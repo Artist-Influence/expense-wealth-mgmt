@@ -14,7 +14,299 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      app_settings: {
+        Row: {
+          ai_enabled: boolean
+          business_auto_threshold: number
+          business_suggest_threshold: number
+          created_at: string
+          id: string
+          owner_id: string
+          passcode_enabled: boolean
+          passcode_hash: string | null
+          personal_auto_threshold: number
+          personal_suggest_threshold: number
+          updated_at: string
+        }
+        Insert: {
+          ai_enabled?: boolean
+          business_auto_threshold?: number
+          business_suggest_threshold?: number
+          created_at?: string
+          id?: string
+          owner_id: string
+          passcode_enabled?: boolean
+          passcode_hash?: string | null
+          personal_auto_threshold?: number
+          personal_suggest_threshold?: number
+          updated_at?: string
+        }
+        Update: {
+          ai_enabled?: boolean
+          business_auto_threshold?: number
+          business_suggest_threshold?: number
+          created_at?: string
+          id?: string
+          owner_id?: string
+          passcode_enabled?: boolean
+          passcode_hash?: string | null
+          personal_auto_threshold?: number
+          personal_suggest_threshold?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      categorization_rules: {
+        Row: {
+          category_output: string | null
+          id: string
+          is_active: boolean
+          match_type: string
+          method_output: string | null
+          mode: string
+          notes_output: string | null
+          owner_id: string
+          pattern: string
+          priority: number
+          rule_name: string
+        }
+        Insert: {
+          category_output?: string | null
+          id?: string
+          is_active?: boolean
+          match_type: string
+          method_output?: string | null
+          mode: string
+          notes_output?: string | null
+          owner_id: string
+          pattern: string
+          priority?: number
+          rule_name: string
+        }
+        Update: {
+          category_output?: string | null
+          id?: string
+          is_active?: boolean
+          match_type?: string
+          method_output?: string | null
+          mode?: string
+          notes_output?: string | null
+          owner_id?: string
+          pattern?: string
+          priority?: number
+          rule_name?: string
+        }
+        Relationships: []
+      }
+      category_options: {
+        Row: {
+          category_name: string
+          id: string
+          is_active: boolean
+          mode: string
+          owner_id: string
+          sort_order: number
+        }
+        Insert: {
+          category_name: string
+          id?: string
+          is_active?: boolean
+          mode: string
+          owner_id: string
+          sort_order?: number
+        }
+        Update: {
+          category_name?: string
+          id?: string
+          is_active?: boolean
+          mode?: string
+          owner_id?: string
+          sort_order?: number
+        }
+        Relationships: []
+      }
+      merchant_memory: {
+        Row: {
+          confidence_weight: number
+          created_at: string
+          default_note_template: string | null
+          id: string
+          last_seen: string
+          merchant_key: string
+          mode: string
+          most_common_category: string | null
+          most_common_method: string | null
+          owner_id: string
+          raw_example: string | null
+          times_seen: number
+          updated_at: string
+        }
+        Insert: {
+          confidence_weight?: number
+          created_at?: string
+          default_note_template?: string | null
+          id?: string
+          last_seen?: string
+          merchant_key: string
+          mode: string
+          most_common_category?: string | null
+          most_common_method?: string | null
+          owner_id: string
+          raw_example?: string | null
+          times_seen?: number
+          updated_at?: string
+        }
+        Update: {
+          confidence_weight?: number
+          created_at?: string
+          default_note_template?: string | null
+          id?: string
+          last_seen?: string
+          merchant_key?: string
+          mode?: string
+          most_common_category?: string | null
+          most_common_method?: string | null
+          owner_id?: string
+          raw_example?: string | null
+          times_seen?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      profiles: {
+        Row: {
+          created_at: string
+          email: string
+          id: string
+          is_owner: boolean
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          email: string
+          id?: string
+          is_owner?: boolean
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          email?: string
+          id?: string
+          is_owner?: boolean
+          user_id?: string
+        }
+        Relationships: []
+      }
+      transactions_uploaded: {
+        Row: {
+          amount: number | null
+          confidence: number | null
+          created_at: string
+          date: string | null
+          description_normalized: string | null
+          description_raw: string | null
+          final_category: string | null
+          final_method: string | null
+          final_notes: string | null
+          id: string
+          match_source: string | null
+          mode: string
+          owner_id: string
+          predicted_category: string | null
+          predicted_method: string | null
+          predicted_notes: string | null
+          review_status: string
+          upload_batch_id: string | null
+        }
+        Insert: {
+          amount?: number | null
+          confidence?: number | null
+          created_at?: string
+          date?: string | null
+          description_normalized?: string | null
+          description_raw?: string | null
+          final_category?: string | null
+          final_method?: string | null
+          final_notes?: string | null
+          id?: string
+          match_source?: string | null
+          mode: string
+          owner_id: string
+          predicted_category?: string | null
+          predicted_method?: string | null
+          predicted_notes?: string | null
+          review_status?: string
+          upload_batch_id?: string | null
+        }
+        Update: {
+          amount?: number | null
+          confidence?: number | null
+          created_at?: string
+          date?: string | null
+          description_normalized?: string | null
+          description_raw?: string | null
+          final_category?: string | null
+          final_method?: string | null
+          final_notes?: string | null
+          id?: string
+          match_source?: string | null
+          mode?: string
+          owner_id?: string
+          predicted_category?: string | null
+          predicted_method?: string | null
+          predicted_notes?: string | null
+          review_status?: string
+          upload_batch_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "transactions_uploaded_upload_batch_id_fkey"
+            columns: ["upload_batch_id"]
+            isOneToOne: false
+            referencedRelation: "upload_batches"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      upload_batches: {
+        Row: {
+          approved_count: number
+          auto_categorized_count: number
+          file_name: string
+          id: string
+          mode: string
+          needs_review_count: number
+          owner_id: string
+          suggested_count: number
+          total_rows: number
+          uploaded_at: string
+        }
+        Insert: {
+          approved_count?: number
+          auto_categorized_count?: number
+          file_name: string
+          id?: string
+          mode: string
+          needs_review_count?: number
+          owner_id: string
+          suggested_count?: number
+          total_rows?: number
+          uploaded_at?: string
+        }
+        Update: {
+          approved_count?: number
+          auto_categorized_count?: number
+          file_name?: string
+          id?: string
+          mode?: string
+          needs_review_count?: number
+          owner_id?: string
+          suggested_count?: number
+          total_rows?: number
+          uploaded_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
