@@ -61,8 +61,53 @@ export default function Workspace() {
         return;
       }
 
-      // Categorize
-      const results = await categorizeTransactions(parsed, validMode, user.id);
+      // Deduplicate: query existing transactions in the date range
+      const dates = parsed.map(r => r.date).filter(Boolean).sort();
+      const minDate = dates[0];
+      const maxDate = dates[dates.length - 1];
+
+      const existingKeys = new Set<string>();
+      if (minDate && maxDate) {
+        let from = 0;
+        const pageSize = 1000;
+        let hasMore = true;
+        while (hasMore) {
+          const { data: existing } = await supabase
+            .from('transactions_uploaded')
+            .select('date, description_raw, amount')
+            .eq('mode', validMode)
+            .eq('owner_id', user.id)
+            .gte('date', minDate)
+            .lte('date', maxDate)
+            .range(from, from + pageSize - 1);
+
+          if (existing) {
+            for (const row of existing) {
+              existingKeys.add(`${row.date}|${row.description_raw}|${row.amount}`);
+            }
+          }
+          hasMore = (existing?.length ?? 0) === pageSize;
+          from += pageSize;
+        }
+      }
+
+      const dedupedParsed = parsed.filter(
+        row => !existingKeys.has(`${row.date}|${row.description_raw}|${row.amount}`)
+      );
+      const skippedCount = parsed.length - dedupedParsed.length;
+
+      if (dedupedParsed.length === 0) {
+        toast.info(`All ${parsed.length} rows are duplicates — nothing to import.`);
+        setIsProcessing(false);
+        return;
+      }
+
+      if (skippedCount > 0) {
+        toast.info(`Skipped ${skippedCount} duplicate row${skippedCount > 1 ? 's' : ''}`);
+      }
+
+      // Categorize (only non-duplicate rows)
+      const results = await categorizeTransactions(dedupedParsed, validMode, user.id);
 
       // Create batch
       const autoCount = results.filter(r => r.review_status === 'auto_categorized').length;
@@ -74,7 +119,7 @@ export default function Workspace() {
         .insert({
           mode: validMode,
           file_name: file.name,
-          total_rows: parsed.length,
+          total_rows: dedupedParsed.length,
           auto_categorized_count: autoCount,
           suggested_count: suggestedCount,
           needs_review_count: reviewCount,
@@ -87,8 +132,8 @@ export default function Workspace() {
 
       // Insert transactions in chunks
       const chunkSize = 100;
-      for (let i = 0; i < parsed.length; i += chunkSize) {
-        const chunk = parsed.slice(i, i + chunkSize).map((tx, idx) => {
+      for (let i = 0; i < dedupedParsed.length; i += chunkSize) {
+        const chunk = dedupedParsed.slice(i, i + chunkSize).map((tx, idx) => {
           const result = results[i + idx];
           return {
             upload_batch_id: batch.id,
@@ -119,7 +164,8 @@ export default function Workspace() {
 
       setLastResult(batch as BatchSummary);
       await loadBatches();
-      toast.success(`Processed ${parsed.length} rows: ${autoCount} auto, ${suggestedCount} suggested, ${reviewCount} review`);
+      const dupMsg = skippedCount > 0 ? ` (${skippedCount} duplicates skipped)` : '';
+      toast.success(`Processed ${dedupedParsed.length} rows: ${autoCount} auto, ${suggestedCount} suggested, ${reviewCount} review${dupMsg}`);
     } catch (err: any) {
       toast.error(err.message || 'Upload failed');
     } finally {
