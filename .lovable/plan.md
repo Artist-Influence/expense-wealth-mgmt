@@ -1,43 +1,34 @@
 
 
-## Plan: Seed Historical Data via Edge Function
+## Plan: Duplicate Detection on CSV Upload
 
-The CSV files are large (2,521 business rows, 1,644 personal rows). The existing Settings UI requires manual file upload after login. Instead, I'll create an edge function that processes the CSV data server-side and seeds merchant memory + category options directly into the database.
+### Problem
+When uploading CSVs month-to-month, overlapping date ranges can result in duplicate transactions being inserted.
 
 ### Approach
-
-**Create a seeding edge function** (`seed-historical`) that:
-1. Accepts the CSV content as text + mode (personal/business) in the request body
-2. Parses rows, normalizes descriptions, generates merchant keys
-3. Applies category remapping (Cannabis → Substances, Pokemon → Investment)
-4. Extracts unique categories → inserts into `category_options`
-5. Builds merchant memory map → upserts into `merchant_memory`
-6. Returns summary stats
-
-**Create a seed script page** (`/seed`) or add a one-click button to Settings that:
-1. Has the two CSV files embedded as static imports (or fetches them)
-2. Calls the edge function for each mode
-
-**Simpler alternative** — since the seeding logic already exists client-side in `Settings.tsx`, and the CSVs can be served as static assets:
-1. Copy the two expense CSVs to `public/seed/` as static files
-2. Add a "Seed from built-in historical data" button to Settings
-3. On click, fetch the CSV files, parse client-side using existing `parseCsvFile` + `handleSeedImport` logic
-4. No new edge function needed
+Add duplicate detection during the upload flow in `Workspace.tsx`. Before inserting new rows, check for existing transactions with matching `date + description_raw + amount + mode` for the same owner. Skip duplicates and report how many were filtered.
 
 ### Implementation Steps
 
-1. **Copy CSV files to `public/seed/`**:
-   - `public/seed/business-expenses-2025.csv` (Artist Influence)
-   - `public/seed/personal-expenses-2025.csv` (Jared Rapoza Personal)
+1. **Add deduplication logic in `Workspace.tsx` `handleFileUpload`** (between parsing and inserting):
+   - Query `transactions_uploaded` for existing rows matching the mode + owner
+   - Filter by the date range of the incoming CSV to limit the query
+   - Build a composite key (`date|description_raw|amount`) for each existing row
+   - Filter out parsed rows whose composite key already exists
+   - Show a toast reporting how many duplicates were skipped (e.g., "Skipped 12 duplicate rows")
+   - Adjust batch counts to reflect only the non-duplicate rows
 
-2. **Add "Seed Built-in Data" buttons to Settings page**:
-   - Two buttons: "Seed Personal 2025 Data" and "Seed Business 2025 Data"
-   - On click, fetch from `/seed/*.csv`, convert to File object, call existing `handleSeedImport`
-   - Show progress and results using existing toast logic
+2. **Update batch summary** to reflect the actual inserted count (excluding duplicates)
 
-3. **Handle multi-select category cleanup**: The personal CSV has entries like `"Cannabis,Business"` — the existing `remapCategory` function already handles comma-separated values and cannabis remapping, so this is covered.
+3. **No schema changes needed** — this is purely client-side filtering before insert
 
-### What gets seeded
-- **Business**: ~2,521 rows → categories like Marketing, Vendor Payment, Subscriptions, Taxes, Label Royalties, etc. + merchant memory for FACEBK, TIKTOK, Zelle recipients, etc.
-- **Personal**: ~1,644 rows → categories like Dining, Subscriptions, Fees, Health & Personal Care, Entertainment, Substances, Investment, etc. + merchant memory for Uber Eats, Foodtown, CVS, etc.
+### Duplicate Key Definition
+A transaction is a duplicate if ALL of these match an existing row:
+- `date`
+- `description_raw` (exact)
+- `amount`
+- `mode`
+- `owner_id`
+
+This is conservative enough to avoid false positives while catching re-uploaded rows.
 
