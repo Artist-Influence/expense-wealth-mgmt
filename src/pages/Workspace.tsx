@@ -1,14 +1,15 @@
-import { useState, useEffect } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { useParams, Link } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
 import { AppNav } from '@/components/AppNav';
 import { CsvUploader } from '@/components/CsvUploader';
+import { FileProgressList, type FileQueueItem } from '@/components/FileProgressList';
 import { parseCsvFile } from '@/lib/csv-parser';
 import { categorizeTransactions } from '@/lib/categorization-engine';
-import { generateMerchantKey } from '@/lib/normalizer';
+import { detectMethodFromFilename } from '@/lib/method-detector';
 import { toast } from 'sonner';
-import { ArrowLeft, FileText, CheckCircle, AlertTriangle, Eye } from 'lucide-react';
+import { ArrowLeft, Eye } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 interface BatchSummary {
@@ -25,12 +26,12 @@ interface BatchSummary {
 export default function Workspace() {
   const { mode } = useParams<{ mode: 'personal' | 'business' }>();
   const { user } = useAuth();
-  const navigate = useNavigate();
-  const [isProcessing, setIsProcessing] = useState(false);
   const [batches, setBatches] = useState<BatchSummary[]>([]);
-  const [lastResult, setLastResult] = useState<BatchSummary | null>(null);
+  const [fileQueue, setFileQueue] = useState<FileQueueItem[]>([]);
+  const processingRef = useRef(false);
 
   const validMode = mode === 'personal' || mode === 'business' ? mode : 'personal';
+  const isProcessing = fileQueue.some(f => !['done', 'error'].includes(f.status));
 
   useEffect(() => {
     if (user) loadBatches();
@@ -47,21 +48,25 @@ export default function Workspace() {
     setBatches((data || []) as BatchSummary[]);
   };
 
-  const handleFileUpload = async (file: File) => {
+  const updateItem = (id: string, patch: Partial<FileQueueItem>) => {
+    setFileQueue(prev => prev.map(item => item.id === id ? { ...item, ...patch } : item));
+  };
+
+  const processFile = async (item: FileQueueItem) => {
     if (!user) return;
-    setIsProcessing(true);
-    setLastResult(null);
+    const { id, file, method } = item;
 
     try {
-      // Parse CSV
+      // Parse
+      updateItem(id, { status: 'parsing' });
       const parsed = await parseCsvFile(file);
       if (parsed.length === 0) {
-        toast.error('No valid rows found in CSV');
-        setIsProcessing(false);
+        updateItem(id, { status: 'error', error: 'No valid rows found' });
         return;
       }
 
-      // Deduplicate: query existing transactions in the date range
+      // Dedup
+      updateItem(id, { status: 'deduplicating' });
       const dates = parsed.map(r => r.date).filter(Boolean).sort();
       const minDate = dates[0];
       const maxDate = dates[dates.length - 1];
@@ -80,7 +85,6 @@ export default function Workspace() {
             .gte('date', minDate)
             .lte('date', maxDate)
             .range(from, from + pageSize - 1);
-
           if (existing) {
             for (const row of existing) {
               existingKeys.add(`${row.date}|${row.description_raw}|${row.amount}`);
@@ -97,19 +101,17 @@ export default function Workspace() {
       const skippedCount = parsed.length - dedupedParsed.length;
 
       if (dedupedParsed.length === 0) {
-        toast.info(`All ${parsed.length} rows are duplicates — nothing to import.`);
-        setIsProcessing(false);
+        updateItem(id, { status: 'done', result: { batchId: '', total: 0, auto: 0, suggested: 0, review: 0, skipped: parsed.length } });
+        toast.info(`${file.name}: all ${parsed.length} rows are duplicates`);
         return;
       }
 
-      if (skippedCount > 0) {
-        toast.info(`Skipped ${skippedCount} duplicate row${skippedCount > 1 ? 's' : ''}`);
-      }
-
-      // Categorize (only non-duplicate rows)
+      // Categorize
+      updateItem(id, { status: 'categorizing' });
       const results = await categorizeTransactions(dedupedParsed, validMode, user.id);
 
       // Create batch
+      updateItem(id, { status: 'inserting' });
       const autoCount = results.filter(r => r.review_status === 'auto_categorized').length;
       const suggestedCount = results.filter(r => r.review_status === 'suggested').length;
       const reviewCount = results.filter(r => r.review_status === 'needs_review').length;
@@ -130,11 +132,12 @@ export default function Workspace() {
 
       if (batchError) throw batchError;
 
-      // Insert transactions in chunks
+      // Insert transactions in chunks, override method from filename
       const chunkSize = 100;
       for (let i = 0; i < dedupedParsed.length; i += chunkSize) {
         const chunk = dedupedParsed.slice(i, i + chunkSize).map((tx, idx) => {
           const result = results[i + idx];
+          const txMethod = method || result.predicted_method;
           return {
             upload_batch_id: batch.id,
             mode: validMode,
@@ -143,10 +146,10 @@ export default function Workspace() {
             description_normalized: tx.description_normalized,
             amount: tx.amount,
             predicted_category: result.predicted_category,
-            predicted_method: result.predicted_method,
+            predicted_method: txMethod,
             predicted_notes: result.predicted_notes,
             final_category: result.review_status === 'auto_categorized' ? result.predicted_category : null,
-            final_method: result.review_status === 'auto_categorized' ? result.predicted_method : null,
+            final_method: result.review_status === 'auto_categorized' ? txMethod : null,
             final_notes: result.review_status === 'auto_categorized' ? result.predicted_notes : null,
             confidence: result.confidence,
             match_source: result.match_source,
@@ -158,19 +161,38 @@ export default function Workspace() {
         const { error: txError } = await supabase
           .from('transactions_uploaded')
           .insert(chunk);
-
         if (txError) throw txError;
       }
 
-      setLastResult(batch as BatchSummary);
-      await loadBatches();
-      const dupMsg = skippedCount > 0 ? ` (${skippedCount} duplicates skipped)` : '';
-      toast.success(`Processed ${dedupedParsed.length} rows: ${autoCount} auto, ${suggestedCount} suggested, ${reviewCount} review${dupMsg}`);
+      updateItem(id, {
+        status: 'done',
+        result: { batchId: batch.id, total: dedupedParsed.length, auto: autoCount, suggested: suggestedCount, review: reviewCount, skipped: skippedCount },
+      });
     } catch (err: any) {
-      toast.error(err.message || 'Upload failed');
-    } finally {
-      setIsProcessing(false);
+      updateItem(id, { status: 'error', error: err.message || 'Processing failed' });
     }
+  };
+
+  const processQueue = useCallback(async (items: FileQueueItem[]) => {
+    if (processingRef.current) return;
+    processingRef.current = true;
+    for (const item of items) {
+      await processFile(item);
+    }
+    await loadBatches();
+    processingRef.current = false;
+  }, [user, validMode]);
+
+  const handleFilesSelect = (files: File[]) => {
+    const newItems: FileQueueItem[] = files.map(file => ({
+      id: crypto.randomUUID(),
+      file,
+      status: 'queued' as const,
+      progress: 0,
+      method: detectMethodFromFilename(file.name),
+    }));
+    setFileQueue(prev => [...newItems, ...prev]);
+    processQueue(newItems);
   };
 
   return (
@@ -188,39 +210,9 @@ export default function Workspace() {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Upload Area */}
           <div className="lg:col-span-2 space-y-4">
-            <CsvUploader onFileSelect={handleFileUpload} isProcessing={isProcessing} />
-
-            {/* Last Result Summary */}
-            {lastResult && (
-              <div className="glass-panel p-6 animate-fade-in">
-                <h3 className="text-sm font-medium text-foreground mb-4">Upload Result</h3>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-                  <div className="glass-panel-sm p-3 text-center">
-                    <p className="text-xs text-muted-foreground">Total</p>
-                    <p className="text-lg font-mono font-semibold text-foreground">{lastResult.total_rows}</p>
-                  </div>
-                  <div className="glass-panel-sm p-3 text-center">
-                    <p className="text-xs text-muted-foreground">Auto</p>
-                    <p className="text-lg font-mono font-semibold text-success">{lastResult.auto_categorized_count}</p>
-                  </div>
-                  <div className="glass-panel-sm p-3 text-center">
-                    <p className="text-xs text-muted-foreground">Suggested</p>
-                    <p className="text-lg font-mono font-semibold text-warning">{lastResult.suggested_count}</p>
-                  </div>
-                  <div className="glass-panel-sm p-3 text-center">
-                    <p className="text-xs text-muted-foreground">Review</p>
-                    <p className="text-lg font-mono font-semibold text-destructive">{lastResult.needs_review_count}</p>
-                  </div>
-                </div>
-                <Button asChild variant="outline" size="sm" className="w-full">
-                  <Link to={`/review?mode=${validMode}&batch=${lastResult.id}`}>
-                    <Eye className="h-4 w-4 mr-2" /> Open Review Table
-                  </Link>
-                </Button>
-              </div>
-            )}
+            <CsvUploader onFilesSelect={handleFilesSelect} disabled={isProcessing} />
+            <FileProgressList items={fileQueue} mode={validMode} />
           </div>
 
           {/* Upload History */}
