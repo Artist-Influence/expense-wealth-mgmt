@@ -1,9 +1,10 @@
-import { CheckCircle, AlertCircle, Loader2, FileText } from 'lucide-react';
+import { CheckCircle, AlertCircle, Loader2, FileText, ChevronDown, ChevronUp } from 'lucide-react';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Link } from 'react-router-dom';
 import { Eye } from 'lucide-react';
+import { useState } from 'react';
 
 export type FileStatus = 'queued' | 'parsing' | 'deduplicating' | 'categorizing' | 'inserting' | 'done' | 'error';
 
@@ -13,7 +14,10 @@ export interface FileQueueItem {
   status: FileStatus;
   progress: number;
   method: string | null;
-  result?: { batchId: string; total: number; auto: number; suggested: number; review: number; skipped: number };
+  result?: {
+    batchId: string; total: number; auto: number; suggested: number; review: number;
+    skipped: number; possibleDuplicates?: number; transfers?: number; parseErrors?: number;
+  };
   error?: string;
 }
 
@@ -43,7 +47,18 @@ interface FileProgressListProps {
 }
 
 export function FileProgressList({ items, mode }: FileProgressListProps) {
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+
   if (items.length === 0) return null;
+
+  const toggleExpand = (id: string) => {
+    setExpandedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   return (
     <div className="space-y-3 animate-fade-in">
@@ -73,27 +88,57 @@ export function FileProgressList({ items, mode }: FileProgressListProps) {
           <div className="flex items-center justify-between">
             <span className="text-xs text-muted-foreground">{STATUS_LABELS[item.status]}</span>
             {item.status === 'done' && item.result && (
-              <div className="flex items-center gap-2 text-xs">
-                <span className="text-success">{item.result.auto} auto</span>
-                <span className="text-muted-foreground">·</span>
-                <span className="text-warning">{item.result.suggested} suggested</span>
-                <span className="text-muted-foreground">·</span>
-                <span className="text-destructive">{item.result.review} review</span>
-                {item.result.skipped > 0 && (
-                  <>
-                    <span className="text-muted-foreground">·</span>
-                    <span className="text-muted-foreground">{item.result.skipped} dupes</span>
-                  </>
-                )}
-              </div>
+              <button
+                onClick={() => toggleExpand(item.id)}
+                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+              >
+                <span className="text-success">{item.result.total} imported</span>
+                {expandedIds.has(item.id) ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+              </button>
             )}
           </div>
+
+          {/* Expanded summary */}
+          {item.status === 'done' && item.result && expandedIds.has(item.id) && (
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs pt-1 border-t border-border/30">
+              <span className="text-muted-foreground">Auto-categorized</span>
+              <span className="text-success text-right">{item.result.auto}</span>
+              <span className="text-muted-foreground">Suggested</span>
+              <span className="text-warning text-right">{item.result.suggested}</span>
+              <span className="text-muted-foreground">Needs review</span>
+              <span className="text-destructive text-right">{item.result.review}</span>
+              {item.result.skipped > 0 && (
+                <>
+                  <span className="text-muted-foreground">Exact duplicates skipped</span>
+                  <span className="text-muted-foreground text-right">{item.result.skipped}</span>
+                </>
+              )}
+              {(item.result.possibleDuplicates ?? 0) > 0 && (
+                <>
+                  <span className="text-muted-foreground">Possible duplicates</span>
+                  <span className="text-warning text-right">{item.result.possibleDuplicates}</span>
+                </>
+              )}
+              {(item.result.transfers ?? 0) > 0 && (
+                <>
+                  <span className="text-muted-foreground">Transfers detected</span>
+                  <span className="text-primary text-right">{item.result.transfers}</span>
+                </>
+              )}
+              {(item.result.parseErrors ?? 0) > 0 && (
+                <>
+                  <span className="text-muted-foreground">Parse errors</span>
+                  <span className="text-destructive text-right">{item.result.parseErrors}</span>
+                </>
+              )}
+            </div>
+          )}
 
           {item.status === 'error' && item.error && (
             <p className="text-xs text-destructive">{item.error}</p>
           )}
 
-          {item.status === 'done' && item.result && (
+          {item.status === 'done' && item.result && item.result.batchId && (
             <Button asChild variant="outline" size="sm" className="w-full mt-1">
               <Link to={`/review?mode=${mode}&batch=${item.result.batchId}`}>
                 <Eye className="h-3.5 w-3.5 mr-1.5" /> Review {item.result.total} rows
