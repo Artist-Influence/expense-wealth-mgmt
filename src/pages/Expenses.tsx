@@ -819,9 +819,7 @@ export default function Expenses() {
         open={showPreview}
         onConfirm={handlePreviewConfirm}
         onCancel={handlePreviewCancel}
-        preview={previewData}
-        fileName={previewFile?.name || ''}
-        detectedMethod={previewMethod}
+        filePreviews={filePreviews}
       />
     </div>
   );
