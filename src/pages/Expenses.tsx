@@ -68,9 +68,7 @@ export default function Expenses() {
   // Upload state
   const [fileQueue, setFileQueue] = useState<FileQueueItem[]>([]);
   const processingRef = useRef(false);
-  const [previewData, setPreviewData] = useState<ParsePreview | null>(null);
-  const [previewFile, setPreviewFile] = useState<File | null>(null);
-  const [previewMethod, setPreviewMethod] = useState<string | null>(null);
+  const [filePreviews, setFilePreviews] = useState<FilePreviewInfo[]>([]);
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [showPreview, setShowPreview] = useState(false);
 
