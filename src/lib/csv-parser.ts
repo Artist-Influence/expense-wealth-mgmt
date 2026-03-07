@@ -10,74 +10,266 @@ export interface ParsedTransaction {
   category: string | null;
   method: string | null;
   notes: string | null;
+  source_row_json: Record<string, string>;
+  parse_status: 'ok' | 'parse_error';
+  parse_error: string | null;
+}
+
+export interface ColumnMapping {
+  description: string | null;
+  amount: string | null;
+  date: string | null;
+  category: string | null;
+  method: string | null;
+  notes: string | null;
+}
+
+export interface ParsePreview {
+  headers: string[];
+  mapping: ColumnMapping;
+  rowCount: number;
+  sampleRows: Record<string, string>[];
+  unmappedRequired: string[];
 }
 
 interface CsvRow {
   [key: string]: string;
 }
 
+const DESCRIPTION_CANDIDATES = ['short description', 'description', 'desc', 'merchant', 'name', 'memo', 'transaction description', 'payee'];
+const AMOUNT_CANDIDATES = ['total', 'amount', 'debit', 'credit', 'value', 'sum', 'transaction amount'];
+const DATE_CANDIDATES = ['date & time', 'date', 'transaction date', 'post date', 'posted date', 'trans date'];
+const CATEGORY_CANDIDATES = ['category', 'type', 'expense type', 'expense category'];
+const METHOD_CANDIDATES = ['method', 'payment method', 'card', 'account', 'source'];
+const NOTES_CANDIDATES = ['notes', 'note', 'memo', 'comment', 'comments', 'reference'];
+
+/**
+ * 3-tier matching: exact → starts-with → contains
+ */
 function findColumn(headers: string[], candidates: string[]): string | null {
+  const cleanHeaders = headers.map(h => h.replace(/^\uFEFF/, '').trim());
+  
+  // Tier 1: Exact match (case-insensitive)
   for (const candidate of candidates) {
-    const found = headers.find(h => h.toLowerCase().trim() === candidate.toLowerCase());
-    if (found) return found;
+    const idx = cleanHeaders.findIndex(h => h.toLowerCase() === candidate.toLowerCase());
+    if (idx !== -1) return headers[idx];
   }
+  
+  // Tier 2: Starts-with match
+  for (const candidate of candidates) {
+    const idx = cleanHeaders.findIndex(h => h.toLowerCase().startsWith(candidate.toLowerCase()));
+    if (idx !== -1) return headers[idx];
+  }
+  
+  // Tier 3: Contains match
+  for (const candidate of candidates) {
+    const idx = cleanHeaders.findIndex(h => h.toLowerCase().includes(candidate.toLowerCase()));
+    if (idx !== -1) return headers[idx];
+  }
+  
   return null;
 }
 
+function stripBom(text: string): string {
+  return text.replace(/^\uFEFF/, '');
+}
+
+/**
+ * Parse CSV file and return a preview for user confirmation before processing.
+ */
+export function previewCsvFile(file: File): Promise<ParsePreview> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = stripBom(e.target?.result as string || '');
+      
+      Papa.parse<CsvRow>(text, {
+        header: true,
+        skipEmptyLines: true,
+        complete: (results) => {
+          if (!results.data || results.data.length === 0) {
+            reject(new Error('No data found in CSV'));
+            return;
+          }
+
+          const headers = Object.keys(results.data[0]).map(h => h.replace(/^\uFEFF/, '').trim());
+          const rawHeaders = Object.keys(results.data[0]);
+          
+          const mapping: ColumnMapping = {
+            description: findColumn(rawHeaders, DESCRIPTION_CANDIDATES),
+            amount: findColumn(rawHeaders, AMOUNT_CANDIDATES),
+            date: findColumn(rawHeaders, DATE_CANDIDATES),
+            category: findColumn(rawHeaders, CATEGORY_CANDIDATES),
+            method: findColumn(rawHeaders, METHOD_CANDIDATES),
+            notes: findColumn(rawHeaders, NOTES_CANDIDATES),
+          };
+
+          const unmappedRequired: string[] = [];
+          if (!mapping.description) unmappedRequired.push('Description');
+          if (!mapping.amount) unmappedRequired.push('Amount');
+          if (!mapping.date) unmappedRequired.push('Date');
+
+          resolve({
+            headers,
+            mapping,
+            rowCount: results.data.length,
+            sampleRows: results.data.slice(0, 3),
+            unmappedRequired,
+          });
+        },
+        error: (error) => {
+          reject(new Error(`CSV parse error: ${error.message}`));
+        },
+      });
+    };
+    reader.onerror = () => reject(new Error('Failed to read file'));
+    reader.readAsText(file);
+  });
+}
+
+/**
+ * Parse the full CSV file using a confirmed column mapping.
+ */
+export function parseCsvFileWithMapping(file: File, mapping: ColumnMapping): Promise<ParsedTransaction[]> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = stripBom(e.target?.result as string || '');
+      
+      Papa.parse<CsvRow>(text, {
+        header: true,
+        skipEmptyLines: true,
+        complete: (results) => {
+          if (!results.data || results.data.length === 0) {
+            reject(new Error('No data found in CSV'));
+            return;
+          }
+
+          const transactions: ParsedTransaction[] = results.data
+            .filter(row => {
+              const desc = mapping.description ? (row[mapping.description] || '').trim() : '';
+              const total = mapping.amount ? (row[mapping.amount] || '').trim() : '';
+              return desc || total;
+            })
+            .map(row => {
+              const errors: string[] = [];
+              
+              const rawDesc = mapping.description ? (row[mapping.description] || '').trim() : '';
+              const rawAmount = mapping.amount ? (row[mapping.amount] || '').trim() : '';
+              const rawDate = mapping.date ? (row[mapping.date] || '').trim() : '';
+              
+              if (!rawDesc) errors.push('Missing description');
+              if (!rawAmount) errors.push('Missing amount');
+              
+              const parsedDate = rawDate ? parseDate(rawDate) : null;
+              if (rawDate && !parsedDate) errors.push(`Unparseable date: ${rawDate}`);
+              
+              const amount = rawAmount ? parseAmount(rawAmount) : 0;
+              if (rawAmount && amount === 0 && rawAmount !== '0' && rawAmount !== '$0.00') {
+                errors.push(`Unparseable amount: ${rawAmount}`);
+              }
+              
+              const normalized = normalizeDescription(rawDesc);
+              const merchantKey = generateMerchantKey(normalized);
+              const rawCategory = mapping.category ? (row[mapping.category] || '').trim() : '';
+              const category = rawCategory ? remapCategory(rawCategory, rawDesc) : null;
+
+              const hasErrors = errors.length > 0 && !rawDesc && !rawAmount;
+
+              return {
+                date: parsedDate,
+                description_raw: rawDesc,
+                description_normalized: normalized,
+                merchant_key: merchantKey,
+                amount,
+                category,
+                method: mapping.method ? (row[mapping.method] || '').trim() || null : null,
+                notes: mapping.notes ? (row[mapping.notes] || '').trim() || null : null,
+                source_row_json: { ...row },
+                parse_status: (hasErrors ? 'parse_error' : 'ok') as 'ok' | 'parse_error',
+                parse_error: errors.length > 0 ? errors.join('; ') : null,
+              };
+            });
+
+          resolve(transactions);
+        },
+        error: (error) => {
+          reject(new Error(`CSV parse error: ${error.message}`));
+        },
+      });
+    };
+    reader.onerror = () => reject(new Error('Failed to read file'));
+    reader.readAsText(file);
+  });
+}
+
+/**
+ * Legacy function — now uses preview + mapping internally.
+ */
 export function parseCsvFile(file: File): Promise<ParsedTransaction[]> {
   return new Promise((resolve, reject) => {
-    Papa.parse<CsvRow>(file, {
-      header: true,
-      skipEmptyLines: true,
-      complete: (results) => {
-        if (!results.data || results.data.length === 0) {
-          reject(new Error('No data found in CSV'));
-          return;
-        }
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = stripBom(e.target?.result as string || '');
+      
+      Papa.parse<CsvRow>(text, {
+        header: true,
+        skipEmptyLines: true,
+        complete: (results) => {
+          if (!results.data || results.data.length === 0) {
+            reject(new Error('No data found in CSV'));
+            return;
+          }
 
-        const headers = Object.keys(results.data[0]);
-        const descCol = findColumn(headers, ['Short Description', 'Description', 'short description']);
-        const totalCol = findColumn(headers, ['Total', 'Amount', 'total', 'amount']);
-        const dateCol = findColumn(headers, ['Date & Time', 'Date', 'date & time', 'date']);
-        const categoryCol = findColumn(headers, ['Category', 'category']);
-        const methodCol = findColumn(headers, ['Method', 'method']);
-        const notesCol = findColumn(headers, ['Notes', 'notes']);
+          const rawHeaders = Object.keys(results.data[0]);
+          const descCol = findColumn(rawHeaders, DESCRIPTION_CANDIDATES);
+          const totalCol = findColumn(rawHeaders, AMOUNT_CANDIDATES);
+          const dateCol = findColumn(rawHeaders, DATE_CANDIDATES);
+          const categoryCol = findColumn(rawHeaders, CATEGORY_CANDIDATES);
+          const methodCol = findColumn(rawHeaders, METHOD_CANDIDATES);
+          const notesCol = findColumn(rawHeaders, NOTES_CANDIDATES);
 
-        if (!descCol && !totalCol) {
-          reject(new Error('CSV must have at least a Description or Total column'));
-          return;
-        }
+          if (!descCol && !totalCol) {
+            reject(new Error('CSV must have at least a Description or Total column'));
+            return;
+          }
 
-        const transactions: ParsedTransaction[] = results.data
-          .filter(row => {
-            const desc = descCol ? row[descCol] : '';
-            const total = totalCol ? row[totalCol] : '';
-            return desc || total;
-          })
-          .map(row => {
-            const rawDesc = descCol ? (row[descCol] || '').trim() : '';
-            const normalized = normalizeDescription(rawDesc);
-            const merchantKey = generateMerchantKey(normalized);
-            const rawCategory = categoryCol ? (row[categoryCol] || '').trim() : null;
-            const category = rawCategory ? remapCategory(rawCategory, rawDesc) : null;
+          const transactions: ParsedTransaction[] = results.data
+            .filter(row => {
+              const desc = descCol ? row[descCol] : '';
+              const total = totalCol ? row[totalCol] : '';
+              return desc || total;
+            })
+            .map(row => {
+              const rawDesc = descCol ? (row[descCol] || '').trim() : '';
+              const normalized = normalizeDescription(rawDesc);
+              const merchantKey = generateMerchantKey(normalized);
+              const rawCategory = categoryCol ? (row[categoryCol] || '').trim() : null;
+              const category = rawCategory ? remapCategory(rawCategory, rawDesc) : null;
 
-            return {
-              date: dateCol ? parseDate(row[dateCol] || '') : null,
-              description_raw: rawDesc,
-              description_normalized: normalized,
-              merchant_key: merchantKey,
-              amount: totalCol ? parseAmount(row[totalCol] || '') : 0,
-              category,
-              method: methodCol ? (row[methodCol] || '').trim() || null : null,
-              notes: notesCol ? (row[notesCol] || '').trim() || null : null,
-            };
-          });
+              return {
+                date: dateCol ? parseDate(row[dateCol] || '') : null,
+                description_raw: rawDesc,
+                description_normalized: normalized,
+                merchant_key: merchantKey,
+                amount: totalCol ? parseAmount(row[totalCol] || '') : 0,
+                category,
+                method: methodCol ? (row[methodCol] || '').trim() || null : null,
+                notes: notesCol ? (row[notesCol] || '').trim() || null : null,
+                source_row_json: { ...row },
+                parse_status: 'ok' as const,
+                parse_error: null,
+              };
+            });
 
-        resolve(transactions);
-      },
-      error: (error) => {
-        reject(new Error(`CSV parse error: ${error.message}`));
-      },
-    });
+          resolve(transactions);
+        },
+        error: (error) => {
+          reject(new Error(`CSV parse error: ${error.message}`));
+        },
+      });
+    };
+    reader.onerror = () => reject(new Error('Failed to read file'));
+    reader.readAsText(file);
   });
 }
