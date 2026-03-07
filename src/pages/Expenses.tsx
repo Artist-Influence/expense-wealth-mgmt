@@ -4,7 +4,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { AppNav } from '@/components/AppNav';
 import { CsvUploader } from '@/components/CsvUploader';
 import { FileProgressList, type FileQueueItem } from '@/components/FileProgressList';
-import { ImportPreviewDialog } from '@/components/ImportPreviewDialog';
+import { ImportPreviewDialog, type FilePreviewInfo } from '@/components/ImportPreviewDialog';
 import { previewCsvFile, parseCsvFileWithMapping, type ParsePreview, type ColumnMapping } from '@/lib/csv-parser';
 import { categorizeTransactions, updateMerchantMemory } from '@/lib/categorization-engine';
 import { detectMethodFromFilename } from '@/lib/method-detector';
@@ -68,9 +68,7 @@ export default function Expenses() {
   // Upload state
   const [fileQueue, setFileQueue] = useState<FileQueueItem[]>([]);
   const processingRef = useRef(false);
-  const [previewData, setPreviewData] = useState<ParsePreview | null>(null);
-  const [previewFile, setPreviewFile] = useState<File | null>(null);
-  const [previewMethod, setPreviewMethod] = useState<string | null>(null);
+  const [filePreviews, setFilePreviews] = useState<FilePreviewInfo[]>([]);
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [showPreview, setShowPreview] = useState(false);
 
@@ -318,9 +316,9 @@ export default function Expenses() {
     };
   };
 
-  const processFile = async (item: FileQueueItem, mapping: ColumnMapping) => {
+  const processFile = async (item: FileQueueItem & { mapping: ColumnMapping; detectedHeaders?: string[] }) => {
     if (!user) return;
-    const { id, file, method } = item;
+    const { id, file, method, mapping, detectedHeaders } = item;
     try {
       const appSettings = await loadSettings();
       updateItem(id, { status: 'parsing' });
@@ -403,7 +401,11 @@ export default function Expenses() {
         auto_categorized_count: autoCount, suggested_count: suggestedCount, needs_review_count: reviewCount,
         exact_duplicates_skipped: exactDupCount, possible_duplicates_flagged: possibleDupCount,
         transfers_detected: 0, parse_errors: parseErrorRows.length, owner_id: user.id,
-      }).select().single();
+        detected_headers: detectedHeaders || null,
+        mapped_columns: mapping as any,
+        parse_details: { total_raw_rows: parsed.length, filtered_artifacts: parsed.length - validRows.length - parseErrorRows.length, valid_rows: validRows.length, parse_error_count: parseErrorRows.length, exact_duplicates: exactDupCount, possible_duplicates: possibleDupCount } as any,
+      } as any).select().single();
+      if (batchError) throw batchError;
       if (batchError) throw batchError;
 
       const chunkSize = 100;
@@ -455,40 +457,59 @@ export default function Expenses() {
     }
   };
 
-  const processQueue = useCallback(async (items: FileQueueItem[], mapping: ColumnMapping) => {
+  const processQueue = useCallback(async (items: (FileQueueItem & { mapping: ColumnMapping; detectedHeaders?: string[] })[]) => {
     if (processingRef.current) return;
     processingRef.current = true;
-    for (const item of items) await processFile(item, mapping);
+    for (const item of items) {
+      if (item.status === 'error') continue; // skip pre-failed files
+      await processFile(item);
+    }
     await loadTransactions();
     processingRef.current = false;
   }, [user, mode]);
 
   const handleFilesSelect = async (files: File[]) => {
-    try {
-      const preview = await previewCsvFile(files[0]);
-      setPreviewData(preview);
-      setPreviewFile(files[0]);
-      setPreviewMethod(detectMethodFromFilename(files[0].name));
-      setPendingFiles(files);
-      setShowPreview(true);
-    } catch (err: any) { toast.error(err.message); }
+    const previews: FilePreviewInfo[] = [];
+    for (const file of files) {
+      try {
+        const preview = await previewCsvFile(file);
+        previews.push({ file, preview, error: null, method: detectMethodFromFilename(file.name) });
+      } catch (err: any) {
+        previews.push({ file, preview: null, error: err.message || 'Failed to read file', method: detectMethodFromFilename(file.name) });
+      }
+    }
+    setFilePreviews(previews);
+    setPendingFiles(files);
+    setShowPreview(true);
   };
 
-  const handlePreviewConfirm = () => {
-    if (!previewData || pendingFiles.length === 0) return;
+  const handlePreviewConfirm = (validIndexes: number[]) => {
+    if (validIndexes.length === 0) return;
     setShowPreview(false);
-    const mapping = previewData.mapping;
-    const newItems: FileQueueItem[] = pendingFiles.map(file => ({
-      id: crypto.randomUUID(), file, status: 'queued' as const, progress: 0,
-      method: detectMethodFromFilename(file.name),
-    }));
-    setFileQueue(prev => [...newItems, ...prev]);
-    processQueue(newItems, mapping);
-    setPreviewData(null); setPreviewFile(null); setPendingFiles([]);
+    const newItems: (FileQueueItem & { mapping: ColumnMapping; detectedHeaders?: string[] })[] = validIndexes.map(i => {
+      const fp = filePreviews[i];
+      return {
+        id: crypto.randomUUID(), file: fp.file, status: 'queued' as const, progress: 0,
+        method: fp.method,
+        mapping: fp.preview!.mapping,
+        detectedHeaders: fp.preview!.headers,
+      };
+    });
+    // Also add errored files to the queue so the user sees them
+    const errorItems: FileQueueItem[] = filePreviews
+      .filter((fp, i) => !validIndexes.includes(i))
+      .map(fp => ({
+        id: crypto.randomUUID(), file: fp.file, status: 'error' as const, progress: 0,
+        method: fp.method,
+        error: fp.error || `Missing required columns: ${fp.preview?.unmappedRequired.join(', ') || 'unknown'}`,
+      }));
+    setFileQueue(prev => [...newItems, ...errorItems, ...prev]);
+    processQueue(newItems);
+    setFilePreviews([]); setPendingFiles([]);
   };
 
   const handlePreviewCancel = () => {
-    setShowPreview(false); setPreviewData(null); setPreviewFile(null); setPendingFiles([]);
+    setShowPreview(false); setFilePreviews([]); setPendingFiles([]);
   };
 
   const getConfidenceClass = (c: number | null) => {
@@ -798,9 +819,7 @@ export default function Expenses() {
         open={showPreview}
         onConfirm={handlePreviewConfirm}
         onCancel={handlePreviewCancel}
-        preview={previewData}
-        fileName={previewFile?.name || ''}
-        detectedMethod={previewMethod}
+        filePreviews={filePreviews}
       />
     </div>
   );
