@@ -4,7 +4,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { AppNav } from '@/components/AppNav';
 import { CsvUploader } from '@/components/CsvUploader';
 import { FileProgressList, type FileQueueItem } from '@/components/FileProgressList';
-import { ImportPreviewDialog } from '@/components/ImportPreviewDialog';
+import { ImportPreviewDialog, type FilePreviewInfo } from '@/components/ImportPreviewDialog';
 import { previewCsvFile, parseCsvFileWithMapping, type ParsePreview, type ColumnMapping } from '@/lib/csv-parser';
 import { categorizeTransactions, updateMerchantMemory } from '@/lib/categorization-engine';
 import { detectMethodFromFilename } from '@/lib/method-detector';
