@@ -239,17 +239,17 @@ export function parseCsvFile(file: File): Promise<ParsedTransaction[]> {
               const total = totalCol ? row[totalCol] : '';
               return desc || total;
             })
-            .map(row => {
+            .reduce<ParsedTransaction[]>((acc, row) => {
               const rawDesc = descCol ? (row[descCol] || '').trim() : '';
               const amount = totalCol ? parseAmount(row[totalCol] || '') : 0;
-              if (isStatementArtifact(rawDesc, amount)) return null;
+              if (isStatementArtifact(rawDesc, amount)) return acc;
 
               const normalized = normalizeDescription(rawDesc);
               const merchantKey = generateMerchantKey(normalized);
               const rawCategory = categoryCol ? (row[categoryCol] || '').trim() : null;
               const category = rawCategory ? remapCategory(rawCategory, rawDesc) : null;
 
-              return {
+              acc.push({
                 date: dateCol ? parseDate(row[dateCol] || '') : null,
                 description_raw: rawDesc,
                 description_normalized: normalized,
@@ -259,11 +259,11 @@ export function parseCsvFile(file: File): Promise<ParsedTransaction[]> {
                 method: methodCol ? (row[methodCol] || '').trim() || null : null,
                 notes: notesCol ? (row[notesCol] || '').trim() || null : null,
                 source_row_json: { ...row },
-                parse_status: 'ok' as const,
+                parse_status: 'ok',
                 parse_error: null,
-              };
-            })
-            .filter((tx): tx is ParsedTransaction => tx !== null);
+              });
+              return acc;
+            }, []);
 
           resolve(transactions);
         },
