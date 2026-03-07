@@ -43,30 +43,51 @@ const CATEGORY_CANDIDATES = ['category', 'type', 'expense type', 'expense catego
 const METHOD_CANDIDATES = ['method', 'payment method', 'card', 'account', 'source'];
 const NOTES_CANDIDATES = ['notes', 'note', 'memo', 'comment', 'comments', 'reference'];
 
+const STATEMENT_ARTIFACT_PATTERNS = [
+  /^(beginning|ending|opening|closing)\s+balance/i,
+  /^total\s+(credits|debits|charges|fees|interest|payments)/i,
+  /^(statement|account)\s+(summary|period|ending|opening|balance)/i,
+  /^(interest|fee|finance)\s+charge/i,
+  /^(minimum|previous|new)\s+(payment|balance)/i,
+  /^(credit|debit)\s+adjustments?$/i,
+  /^balance\s+(forward|brought|carried)/i,
+  /^(days?\s+in\s+billing|billing\s+period)/i,
+  /^(annual|monthly)\s+percentage/i,
+  /^\s*$/,
+];
+
+/**
+ * Returns true if the row is statement metadata, not a real transaction.
+ */
+export function isStatementArtifact(description: string, amount: number): boolean {
+  const trimmed = (description || '').trim();
+  if (!trimmed) return true;
+  for (const pattern of STATEMENT_ARTIFACT_PATTERNS) {
+    if (pattern.test(trimmed)) return true;
+  }
+  // 0-amount rows with non-merchant-looking descriptions
+  if (amount === 0 && trimmed.length < 5) return true;
+  return false;
+}
+
 /**
  * 3-tier matching: exact → starts-with → contains
  */
 function findColumn(headers: string[], candidates: string[]): string | null {
   const cleanHeaders = headers.map(h => h.replace(/^\uFEFF/, '').trim());
   
-  // Tier 1: Exact match (case-insensitive)
   for (const candidate of candidates) {
     const idx = cleanHeaders.findIndex(h => h.toLowerCase() === candidate.toLowerCase());
     if (idx !== -1) return headers[idx];
   }
-  
-  // Tier 2: Starts-with match
   for (const candidate of candidates) {
     const idx = cleanHeaders.findIndex(h => h.toLowerCase().startsWith(candidate.toLowerCase()));
     if (idx !== -1) return headers[idx];
   }
-  
-  // Tier 3: Contains match
   for (const candidate of candidates) {
     const idx = cleanHeaders.findIndex(h => h.toLowerCase().includes(candidate.toLowerCase()));
     if (idx !== -1) return headers[idx];
   }
-  
   return null;
 }
 
@@ -74,15 +95,11 @@ function stripBom(text: string): string {
   return text.replace(/^\uFEFF/, '');
 }
 
-/**
- * Parse CSV file and return a preview for user confirmation before processing.
- */
 export function previewCsvFile(file: File): Promise<ParsePreview> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (e) => {
       const text = stripBom(e.target?.result as string || '');
-      
       Papa.parse<CsvRow>(text, {
         header: true,
         skipEmptyLines: true,
@@ -91,10 +108,8 @@ export function previewCsvFile(file: File): Promise<ParsePreview> {
             reject(new Error('No data found in CSV'));
             return;
           }
-
           const headers = Object.keys(results.data[0]).map(h => h.replace(/^\uFEFF/, '').trim());
           const rawHeaders = Object.keys(results.data[0]);
-          
           const mapping: ColumnMapping = {
             description: findColumn(rawHeaders, DESCRIPTION_CANDIDATES),
             amount: findColumn(rawHeaders, AMOUNT_CANDIDATES),
@@ -103,23 +118,13 @@ export function previewCsvFile(file: File): Promise<ParsePreview> {
             method: findColumn(rawHeaders, METHOD_CANDIDATES),
             notes: findColumn(rawHeaders, NOTES_CANDIDATES),
           };
-
           const unmappedRequired: string[] = [];
           if (!mapping.description) unmappedRequired.push('Description');
           if (!mapping.amount) unmappedRequired.push('Amount');
           if (!mapping.date) unmappedRequired.push('Date');
-
-          resolve({
-            headers,
-            mapping,
-            rowCount: results.data.length,
-            sampleRows: results.data.slice(0, 3),
-            unmappedRequired,
-          });
+          resolve({ headers, mapping, rowCount: results.data.length, sampleRows: results.data.slice(0, 3), unmappedRequired });
         },
-        error: (error) => {
-          reject(new Error(`CSV parse error: ${error.message}`));
-        },
+        error: (error) => reject(new Error(`CSV parse error: ${error.message}`)),
       });
     };
     reader.onerror = () => reject(new Error('Failed to read file'));
@@ -127,15 +132,11 @@ export function previewCsvFile(file: File): Promise<ParsePreview> {
   });
 }
 
-/**
- * Parse the full CSV file using a confirmed column mapping.
- */
 export function parseCsvFileWithMapping(file: File, mapping: ColumnMapping): Promise<ParsedTransaction[]> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (e) => {
       const text = stripBom(e.target?.result as string || '');
-      
       Papa.parse<CsvRow>(text, {
         header: true,
         skipEmptyLines: true,
@@ -153,26 +154,30 @@ export function parseCsvFileWithMapping(file: File, mapping: ColumnMapping): Pro
             })
             .map(row => {
               const errors: string[] = [];
-              
               const rawDesc = mapping.description ? (row[mapping.description] || '').trim() : '';
               const rawAmount = mapping.amount ? (row[mapping.amount] || '').trim() : '';
               const rawDate = mapping.date ? (row[mapping.date] || '').trim() : '';
-              
+
               if (!rawDesc) errors.push('Missing description');
               if (!rawAmount) errors.push('Missing amount');
-              
+
               const parsedDate = rawDate ? parseDate(rawDate) : null;
               if (rawDate && !parsedDate) errors.push(`Unparseable date: ${rawDate}`);
-              
+
               const amount = rawAmount ? parseAmount(rawAmount) : 0;
               if (rawAmount && amount === 0 && rawAmount !== '0' && rawAmount !== '$0.00') {
                 errors.push(`Unparseable amount: ${rawAmount}`);
               }
-              
+
               const normalized = normalizeDescription(rawDesc);
               const merchantKey = generateMerchantKey(normalized);
               const rawCategory = mapping.category ? (row[mapping.category] || '').trim() : '';
               const category = rawCategory ? remapCategory(rawCategory, rawDesc) : null;
+
+              // Check for statement artifacts
+              if (isStatementArtifact(rawDesc, amount)) {
+                return null; // will be filtered out
+              }
 
               const hasErrors = errors.length > 0 && !rawDesc && !rawAmount;
 
@@ -189,13 +194,12 @@ export function parseCsvFileWithMapping(file: File, mapping: ColumnMapping): Pro
                 parse_status: (hasErrors ? 'parse_error' : 'ok') as 'ok' | 'parse_error',
                 parse_error: errors.length > 0 ? errors.join('; ') : null,
               };
-            });
+            })
+            .filter((tx): tx is ParsedTransaction => tx !== null);
 
           resolve(transactions);
         },
-        error: (error) => {
-          reject(new Error(`CSV parse error: ${error.message}`));
-        },
+        error: (error) => reject(new Error(`CSV parse error: ${error.message}`)),
       });
     };
     reader.onerror = () => reject(new Error('Failed to read file'));
@@ -203,15 +207,11 @@ export function parseCsvFileWithMapping(file: File, mapping: ColumnMapping): Pro
   });
 }
 
-/**
- * Legacy function — now uses preview + mapping internally.
- */
 export function parseCsvFile(file: File): Promise<ParsedTransaction[]> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (e) => {
       const text = stripBom(e.target?.result as string || '');
-      
       Papa.parse<CsvRow>(text, {
         header: true,
         skipEmptyLines: true,
@@ -220,7 +220,6 @@ export function parseCsvFile(file: File): Promise<ParsedTransaction[]> {
             reject(new Error('No data found in CSV'));
             return;
           }
-
           const rawHeaders = Object.keys(results.data[0]);
           const descCol = findColumn(rawHeaders, DESCRIPTION_CANDIDATES);
           const totalCol = findColumn(rawHeaders, AMOUNT_CANDIDATES);
@@ -242,6 +241,9 @@ export function parseCsvFile(file: File): Promise<ParsedTransaction[]> {
             })
             .map(row => {
               const rawDesc = descCol ? (row[descCol] || '').trim() : '';
+              const amount = totalCol ? parseAmount(row[totalCol] || '') : 0;
+              if (isStatementArtifact(rawDesc, amount)) return null;
+
               const normalized = normalizeDescription(rawDesc);
               const merchantKey = generateMerchantKey(normalized);
               const rawCategory = categoryCol ? (row[categoryCol] || '').trim() : null;
@@ -252,7 +254,7 @@ export function parseCsvFile(file: File): Promise<ParsedTransaction[]> {
                 description_raw: rawDesc,
                 description_normalized: normalized,
                 merchant_key: merchantKey,
-                amount: totalCol ? parseAmount(row[totalCol] || '') : 0,
+                amount,
                 category,
                 method: methodCol ? (row[methodCol] || '').trim() || null : null,
                 notes: notesCol ? (row[notesCol] || '').trim() || null : null,
@@ -260,13 +262,12 @@ export function parseCsvFile(file: File): Promise<ParsedTransaction[]> {
                 parse_status: 'ok' as const,
                 parse_error: null,
               };
-            });
+            })
+            .filter((tx): tx is ParsedTransaction => tx !== null);
 
           resolve(transactions);
         },
-        error: (error) => {
-          reject(new Error(`CSV parse error: ${error.message}`));
-        },
+        error: (error) => reject(new Error(`CSV parse error: ${error.message}`)),
       });
     };
     reader.onerror = () => reject(new Error('Failed to read file'));

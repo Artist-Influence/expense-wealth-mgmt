@@ -7,29 +7,34 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { Slider } from '@/components/ui/slider';
-import { Plus, Trash2 } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { Plus, Trash2, ChevronDown, Zap, Save } from 'lucide-react';
 import { parseCsvFile } from '@/lib/csv-parser';
 import { updateMerchantMemory } from '@/lib/categorization-engine';
 
 interface CategoryOption {
-  id: string;
-  mode: string;
-  category_name: string;
-  sort_order: number;
-  is_active: boolean;
+  id: string; mode: string; category_name: string; sort_order: number; is_active: boolean;
 }
 
 interface AppSettingsData {
-  personal_auto_threshold: number;
-  business_auto_threshold: number;
-  personal_suggest_threshold: number;
-  business_suggest_threshold: number;
-  ai_enabled: boolean;
-  passcode_enabled: boolean;
-  prevent_exact_duplicates: boolean;
-  flag_possible_duplicates: boolean;
+  personal_auto_threshold: number; business_auto_threshold: number;
+  personal_suggest_threshold: number; business_suggest_threshold: number;
+  ai_enabled: boolean; passcode_enabled: boolean;
+  prevent_exact_duplicates: boolean; flag_possible_duplicates: boolean;
   exclude_transfers_from_totals: boolean;
 }
+
+interface Rule {
+  id: string; mode: string; rule_name: string; match_type: string; pattern: string;
+  category_output: string | null; method_output: string | null; notes_output: string | null;
+  priority: number; is_active: boolean;
+}
+
+const emptyRule = {
+  rule_name: '', mode: 'both', match_type: 'contains', pattern: '',
+  category_output: '', method_output: '', notes_output: '', priority: 100, is_active: true,
+};
 
 export default function SettingsPage() {
   const { user } = useAuth();
@@ -47,8 +52,16 @@ export default function SettingsPage() {
   const [seedingPersonal, setSeedingPersonal] = useState(false);
   const [seedingBusiness, setSeedingBusiness] = useState(false);
 
+  // Rules state
+  const [rules, setRules] = useState<Rule[]>([]);
+  const [isAddingRule, setIsAddingRule] = useState(false);
+  const [newRule, setNewRule] = useState(emptyRule);
+  const [rulesOpen, setRulesOpen] = useState(false);
+  const [testInput, setTestInput] = useState('');
+  const [testResult, setTestResult] = useState<string | null>(null);
+
   useEffect(() => {
-    if (user) { loadCategories(); loadSettings(); }
+    if (user) { loadCategories(); loadSettings(); loadRules(); }
   }, [user]);
 
   const loadCategories = async () => {
@@ -66,13 +79,17 @@ export default function SettingsPage() {
         business_auto_threshold: data.business_auto_threshold,
         personal_suggest_threshold: data.personal_suggest_threshold,
         business_suggest_threshold: data.business_suggest_threshold,
-        ai_enabled: data.ai_enabled,
-        passcode_enabled: data.passcode_enabled,
+        ai_enabled: data.ai_enabled, passcode_enabled: data.passcode_enabled,
         prevent_exact_duplicates: data.prevent_exact_duplicates ?? true,
         flag_possible_duplicates: data.flag_possible_duplicates ?? true,
         exclude_transfers_from_totals: data.exclude_transfers_from_totals ?? true,
       });
     }
+  };
+
+  const loadRules = async () => {
+    const { data } = await supabase.from('categorization_rules').select('*').eq('owner_id', user!.id).order('priority', { ascending: true });
+    setRules((data || []) as Rule[]);
   };
 
   const addCategory = async (mode: 'personal' | 'business', name: string) => {
@@ -91,22 +108,9 @@ export default function SettingsPage() {
 
   const saveSettings = async () => {
     const { data: existing } = await supabase.from('app_settings').select('id').eq('owner_id', user!.id).maybeSingle();
-    const payload = {
-      personal_auto_threshold: settings.personal_auto_threshold,
-      business_auto_threshold: settings.business_auto_threshold,
-      personal_suggest_threshold: settings.personal_suggest_threshold,
-      business_suggest_threshold: settings.business_suggest_threshold,
-      ai_enabled: settings.ai_enabled,
-      passcode_enabled: settings.passcode_enabled,
-      prevent_exact_duplicates: settings.prevent_exact_duplicates,
-      flag_possible_duplicates: settings.flag_possible_duplicates,
-      exclude_transfers_from_totals: settings.exclude_transfers_from_totals,
-    };
-    if (existing) {
-      await supabase.from('app_settings').update(payload).eq('id', existing.id);
-    } else {
-      await supabase.from('app_settings').insert({ ...payload, owner_id: user!.id });
-    }
+    const payload = { ...settings };
+    if (existing) await supabase.from('app_settings').update(payload).eq('id', existing.id);
+    else await supabase.from('app_settings').insert({ ...payload, owner_id: user!.id });
     toast.success('Settings saved');
   };
 
@@ -119,11 +123,8 @@ export default function SettingsPage() {
       for (const tx of parsed) {
         if (tx.category) {
           categorySet.add(tx.category);
-          const key = tx.merchant_key;
-          const existing = merchantMap.get(key);
-          if (existing) { existing.count++; } else {
-            merchantMap.set(key, { category: tx.category, method: tx.method, notes: tx.notes, raw: tx.description_raw, count: 1 });
-          }
+          const existing = merchantMap.get(tx.merchant_key);
+          if (existing) existing.count++; else merchantMap.set(tx.merchant_key, { category: tx.category, method: tx.method, notes: tx.notes, raw: tx.description_raw, count: 1 });
         }
       }
       const existingCats = mode === 'personal' ? personalCats : businessCats;
@@ -136,9 +137,42 @@ export default function SettingsPage() {
         await updateMerchantMemory(key, mode, data.category, data.method, data.notes, data.raw, user!.id);
       }
       await loadCategories();
-      toast.success(`Seeded ${merchantMap.size} merchants and ${newCategories.length} new categories from ${parsed.length} rows`);
+      toast.success(`Seeded ${merchantMap.size} merchants and ${newCategories.length} categories`);
     } catch (err: any) { toast.error(err.message); }
     finally { if (mode === 'personal') setSeedingPersonal(false); else setSeedingBusiness(false); }
+  };
+
+  // Rules functions
+  const addRule = async () => {
+    const { error } = await supabase.from('categorization_rules').insert({
+      ...newRule, category_output: newRule.category_output || null,
+      method_output: newRule.method_output || null, notes_output: newRule.notes_output || null,
+      owner_id: user!.id,
+    });
+    if (!error) { setIsAddingRule(false); setNewRule(emptyRule); await loadRules(); toast.success('Rule added'); }
+  };
+
+  const deleteRule = async (id: string) => {
+    await supabase.from('categorization_rules').delete().eq('id', id);
+    await loadRules(); toast.success('Rule deleted');
+  };
+
+  const toggleRuleActive = async (id: string, active: boolean) => {
+    await supabase.from('categorization_rules').update({ is_active: active }).eq('id', id);
+    await loadRules();
+  };
+
+  const testRules = () => {
+    if (!testInput) return;
+    const upper = testInput.toUpperCase();
+    for (const rule of rules.filter(r => r.is_active)) {
+      let match = false;
+      if (rule.match_type === 'contains') match = upper.includes(rule.pattern.toUpperCase());
+      else if (rule.match_type === 'equals') match = upper === rule.pattern.toUpperCase();
+      else if (rule.match_type === 'regex') { try { match = new RegExp(rule.pattern, 'i').test(testInput); } catch {} }
+      if (match) { setTestResult(`✓ "${rule.rule_name}" → ${rule.category_output || '—'}`); return; }
+    }
+    setTestResult('✗ No rules matched');
   };
 
   const CategoryList = ({ cats, mode, newVal, setNewVal }: { cats: CategoryOption[]; mode: 'personal' | 'business'; newVal: string; setNewVal: (v: string) => void }) => (
@@ -166,13 +200,13 @@ export default function SettingsPage() {
   return (
     <div className="min-h-screen bg-background">
       <AppNav />
-      <div className="container py-8 animate-fade-in max-w-4xl">
+      <div className="container py-6 animate-fade-in max-w-4xl">
         <div className="mb-6">
-          <h1 className="text-xl font-semibold text-foreground">Settings</h1>
-          <p className="text-sm text-muted-foreground">Manage categories, thresholds, and import historical data</p>
+          <h1 className="text-lg font-semibold text-foreground">Settings</h1>
+          <p className="text-sm text-muted-foreground">Manage categories, thresholds, rules, and import logic</p>
         </div>
 
-        <div className="space-y-6">
+        <div className="space-y-4">
           {/* Categories */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <CategoryList cats={personalCats} mode="personal" newVal={newCatPersonal} setNewVal={setNewCatPersonal} />
@@ -184,75 +218,170 @@ export default function SettingsPage() {
             <h3 className="text-sm font-medium text-foreground">Confidence Thresholds</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="space-y-3">
-                <label className="text-xs text-muted-foreground">Personal Auto Threshold: {settings.personal_auto_threshold}%</label>
+                <label className="text-xs text-muted-foreground">Personal Auto: {settings.personal_auto_threshold}%</label>
                 <Slider value={[settings.personal_auto_threshold]} onValueChange={v => setSettings(s => ({ ...s, personal_auto_threshold: v[0] }))} max={100} min={50} step={5} />
-                <label className="text-xs text-muted-foreground">Personal Suggest Threshold: {settings.personal_suggest_threshold}%</label>
+                <label className="text-xs text-muted-foreground">Personal Suggest: {settings.personal_suggest_threshold}%</label>
                 <Slider value={[settings.personal_suggest_threshold]} onValueChange={v => setSettings(s => ({ ...s, personal_suggest_threshold: v[0] }))} max={100} min={30} step={5} />
               </div>
               <div className="space-y-3">
-                <label className="text-xs text-muted-foreground">Business Auto Threshold: {settings.business_auto_threshold}%</label>
+                <label className="text-xs text-muted-foreground">Business Auto: {settings.business_auto_threshold}%</label>
                 <Slider value={[settings.business_auto_threshold]} onValueChange={v => setSettings(s => ({ ...s, business_auto_threshold: v[0] }))} max={100} min={50} step={5} />
-                <label className="text-xs text-muted-foreground">Business Suggest Threshold: {settings.business_suggest_threshold}%</label>
+                <label className="text-xs text-muted-foreground">Business Suggest: {settings.business_suggest_threshold}%</label>
                 <Slider value={[settings.business_suggest_threshold]} onValueChange={v => setSettings(s => ({ ...s, business_suggest_threshold: v[0] }))} max={100} min={30} step={5} />
               </div>
             </div>
-
-            <div className="flex items-center gap-4 pt-2">
-              <div className="flex items-center gap-2">
-                <Switch checked={settings.ai_enabled} onCheckedChange={v => setSettings(s => ({ ...s, ai_enabled: v }))} />
-                <label className="text-xs text-muted-foreground">AI Fallback Enabled</label>
-              </div>
+            <div className="flex items-center gap-2 pt-2">
+              <Switch checked={settings.ai_enabled} onCheckedChange={v => setSettings(s => ({ ...s, ai_enabled: v }))} />
+              <label className="text-xs text-muted-foreground">AI Fallback Enabled</label>
             </div>
-
-            <Button size="sm" onClick={saveSettings}>Save Settings</Button>
           </div>
 
-          {/* Import Logic Controls */}
-          <div className="glass-panel p-4 space-y-4">
+          {/* Import Logic */}
+          <div className="glass-panel p-4 space-y-3">
             <h3 className="text-sm font-medium text-foreground">Import Logic</h3>
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs text-foreground">Prevent exact duplicate imports</p>
-                  <p className="text-xs text-muted-foreground">Skip rows that already exist with same date, amount, and description</p>
-                </div>
-                <Switch checked={settings.prevent_exact_duplicates} onCheckedChange={v => setSettings(s => ({ ...s, prevent_exact_duplicates: v }))} />
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs text-foreground">Prevent exact duplicate imports</p>
+                <p className="text-[11px] text-muted-foreground">Skip rows that already exist</p>
               </div>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs text-foreground">Flag possible duplicates</p>
-                  <p className="text-xs text-muted-foreground">Mark similar transactions within 3 days for review</p>
-                </div>
-                <Switch checked={settings.flag_possible_duplicates} onCheckedChange={v => setSettings(s => ({ ...s, flag_possible_duplicates: v }))} />
-              </div>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs text-foreground">Exclude transfers from expense totals</p>
-                  <p className="text-xs text-muted-foreground">Credit card payments and account transfers won't count as expenses</p>
-                </div>
-                <Switch checked={settings.exclude_transfers_from_totals} onCheckedChange={v => setSettings(s => ({ ...s, exclude_transfers_from_totals: v }))} />
-              </div>
+              <Switch checked={settings.prevent_exact_duplicates} onCheckedChange={v => setSettings(s => ({ ...s, prevent_exact_duplicates: v }))} />
             </div>
-            <Button size="sm" onClick={saveSettings}>Save Settings</Button>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs text-foreground">Flag possible duplicates</p>
+                <p className="text-[11px] text-muted-foreground">Mark similar transactions within 3 days</p>
+              </div>
+              <Switch checked={settings.flag_possible_duplicates} onCheckedChange={v => setSettings(s => ({ ...s, flag_possible_duplicates: v }))} />
+            </div>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs text-foreground">Exclude transfers from totals</p>
+                <p className="text-[11px] text-muted-foreground">Card payments won't count as expenses</p>
+              </div>
+              <Switch checked={settings.exclude_transfers_from_totals} onCheckedChange={v => setSettings(s => ({ ...s, exclude_transfers_from_totals: v }))} />
+            </div>
           </div>
+
+          <Button size="sm" onClick={saveSettings}>Save Settings</Button>
 
           {/* Historical Seed Import */}
           <div className="glass-panel p-4">
-            <h3 className="text-sm font-medium text-foreground mb-3">Import Historical CSV (Seed Data)</h3>
-            <p className="text-xs text-muted-foreground mb-4">Import historical CSVs to build merchant memory and extract categories.</p>
+            <h3 className="text-sm font-medium text-foreground mb-3">Import Historical CSV (Seed)</h3>
+            <p className="text-[11px] text-muted-foreground mb-3">Build merchant memory from historical data.</p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="text-xs text-muted-foreground mb-2 block">Personal Expenses CSV</label>
+                <label className="text-xs text-muted-foreground mb-2 block">Personal CSV</label>
                 <input type="file" accept=".csv" disabled={seedingPersonal} onChange={e => e.target.files?.[0] && handleSeedImport(e.target.files[0], 'personal')} className="text-xs text-muted-foreground file:mr-2 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-primary/10 file:text-primary hover:file:bg-primary/20 cursor-pointer" />
                 {seedingPersonal && <p className="text-xs text-primary mt-2 animate-pulse">Processing...</p>}
               </div>
               <div>
-                <label className="text-xs text-muted-foreground mb-2 block">Business Expenses CSV</label>
+                <label className="text-xs text-muted-foreground mb-2 block">Business CSV</label>
                 <input type="file" accept=".csv" disabled={seedingBusiness} onChange={e => e.target.files?.[0] && handleSeedImport(e.target.files[0], 'business')} className="text-xs text-muted-foreground file:mr-2 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-primary/10 file:text-primary hover:file:bg-primary/20 cursor-pointer" />
                 {seedingBusiness && <p className="text-xs text-primary mt-2 animate-pulse">Processing...</p>}
               </div>
             </div>
           </div>
+
+          {/* Advanced Rules */}
+          <Collapsible open={rulesOpen} onOpenChange={setRulesOpen}>
+            <CollapsibleTrigger className="glass-panel p-4 w-full flex items-center justify-between cursor-pointer hover:bg-secondary/20 transition-colors">
+              <div className="flex items-center gap-2">
+                <Zap className="h-4 w-4 text-primary" />
+                <h3 className="text-sm font-medium text-foreground">Advanced Rules</h3>
+                <span className="text-[11px] text-muted-foreground font-mono">{rules.length} rules</span>
+              </div>
+              <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${rulesOpen ? 'rotate-180' : ''}`} />
+            </CollapsibleTrigger>
+            <CollapsibleContent className="mt-2 space-y-3 animate-fade-in">
+              {/* Rule Tester */}
+              <div className="glass-panel-sm p-3">
+                <div className="flex items-center gap-2">
+                  <Input placeholder="Test a description..." value={testInput} onChange={e => setTestInput(e.target.value)} className="glass-input h-8 text-xs flex-1" />
+                  <Button size="sm" onClick={testRules} className="h-8 text-xs">Test</Button>
+                </div>
+                {testResult && (
+                  <p className={`mt-2 text-xs font-mono ${testResult.startsWith('✓') ? 'text-success' : 'text-muted-foreground'}`}>{testResult}</p>
+                )}
+              </div>
+
+              {/* Add Rule */}
+              <div className="flex justify-end">
+                <Button size="sm" onClick={() => setIsAddingRule(true)} className="h-8 gap-1 text-xs">
+                  <Plus className="h-3 w-3" /> Add Rule
+                </Button>
+              </div>
+
+              {isAddingRule && (
+                <div className="glass-panel-sm p-3 animate-fade-in space-y-2">
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                    <Input placeholder="Rule name" value={newRule.rule_name} onChange={e => setNewRule(v => ({ ...v, rule_name: e.target.value }))} className="glass-input h-8 text-xs" />
+                    <Select value={newRule.mode} onValueChange={v => setNewRule(r => ({ ...r, mode: v }))}>
+                      <SelectTrigger className="h-8 glass-input text-xs"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="both">Both</SelectItem>
+                        <SelectItem value="personal">Personal</SelectItem>
+                        <SelectItem value="business">Business</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Select value={newRule.match_type} onValueChange={v => setNewRule(r => ({ ...r, match_type: v }))}>
+                      <SelectTrigger className="h-8 glass-input text-xs"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="contains">Contains</SelectItem>
+                        <SelectItem value="equals">Equals</SelectItem>
+                        <SelectItem value="regex">Regex</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Input placeholder="Pattern" value={newRule.pattern} onChange={e => setNewRule(v => ({ ...v, pattern: e.target.value }))} className="glass-input h-8 text-xs" />
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <Input placeholder="Category" value={newRule.category_output} onChange={e => setNewRule(v => ({ ...v, category_output: e.target.value }))} className="glass-input h-8 text-xs" />
+                    <Input placeholder="Method" value={newRule.method_output} onChange={e => setNewRule(v => ({ ...v, method_output: e.target.value }))} className="glass-input h-8 text-xs" />
+                    <Input placeholder="Notes" value={newRule.notes_output} onChange={e => setNewRule(v => ({ ...v, notes_output: e.target.value }))} className="glass-input h-8 text-xs" />
+                  </div>
+                  <div className="flex gap-2">
+                    <Button size="sm" onClick={addRule} className="h-8 text-xs">Save</Button>
+                    <Button size="sm" variant="ghost" onClick={() => { setIsAddingRule(false); setNewRule(emptyRule); }} className="h-8 text-xs">Cancel</Button>
+                  </div>
+                </div>
+              )}
+
+              {/* Rules Table */}
+              <div className="glass-panel-sm overflow-hidden">
+                <div className="overflow-x-auto scrollbar-thin">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b border-border/40">
+                        <th className="px-2 py-2 text-left text-[11px] font-medium text-muted-foreground">On</th>
+                        <th className="px-2 py-2 text-left text-[11px] font-medium text-muted-foreground">Name</th>
+                        <th className="px-2 py-2 text-left text-[11px] font-medium text-muted-foreground">Mode</th>
+                        <th className="px-2 py-2 text-left text-[11px] font-medium text-muted-foreground">Match</th>
+                        <th className="px-2 py-2 text-left text-[11px] font-medium text-muted-foreground">Pattern</th>
+                        <th className="px-2 py-2 text-left text-[11px] font-medium text-muted-foreground">→ Cat</th>
+                        <th className="px-2 py-2 text-right text-[11px] font-medium text-muted-foreground">Del</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rules.map(r => (
+                        <tr key={r.id} className="border-b border-border/10 hover:bg-secondary/20">
+                          <td className="px-2 py-1.5"><Switch checked={r.is_active} onCheckedChange={v => toggleRuleActive(r.id, v)} /></td>
+                          <td className="px-2 py-1.5 text-foreground">{r.rule_name}</td>
+                          <td className="px-2 py-1.5"><span className="match-tag bg-primary/10 text-primary/80">{r.mode}</span></td>
+                          <td className="px-2 py-1.5 font-mono text-muted-foreground">{r.match_type}</td>
+                          <td className="px-2 py-1.5 font-mono text-foreground">{r.pattern}</td>
+                          <td className="px-2 py-1.5 text-muted-foreground">{r.category_output || '—'}</td>
+                          <td className="px-2 py-1.5 text-right">
+                            <Button size="sm" variant="ghost" className="h-5 w-5 p-0" onClick={() => deleteRule(r.id)}>
+                              <Trash2 className="h-3 w-3 text-destructive/60" />
+                            </Button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
         </div>
       </div>
     </div>
