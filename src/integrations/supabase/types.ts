@@ -318,12 +318,15 @@ export type Database = {
         Row: {
           approved_count: number
           auto_categorized_count: number
+          detected_headers: Json | null
           exact_duplicates_skipped: number
           file_name: string
           id: string
+          mapped_columns: Json | null
           mode: string
           needs_review_count: number
           owner_id: string
+          parse_details: Json | null
           parse_errors: number
           possible_duplicates_flagged: number
           suggested_count: number
@@ -334,12 +337,15 @@ export type Database = {
         Insert: {
           approved_count?: number
           auto_categorized_count?: number
+          detected_headers?: Json | null
           exact_duplicates_skipped?: number
           file_name: string
           id?: string
+          mapped_columns?: Json | null
           mode: string
           needs_review_count?: number
           owner_id: string
+          parse_details?: Json | null
           parse_errors?: number
           possible_duplicates_flagged?: number
           suggested_count?: number
@@ -350,12 +356,15 @@ export type Database = {
         Update: {
           approved_count?: number
           auto_categorized_count?: number
+          detected_headers?: Json | null
           exact_duplicates_skipped?: number
           file_name?: string
           id?: string
+          mapped_columns?: Json | null
           mode?: string
           needs_review_count?: number
           owner_id?: string
+          parse_details?: Json | null
           parse_errors?: number
           possible_duplicates_flagged?: number
           suggested_count?: number
