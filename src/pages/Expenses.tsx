@@ -22,7 +22,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/co
 import {
   Upload, Search, Download, Check, CheckCheck, Edit3, X,
   ArrowLeftRight, AlertTriangle, Ban, FileText, Filter,
-  Calendar, ChevronDown
+  Calendar, ChevronDown, Trash2
 } from 'lucide-react';
 
 interface Transaction {
@@ -253,6 +253,16 @@ export default function Expenses() {
     setSelectedIds(new Set());
     await loadTransactions();
     toast.success(`Marked ${ids.length} rows as transfer`);
+  };
+
+  const bulkDelete = async () => {
+    const ids = [...selectedIds];
+    if (!confirm(`Delete ${ids.length} selected transaction(s)? This cannot be undone.`)) return;
+    const { error } = await supabase.from('transactions_uploaded').delete().in('id', ids);
+    if (error) { toast.error('Failed to delete'); return; }
+    setSelectedIds(new Set());
+    await loadTransactions();
+    toast.success(`Deleted ${ids.length} rows`);
   };
 
   const toggleTransfer = async (tx: Transaction) => {
@@ -600,6 +610,9 @@ export default function Expenses() {
               </Button>
               <Button size="sm" variant="outline" onClick={bulkMarkTransfer} className="h-8 gap-1 text-xs">
                 <ArrowLeftRight className="h-3 w-3" /> Transfer
+              </Button>
+              <Button size="sm" variant="destructive" onClick={bulkDelete} className="h-8 gap-1 text-xs">
+                <Trash2 className="h-3 w-3" /> Delete {selectedIds.size}
               </Button>
             </>
           )}
