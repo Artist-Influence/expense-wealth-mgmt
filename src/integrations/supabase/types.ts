@@ -20,12 +20,15 @@ export type Database = {
           business_auto_threshold: number
           business_suggest_threshold: number
           created_at: string
+          exclude_transfers_from_totals: boolean
+          flag_possible_duplicates: boolean
           id: string
           owner_id: string
           passcode_enabled: boolean
           passcode_hash: string | null
           personal_auto_threshold: number
           personal_suggest_threshold: number
+          prevent_exact_duplicates: boolean
           updated_at: string
         }
         Insert: {
@@ -33,12 +36,15 @@ export type Database = {
           business_auto_threshold?: number
           business_suggest_threshold?: number
           created_at?: string
+          exclude_transfers_from_totals?: boolean
+          flag_possible_duplicates?: boolean
           id?: string
           owner_id: string
           passcode_enabled?: boolean
           passcode_hash?: string | null
           personal_auto_threshold?: number
           personal_suggest_threshold?: number
+          prevent_exact_duplicates?: boolean
           updated_at?: string
         }
         Update: {
@@ -46,12 +52,15 @@ export type Database = {
           business_auto_threshold?: number
           business_suggest_threshold?: number
           created_at?: string
+          exclude_transfers_from_totals?: boolean
+          flag_possible_duplicates?: boolean
           id?: string
           owner_id?: string
           passcode_enabled?: boolean
           passcode_hash?: string | null
           personal_auto_threshold?: number
           personal_suggest_threshold?: number
+          prevent_exact_duplicates?: boolean
           updated_at?: string
         }
         Relationships: []
@@ -205,17 +214,27 @@ export type Database = {
           date: string | null
           description_normalized: string | null
           description_raw: string | null
+          duplicate_fingerprint: string | null
+          duplicate_of_transaction_id: string | null
+          duplicate_status: string
+          exclude_from_expense_totals: boolean
           final_category: string | null
           final_method: string | null
           final_notes: string | null
           id: string
+          is_transfer: boolean
           match_source: string | null
           mode: string
           owner_id: string
+          parse_error: string | null
+          parse_status: string
           predicted_category: string | null
           predicted_method: string | null
           predicted_notes: string | null
           review_status: string
+          source_file_name: string | null
+          source_row_json: Json | null
+          transfer_type: string | null
           upload_batch_id: string | null
         }
         Insert: {
@@ -225,17 +244,27 @@ export type Database = {
           date?: string | null
           description_normalized?: string | null
           description_raw?: string | null
+          duplicate_fingerprint?: string | null
+          duplicate_of_transaction_id?: string | null
+          duplicate_status?: string
+          exclude_from_expense_totals?: boolean
           final_category?: string | null
           final_method?: string | null
           final_notes?: string | null
           id?: string
+          is_transfer?: boolean
           match_source?: string | null
           mode: string
           owner_id: string
+          parse_error?: string | null
+          parse_status?: string
           predicted_category?: string | null
           predicted_method?: string | null
           predicted_notes?: string | null
           review_status?: string
+          source_file_name?: string | null
+          source_row_json?: Json | null
+          transfer_type?: string | null
           upload_batch_id?: string | null
         }
         Update: {
@@ -245,20 +274,37 @@ export type Database = {
           date?: string | null
           description_normalized?: string | null
           description_raw?: string | null
+          duplicate_fingerprint?: string | null
+          duplicate_of_transaction_id?: string | null
+          duplicate_status?: string
+          exclude_from_expense_totals?: boolean
           final_category?: string | null
           final_method?: string | null
           final_notes?: string | null
           id?: string
+          is_transfer?: boolean
           match_source?: string | null
           mode?: string
           owner_id?: string
+          parse_error?: string | null
+          parse_status?: string
           predicted_category?: string | null
           predicted_method?: string | null
           predicted_notes?: string | null
           review_status?: string
+          source_file_name?: string | null
+          source_row_json?: Json | null
+          transfer_type?: string | null
           upload_batch_id?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "transactions_uploaded_duplicate_of_transaction_id_fkey"
+            columns: ["duplicate_of_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "transactions_uploaded"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "transactions_uploaded_upload_batch_id_fkey"
             columns: ["upload_batch_id"]
@@ -272,37 +318,49 @@ export type Database = {
         Row: {
           approved_count: number
           auto_categorized_count: number
+          exact_duplicates_skipped: number
           file_name: string
           id: string
           mode: string
           needs_review_count: number
           owner_id: string
+          parse_errors: number
+          possible_duplicates_flagged: number
           suggested_count: number
           total_rows: number
+          transfers_detected: number
           uploaded_at: string
         }
         Insert: {
           approved_count?: number
           auto_categorized_count?: number
+          exact_duplicates_skipped?: number
           file_name: string
           id?: string
           mode: string
           needs_review_count?: number
           owner_id: string
+          parse_errors?: number
+          possible_duplicates_flagged?: number
           suggested_count?: number
           total_rows?: number
+          transfers_detected?: number
           uploaded_at?: string
         }
         Update: {
           approved_count?: number
           auto_categorized_count?: number
+          exact_duplicates_skipped?: number
           file_name?: string
           id?: string
           mode?: string
           needs_review_count?: number
           owner_id?: string
+          parse_errors?: number
+          possible_duplicates_flagged?: number
           suggested_count?: number
           total_rows?: number
+          transfers_detected?: number
           uploaded_at?: string
         }
         Relationships: []
