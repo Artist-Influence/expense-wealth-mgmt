@@ -5,12 +5,15 @@ import { supabase } from '@/integrations/supabase/client';
 import { AppNav } from '@/components/AppNav';
 import { CsvUploader } from '@/components/CsvUploader';
 import { FileProgressList, type FileQueueItem } from '@/components/FileProgressList';
-import { parseCsvFile } from '@/lib/csv-parser';
+import { ImportPreviewDialog } from '@/components/ImportPreviewDialog';
+import { previewCsvFile, parseCsvFileWithMapping, type ParsePreview, type ColumnMapping } from '@/lib/csv-parser';
 import { categorizeTransactions } from '@/lib/categorization-engine';
 import { detectMethodFromFilename } from '@/lib/method-detector';
+import { detectTransfer } from '@/lib/transfer-detector';
+import { generateFingerprint, isNearDuplicate } from '@/lib/duplicate-detector';
 import { toast } from 'sonner';
-import { ArrowLeft, Eye } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { ArrowLeft } from 'lucide-react';
+import { Progress } from '@/components/ui/progress';
 
 interface BatchSummary {
   id: string;
@@ -21,6 +24,10 @@ interface BatchSummary {
   suggested_count: number;
   needs_review_count: number;
   approved_count: number;
+  exact_duplicates_skipped: number;
+  possible_duplicates_flagged: number;
+  transfers_detected: number;
+  parse_errors: number;
 }
 
 export default function Workspace() {
@@ -30,8 +37,19 @@ export default function Workspace() {
   const [fileQueue, setFileQueue] = useState<FileQueueItem[]>([]);
   const processingRef = useRef(false);
 
+  // Import preview state
+  const [previewData, setPreviewData] = useState<ParsePreview | null>(null);
+  const [previewFile, setPreviewFile] = useState<File | null>(null);
+  const [previewMethod, setPreviewMethod] = useState<string | null>(null);
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const [showPreview, setShowPreview] = useState(false);
+
   const validMode = mode === 'personal' || mode === 'business' ? mode : 'personal';
   const isProcessing = fileQueue.some(f => !['done', 'error'].includes(f.status));
+
+  const totalFiles = fileQueue.length;
+  const completedFiles = fileQueue.filter(f => f.status === 'done' || f.status === 'error').length;
+  const overallProgress = totalFiles > 0 ? Math.round((completedFiles / totalFiles) * 100) : 0;
 
   useEffect(() => {
     if (user) loadBatches();
@@ -52,26 +70,48 @@ export default function Workspace() {
     setFileQueue(prev => prev.map(item => item.id === id ? { ...item, ...patch } : item));
   };
 
-  const processFile = async (item: FileQueueItem) => {
+  const loadSettings = async () => {
+    const { data } = await supabase
+      .from('app_settings')
+      .select('prevent_exact_duplicates, flag_possible_duplicates, exclude_transfers_from_totals')
+      .eq('owner_id', user!.id)
+      .maybeSingle();
+    return {
+      preventExactDuplicates: data?.prevent_exact_duplicates ?? true,
+      flagPossibleDuplicates: data?.flag_possible_duplicates ?? true,
+      excludeTransfers: data?.exclude_transfers_from_totals ?? true,
+    };
+  };
+
+  const processFile = async (item: FileQueueItem, mapping: ColumnMapping) => {
     if (!user) return;
     const { id, file, method } = item;
 
     try {
-      // Parse
+      const appSettings = await loadSettings();
+
+      // Parse with confirmed mapping
       updateItem(id, { status: 'parsing' });
-      const parsed = await parseCsvFile(file);
-      if (parsed.length === 0) {
-        updateItem(id, { status: 'error', error: 'No valid rows found' });
+      const parsed = await parseCsvFileWithMapping(file, mapping);
+
+      const validRows = parsed.filter(r => r.parse_status === 'ok');
+      const parseErrorRows = parsed.filter(r => r.parse_status === 'parse_error');
+
+      if (validRows.length === 0) {
+        updateItem(id, { status: 'error', error: `No valid rows. ${parseErrorRows.length} parse errors.` });
         return;
       }
 
       // Dedup
       updateItem(id, { status: 'deduplicating' });
-      const dates = parsed.map(r => r.date).filter(Boolean).sort();
+      const dates = validRows.map(r => r.date).filter(Boolean).sort();
       const minDate = dates[0];
       const maxDate = dates[dates.length - 1];
 
-      const existingKeys = new Set<string>();
+      // Load existing transactions for dedup
+      const existingFingerprints = new Set<string>();
+      const existingForNearDup: { date: string | null; amount: number; description_normalized: string; id: string; fingerprint: string }[] = [];
+
       if (minDate && maxDate) {
         let from = 0;
         const pageSize = 1000;
@@ -79,7 +119,7 @@ export default function Workspace() {
         while (hasMore) {
           const { data: existing } = await supabase
             .from('transactions_uploaded')
-            .select('date, description_raw, amount')
+            .select('id, date, description_raw, description_normalized, amount, duplicate_fingerprint')
             .eq('mode', validMode)
             .eq('owner_id', user.id)
             .gte('date', minDate)
@@ -87,7 +127,15 @@ export default function Workspace() {
             .range(from, from + pageSize - 1);
           if (existing) {
             for (const row of existing) {
-              existingKeys.add(`${row.date}|${row.description_raw}|${row.amount}`);
+              const fp = row.duplicate_fingerprint || generateFingerprint(validMode, row.date, row.amount ?? 0, row.description_normalized || '');
+              existingFingerprints.add(fp);
+              existingForNearDup.push({
+                date: row.date,
+                amount: row.amount ?? 0,
+                description_normalized: row.description_normalized || '',
+                id: row.id,
+                fingerprint: fp,
+              });
             }
           }
           hasMore = (existing?.length ?? 0) === pageSize;
@@ -95,20 +143,61 @@ export default function Workspace() {
         }
       }
 
-      const dedupedParsed = parsed.filter(
-        row => !existingKeys.has(`${row.date}|${row.description_raw}|${row.amount}`)
-      );
-      const skippedCount = parsed.length - dedupedParsed.length;
+      // Classify each row for duplicates
+      let exactDupCount = 0;
+      let possibleDupCount = 0;
+      const rowsToInsert: typeof validRows = [];
+      const dupStatuses: Map<number, { status: string; matchId: string | null }> = new Map();
 
-      if (dedupedParsed.length === 0) {
-        updateItem(id, { status: 'done', result: { batchId: '', total: 0, auto: 0, suggested: 0, review: 0, skipped: parsed.length } });
+      for (let i = 0; i < validRows.length; i++) {
+        const tx = validRows[i];
+        const fp = generateFingerprint(validMode, tx.date, tx.amount, tx.description_normalized);
+
+        if (appSettings.preventExactDuplicates && existingFingerprints.has(fp)) {
+          exactDupCount++;
+          continue; // skip
+        }
+
+        let nearDupMatch: string | null = null;
+        if (appSettings.flagPossibleDuplicates) {
+          for (const existing of existingForNearDup) {
+            if (existing.fingerprint === fp) continue;
+            if (isNearDuplicate(tx, existing)) {
+              nearDupMatch = existing.id;
+              possibleDupCount++;
+              break;
+            }
+          }
+        }
+
+        dupStatuses.set(rowsToInsert.length, {
+          status: nearDupMatch ? 'possible_duplicate' : 'unique',
+          matchId: nearDupMatch,
+        });
+        rowsToInsert.push(tx);
+        // Add to existing set to prevent intra-batch duplicates
+        existingFingerprints.add(fp);
+      }
+
+      if (rowsToInsert.length === 0) {
+        updateItem(id, {
+          status: 'done',
+          result: {
+            batchId: '', total: 0, auto: 0, suggested: 0, review: 0,
+            skipped: exactDupCount, possibleDuplicates: possibleDupCount,
+            transfers: 0, parseErrors: parseErrorRows.length,
+          },
+        });
         toast.info(`${file.name}: all ${parsed.length} rows are duplicates`);
         return;
       }
 
       // Categorize
       updateItem(id, { status: 'categorizing' });
-      const results = await categorizeTransactions(dedupedParsed, validMode, user.id);
+      const results = await categorizeTransactions(rowsToInsert, validMode, user.id);
+
+      // Detect transfers
+      let transferCount = 0;
 
       // Create batch
       updateItem(id, { status: 'inserting' });
@@ -121,10 +210,14 @@ export default function Workspace() {
         .insert({
           mode: validMode,
           file_name: file.name,
-          total_rows: dedupedParsed.length,
+          total_rows: rowsToInsert.length,
           auto_categorized_count: autoCount,
           suggested_count: suggestedCount,
           needs_review_count: reviewCount,
+          exact_duplicates_skipped: exactDupCount,
+          possible_duplicates_flagged: possibleDupCount,
+          transfers_detected: 0,
+          parse_errors: parseErrorRows.length,
           owner_id: user.id,
         })
         .select()
@@ -132,12 +225,20 @@ export default function Workspace() {
 
       if (batchError) throw batchError;
 
-      // Insert transactions in chunks, override method from filename
+      // Insert transactions in chunks
       const chunkSize = 100;
-      for (let i = 0; i < dedupedParsed.length; i += chunkSize) {
-        const chunk = dedupedParsed.slice(i, i + chunkSize).map((tx, idx) => {
-          const result = results[i + idx];
+      for (let i = 0; i < rowsToInsert.length; i += chunkSize) {
+        const chunk = rowsToInsert.slice(i, i + chunkSize).map((tx, idx) => {
+          const globalIdx = i + idx;
+          const result = results[globalIdx];
           const txMethod = method || result.predicted_method;
+          const dupInfo = dupStatuses.get(globalIdx) || { status: 'unique', matchId: null };
+          const fp = generateFingerprint(validMode, tx.date, tx.amount, tx.description_normalized);
+
+          // Transfer detection
+          const transfer = detectTransfer(tx.description_raw);
+          if (transfer.isTransfer) transferCount++;
+
           return {
             upload_batch_id: batch.id,
             mode: validMode,
@@ -145,16 +246,26 @@ export default function Workspace() {
             description_raw: tx.description_raw,
             description_normalized: tx.description_normalized,
             amount: tx.amount,
-            predicted_category: result.predicted_category,
+            predicted_category: transfer.isTransfer ? 'Transfer' : result.predicted_category,
             predicted_method: txMethod,
             predicted_notes: result.predicted_notes,
-            final_category: result.review_status === 'auto_categorized' ? result.predicted_category : null,
+            final_category: result.review_status === 'auto_categorized' ? (transfer.isTransfer ? 'Transfer' : result.predicted_category) : null,
             final_method: result.review_status === 'auto_categorized' ? txMethod : null,
             final_notes: result.review_status === 'auto_categorized' ? result.predicted_notes : null,
             confidence: result.confidence,
             match_source: result.match_source,
             review_status: result.review_status,
             owner_id: user.id,
+            source_row_json: tx.source_row_json,
+            source_file_name: file.name,
+            parse_status: tx.parse_status,
+            parse_error: tx.parse_error,
+            duplicate_fingerprint: fp,
+            duplicate_status: dupInfo.status,
+            duplicate_of_transaction_id: dupInfo.matchId,
+            is_transfer: transfer.isTransfer,
+            exclude_from_expense_totals: transfer.isTransfer && appSettings.excludeTransfers,
+            transfer_type: transfer.transferType,
           };
         });
 
@@ -164,27 +275,56 @@ export default function Workspace() {
         if (txError) throw txError;
       }
 
+      // Update batch with transfer count
+      if (transferCount > 0) {
+        await supabase.from('upload_batches').update({ transfers_detected: transferCount }).eq('id', batch.id);
+      }
+
       updateItem(id, {
         status: 'done',
-        result: { batchId: batch.id, total: dedupedParsed.length, auto: autoCount, suggested: suggestedCount, review: reviewCount, skipped: skippedCount },
+        result: {
+          batchId: batch.id, total: rowsToInsert.length, auto: autoCount,
+          suggested: suggestedCount, review: reviewCount, skipped: exactDupCount,
+          possibleDuplicates: possibleDupCount, transfers: transferCount,
+          parseErrors: parseErrorRows.length,
+        },
       });
     } catch (err: any) {
       updateItem(id, { status: 'error', error: err.message || 'Processing failed' });
     }
   };
 
-  const processQueue = useCallback(async (items: FileQueueItem[]) => {
+  const processQueue = useCallback(async (items: FileQueueItem[], mapping: ColumnMapping) => {
     if (processingRef.current) return;
     processingRef.current = true;
     for (const item of items) {
-      await processFile(item);
+      await processFile(item, mapping);
     }
     await loadBatches();
     processingRef.current = false;
   }, [user, validMode]);
 
-  const handleFilesSelect = (files: File[]) => {
-    const newItems: FileQueueItem[] = files.map(file => ({
+  const handleFilesSelect = async (files: File[]) => {
+    // Show preview for first file to confirm mapping
+    const firstFile = files[0];
+    try {
+      const preview = await previewCsvFile(firstFile);
+      setPreviewData(preview);
+      setPreviewFile(firstFile);
+      setPreviewMethod(detectMethodFromFilename(firstFile.name));
+      setPendingFiles(files);
+      setShowPreview(true);
+    } catch (err: any) {
+      toast.error(err.message);
+    }
+  };
+
+  const handlePreviewConfirm = () => {
+    if (!previewData || pendingFiles.length === 0) return;
+    setShowPreview(false);
+
+    const mapping = previewData.mapping;
+    const newItems: FileQueueItem[] = pendingFiles.map(file => ({
       id: crypto.randomUUID(),
       file,
       status: 'queued' as const,
@@ -192,7 +332,18 @@ export default function Workspace() {
       method: detectMethodFromFilename(file.name),
     }));
     setFileQueue(prev => [...newItems, ...prev]);
-    processQueue(newItems);
+    processQueue(newItems, mapping);
+
+    setPreviewData(null);
+    setPreviewFile(null);
+    setPendingFiles([]);
+  };
+
+  const handlePreviewCancel = () => {
+    setShowPreview(false);
+    setPreviewData(null);
+    setPreviewFile(null);
+    setPendingFiles([]);
   };
 
   return (
@@ -212,6 +363,18 @@ export default function Workspace() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 space-y-4">
             <CsvUploader onFilesSelect={handleFilesSelect} disabled={isProcessing} />
+
+            {/* Overall progress */}
+            {totalFiles > 0 && (
+              <div className="glass-panel p-3 space-y-2">
+                <div className="flex items-center justify-between text-xs text-muted-foreground">
+                  <span>{completedFiles} / {totalFiles} files processed</span>
+                  <span>{overallProgress}%</span>
+                </div>
+                <Progress value={overallProgress} className="h-1.5" />
+              </div>
+            )}
+
             <FileProgressList items={fileQueue} mode={validMode} />
           </div>
 
@@ -237,10 +400,22 @@ export default function Workspace() {
                       {batch.total_rows} rows
                     </span>
                   </div>
-                  <div className="flex items-center gap-2 text-xs">
+                  <div className="flex items-center gap-2 text-xs flex-wrap">
                     <span className="text-success">{batch.auto_categorized_count} auto</span>
                     <span className="text-muted-foreground">·</span>
                     <span className="text-warning">{batch.suggested_count + batch.needs_review_count} review</span>
+                    {(batch.exact_duplicates_skipped > 0) && (
+                      <>
+                        <span className="text-muted-foreground">·</span>
+                        <span className="text-muted-foreground">{batch.exact_duplicates_skipped} dupes</span>
+                      </>
+                    )}
+                    {(batch.transfers_detected > 0) && (
+                      <>
+                        <span className="text-muted-foreground">·</span>
+                        <span className="text-primary">{batch.transfers_detected} transfers</span>
+                      </>
+                    )}
                     <span className="text-muted-foreground">·</span>
                     <span className="text-muted-foreground">
                       {new Date(batch.uploaded_at).toLocaleDateString()}
@@ -252,6 +427,15 @@ export default function Workspace() {
           </div>
         </div>
       </div>
+
+      <ImportPreviewDialog
+        open={showPreview}
+        onConfirm={handlePreviewConfirm}
+        onCancel={handlePreviewCancel}
+        preview={previewData}
+        fileName={previewFile?.name || ''}
+        detectedMethod={previewMethod}
+      />
     </div>
   );
 }

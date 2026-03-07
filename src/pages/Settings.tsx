@@ -7,10 +7,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { Slider } from '@/components/ui/slider';
-import { Plus, Trash2, Upload } from 'lucide-react';
+import { Plus, Trash2 } from 'lucide-react';
 import { parseCsvFile } from '@/lib/csv-parser';
-import { categorizeTransactions, updateMerchantMemory } from '@/lib/categorization-engine';
-import { generateMerchantKey } from '@/lib/normalizer';
+import { updateMerchantMemory } from '@/lib/categorization-engine';
 
 interface CategoryOption {
   id: string;
@@ -27,6 +26,9 @@ interface AppSettingsData {
   business_suggest_threshold: number;
   ai_enabled: boolean;
   passcode_enabled: boolean;
+  prevent_exact_duplicates: boolean;
+  flag_possible_duplicates: boolean;
+  exclude_transfers_from_totals: boolean;
 }
 
 export default function SettingsPage() {
@@ -39,34 +41,25 @@ export default function SettingsPage() {
     personal_auto_threshold: 90, business_auto_threshold: 90,
     personal_suggest_threshold: 70, business_suggest_threshold: 70,
     ai_enabled: false, passcode_enabled: false,
+    prevent_exact_duplicates: true, flag_possible_duplicates: true,
+    exclude_transfers_from_totals: true,
   });
   const [seedingPersonal, setSeedingPersonal] = useState(false);
   const [seedingBusiness, setSeedingBusiness] = useState(false);
 
   useEffect(() => {
-    if (user) {
-      loadCategories();
-      loadSettings();
-    }
+    if (user) { loadCategories(); loadSettings(); }
   }, [user]);
 
   const loadCategories = async () => {
-    const { data } = await supabase
-      .from('category_options')
-      .select('*')
-      .eq('owner_id', user!.id)
-      .order('sort_order');
+    const { data } = await supabase.from('category_options').select('*').eq('owner_id', user!.id).order('sort_order');
     const cats = (data || []) as CategoryOption[];
     setPersonalCats(cats.filter(c => c.mode === 'personal'));
     setBusinessCats(cats.filter(c => c.mode === 'business'));
   };
 
   const loadSettings = async () => {
-    const { data } = await supabase
-      .from('app_settings')
-      .select('*')
-      .eq('owner_id', user!.id)
-      .maybeSingle();
+    const { data } = await supabase.from('app_settings').select('*').eq('owner_id', user!.id).maybeSingle();
     if (data) {
       setSettings({
         personal_auto_threshold: data.personal_auto_threshold,
@@ -75,6 +68,9 @@ export default function SettingsPage() {
         business_suggest_threshold: data.business_suggest_threshold,
         ai_enabled: data.ai_enabled,
         passcode_enabled: data.passcode_enabled,
+        prevent_exact_duplicates: data.prevent_exact_duplicates ?? true,
+        flag_possible_duplicates: data.flag_possible_duplicates ?? true,
+        exclude_transfers_from_totals: data.exclude_transfers_from_totals ?? true,
       });
     }
   };
@@ -82,11 +78,8 @@ export default function SettingsPage() {
   const addCategory = async (mode: 'personal' | 'business', name: string) => {
     if (!name.trim()) return;
     const cats = mode === 'personal' ? personalCats : businessCats;
-    await supabase.from('category_options').insert({
-      mode, category_name: name.trim(), sort_order: cats.length, owner_id: user!.id,
-    });
-    if (mode === 'personal') setNewCatPersonal('');
-    else setNewCatBusiness('');
+    await supabase.from('category_options').insert({ mode, category_name: name.trim(), sort_order: cats.length, owner_id: user!.id });
+    if (mode === 'personal') setNewCatPersonal(''); else setNewCatBusiness('');
     await loadCategories();
     toast.success(`Category "${name}" added`);
   };
@@ -97,76 +90,55 @@ export default function SettingsPage() {
   };
 
   const saveSettings = async () => {
-    const { data: existing } = await supabase
-      .from('app_settings')
-      .select('id')
-      .eq('owner_id', user!.id)
-      .maybeSingle();
-
+    const { data: existing } = await supabase.from('app_settings').select('id').eq('owner_id', user!.id).maybeSingle();
+    const payload = {
+      personal_auto_threshold: settings.personal_auto_threshold,
+      business_auto_threshold: settings.business_auto_threshold,
+      personal_suggest_threshold: settings.personal_suggest_threshold,
+      business_suggest_threshold: settings.business_suggest_threshold,
+      ai_enabled: settings.ai_enabled,
+      passcode_enabled: settings.passcode_enabled,
+      prevent_exact_duplicates: settings.prevent_exact_duplicates,
+      flag_possible_duplicates: settings.flag_possible_duplicates,
+      exclude_transfers_from_totals: settings.exclude_transfers_from_totals,
+    };
     if (existing) {
-      await supabase.from('app_settings').update(settings).eq('id', existing.id);
+      await supabase.from('app_settings').update(payload).eq('id', existing.id);
     } else {
-      await supabase.from('app_settings').insert({ ...settings, owner_id: user!.id });
+      await supabase.from('app_settings').insert({ ...payload, owner_id: user!.id });
     }
     toast.success('Settings saved');
   };
 
   const handleSeedImport = async (file: File, mode: 'personal' | 'business') => {
-    if (mode === 'personal') setSeedingPersonal(true);
-    else setSeedingBusiness(true);
-
+    if (mode === 'personal') setSeedingPersonal(true); else setSeedingBusiness(true);
     try {
       const parsed = await parseCsvFile(file);
-      
-      // Build merchant memory from historical data
       const merchantMap = new Map<string, { category: string; method: string | null; notes: string | null; raw: string; count: number }>();
       const categorySet = new Set<string>();
-
       for (const tx of parsed) {
         if (tx.category) {
           categorySet.add(tx.category);
           const key = tx.merchant_key;
           const existing = merchantMap.get(key);
-          if (existing) {
-            existing.count++;
-          } else {
-            merchantMap.set(key, {
-              category: tx.category,
-              method: tx.method,
-              notes: tx.notes,
-              raw: tx.description_raw,
-              count: 1,
-            });
+          if (existing) { existing.count++; } else {
+            merchantMap.set(key, { category: tx.category, method: tx.method, notes: tx.notes, raw: tx.description_raw, count: 1 });
           }
         }
       }
-
-      // Insert category options
       const existingCats = mode === 'personal' ? personalCats : businessCats;
       const existingNames = new Set(existingCats.map(c => c.category_name));
       const newCategories = [...categorySet].filter(c => !existingNames.has(c));
-      
       if (newCategories.length > 0) {
-        await supabase.from('category_options').insert(
-          newCategories.map((name, i) => ({
-            mode, category_name: name, sort_order: existingCats.length + i, owner_id: user!.id,
-          }))
-        );
+        await supabase.from('category_options').insert(newCategories.map((name, i) => ({ mode, category_name: name, sort_order: existingCats.length + i, owner_id: user!.id })));
       }
-
-      // Insert merchant memory
       for (const [key, data] of merchantMap) {
         await updateMerchantMemory(key, mode, data.category, data.method, data.notes, data.raw, user!.id);
       }
-
       await loadCategories();
       toast.success(`Seeded ${merchantMap.size} merchants and ${newCategories.length} new categories from ${parsed.length} rows`);
-    } catch (err: any) {
-      toast.error(err.message);
-    } finally {
-      if (mode === 'personal') setSeedingPersonal(false);
-      else setSeedingBusiness(false);
-    }
+    } catch (err: any) { toast.error(err.message); }
+    finally { if (mode === 'personal') setSeedingPersonal(false); else setSeedingBusiness(false); }
   };
 
   const CategoryList = ({ cats, mode, newVal, setNewVal }: { cats: CategoryOption[]; mode: 'personal' | 'business'; newVal: string; setNewVal: (v: string) => void }) => (
@@ -183,13 +155,7 @@ export default function SettingsPage() {
         ))}
       </div>
       <div className="flex gap-2">
-        <Input
-          placeholder="New category..."
-          value={newVal}
-          onChange={e => setNewVal(e.target.value)}
-          className="glass-input h-8 text-xs"
-          onKeyDown={e => e.key === 'Enter' && addCategory(mode, newVal)}
-        />
+        <Input placeholder="New category..." value={newVal} onChange={e => setNewVal(e.target.value)} className="glass-input h-8 text-xs" onKeyDown={e => e.key === 'Enter' && addCategory(mode, newVal)} />
         <Button size="sm" className="h-8" onClick={() => addCategory(mode, newVal)}>
           <Plus className="h-3.5 w-3.5" />
         </Button>
@@ -241,6 +207,35 @@ export default function SettingsPage() {
             <Button size="sm" onClick={saveSettings}>Save Settings</Button>
           </div>
 
+          {/* Import Logic Controls */}
+          <div className="glass-panel p-4 space-y-4">
+            <h3 className="text-sm font-medium text-foreground">Import Logic</h3>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs text-foreground">Prevent exact duplicate imports</p>
+                  <p className="text-xs text-muted-foreground">Skip rows that already exist with same date, amount, and description</p>
+                </div>
+                <Switch checked={settings.prevent_exact_duplicates} onCheckedChange={v => setSettings(s => ({ ...s, prevent_exact_duplicates: v }))} />
+              </div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs text-foreground">Flag possible duplicates</p>
+                  <p className="text-xs text-muted-foreground">Mark similar transactions within 3 days for review</p>
+                </div>
+                <Switch checked={settings.flag_possible_duplicates} onCheckedChange={v => setSettings(s => ({ ...s, flag_possible_duplicates: v }))} />
+              </div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs text-foreground">Exclude transfers from expense totals</p>
+                  <p className="text-xs text-muted-foreground">Credit card payments and account transfers won't count as expenses</p>
+                </div>
+                <Switch checked={settings.exclude_transfers_from_totals} onCheckedChange={v => setSettings(s => ({ ...s, exclude_transfers_from_totals: v }))} />
+              </div>
+            </div>
+            <Button size="sm" onClick={saveSettings}>Save Settings</Button>
+          </div>
+
           {/* Historical Seed Import */}
           <div className="glass-panel p-4">
             <h3 className="text-sm font-medium text-foreground mb-3">Import Historical CSV (Seed Data)</h3>
@@ -248,24 +243,12 @@ export default function SettingsPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="text-xs text-muted-foreground mb-2 block">Personal Expenses CSV</label>
-                <input
-                  type="file"
-                  accept=".csv"
-                  disabled={seedingPersonal}
-                  onChange={e => e.target.files?.[0] && handleSeedImport(e.target.files[0], 'personal')}
-                  className="text-xs text-muted-foreground file:mr-2 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-primary/10 file:text-primary hover:file:bg-primary/20 cursor-pointer"
-                />
+                <input type="file" accept=".csv" disabled={seedingPersonal} onChange={e => e.target.files?.[0] && handleSeedImport(e.target.files[0], 'personal')} className="text-xs text-muted-foreground file:mr-2 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-primary/10 file:text-primary hover:file:bg-primary/20 cursor-pointer" />
                 {seedingPersonal && <p className="text-xs text-primary mt-2 animate-pulse">Processing...</p>}
               </div>
               <div>
                 <label className="text-xs text-muted-foreground mb-2 block">Business Expenses CSV</label>
-                <input
-                  type="file"
-                  accept=".csv"
-                  disabled={seedingBusiness}
-                  onChange={e => e.target.files?.[0] && handleSeedImport(e.target.files[0], 'business')}
-                  className="text-xs text-muted-foreground file:mr-2 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-primary/10 file:text-primary hover:file:bg-primary/20 cursor-pointer"
-                />
+                <input type="file" accept=".csv" disabled={seedingBusiness} onChange={e => e.target.files?.[0] && handleSeedImport(e.target.files[0], 'business')} className="text-xs text-muted-foreground file:mr-2 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-primary/10 file:text-primary hover:file:bg-primary/20 cursor-pointer" />
                 {seedingBusiness && <p className="text-xs text-primary mt-2 animate-pulse">Processing...</p>}
               </div>
             </div>
