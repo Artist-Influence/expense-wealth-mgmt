@@ -1,13 +1,12 @@
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
-import { LayoutDashboard, FileText, Brain, Settings, Cog, LogOut, Database } from 'lucide-react';
+import { Receipt, BarChart3, Brain, Settings, LogOut, Database } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 const navItems = [
-  { to: '/', label: 'Dashboard', icon: LayoutDashboard },
-  { to: '/review', label: 'Review', icon: FileText },
+  { to: '/', label: 'Expenses', icon: Receipt },
+  { to: '/insights', label: 'Insights', icon: BarChart3 },
   { to: '/merchants', label: 'Memory', icon: Brain },
-  { to: '/rules', label: 'Rules', icon: Cog },
   { to: '/settings', label: 'Settings', icon: Settings },
 ];
 
@@ -17,15 +16,15 @@ export function AppNav() {
 
   return (
     <nav className="sticky top-0 z-50 glass-panel rounded-none border-x-0 border-t-0">
-      <div className="container flex h-14 items-center justify-between">
+      <div className="container flex h-12 items-center justify-between">
         <div className="flex items-center gap-1">
           <Link to="/" className="flex items-center gap-2 mr-6">
-            <Database className="h-5 w-5 text-primary" />
-            <span className="font-semibold text-foreground text-sm">Expense Memory</span>
+            <Database className="h-4 w-4 text-primary" />
+            <span className="font-semibold text-foreground text-xs">Expense Memory</span>
           </Link>
           
           {navItems.map(({ to, label, icon: Icon }) => {
-            const isActive = location.pathname === to;
+            const isActive = to === '/' ? location.pathname === '/' : location.pathname.startsWith(to);
             return (
               <Link
                 key={to}
