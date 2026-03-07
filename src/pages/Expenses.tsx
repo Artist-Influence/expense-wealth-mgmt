@@ -316,9 +316,9 @@ export default function Expenses() {
     };
   };
 
-  const processFile = async (item: FileQueueItem, mapping: ColumnMapping) => {
+  const processFile = async (item: FileQueueItem & { mapping: ColumnMapping; detectedHeaders?: string[] }) => {
     if (!user) return;
-    const { id, file, method } = item;
+    const { id, file, method, mapping, detectedHeaders } = item;
     try {
       const appSettings = await loadSettings();
       updateItem(id, { status: 'parsing' });
