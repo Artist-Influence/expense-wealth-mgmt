@@ -267,7 +267,7 @@ export function parseCsvFile(file: File): Promise<ParsedTransaction[]> {
 
           resolve(transactions);
         },
-        error: (error) => reject(new Error(`CSV parse error: ${error.message}`)),
+        error: (error: any) => reject(new Error(`CSV parse error: ${error.message}`)),
       });
     };
     reader.onerror = () => reject(new Error('Failed to read file'));
