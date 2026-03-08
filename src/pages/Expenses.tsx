@@ -196,6 +196,18 @@ export default function Expenses() {
   };
 
   const saveEdit = async (tx: Transaction) => {
+    // Validate category against allowed list
+    if (editValues.category && categories.length > 0) {
+      const isAllowed = categories.some(c => c.toLowerCase() === editValues.category.toLowerCase());
+      if (!isAllowed) {
+        toast.error(`"${editValues.category}" is not in your approved category list for ${mode} mode`);
+        return;
+      }
+      // Use canonical casing from allowed list
+      const canonical = categories.find(c => c.toLowerCase() === editValues.category.toLowerCase());
+      if (canonical) editValues.category = canonical;
+    }
+
     const { error } = await supabase
       .from('transactions_uploaded')
       .update({ final_category: editValues.category, final_method: editValues.method, final_notes: editValues.notes, review_status: 'edited' })
@@ -244,9 +256,13 @@ export default function Expenses() {
 
   const bulkMarkTransfer = async () => {
     const ids = [...selectedIds];
+    // Validate 'Transfer' against allowed categories
+    const transferCategory = categories.find(c => c.toLowerCase() === 'transfer') || null;
     await supabase.from('transactions_uploaded').update({
       is_transfer: true, exclude_from_expense_totals: true, transfer_type: 'unknown_transfer',
-      predicted_category: 'Transfer', final_category: 'Transfer',
+      predicted_category: transferCategory,
+      final_category: transferCategory,
+      review_status: transferCategory ? 'edited' : 'needs_review',
     }).in('id', ids);
     setSelectedIds(new Set());
     await loadTransactions();
@@ -321,6 +337,18 @@ export default function Expenses() {
     const { id, file, method, mapping, detectedHeaders } = item;
     try {
       const appSettings = await loadSettings();
+
+      // Load allowed categories for validation
+      const { data: catData } = await supabase
+        .from('category_options')
+        .select('category_name')
+        .eq('mode', mode)
+        .eq('is_active', true)
+        .eq('owner_id', user.id)
+        .order('sort_order');
+      const allowedCategories = (catData || []).map(c => c.category_name);
+      const allowedSet = new Set(allowedCategories.map(c => c.toLowerCase()));
+
       updateItem(id, { status: 'parsing' });
       const parsed = await parseCsvFileWithMapping(file, mapping);
       const validRows = parsed.filter(r => r.parse_status === 'ok');
@@ -388,7 +416,7 @@ export default function Expenses() {
       }
 
       updateItem(id, { status: 'categorizing' });
-      const results = await categorizeTransactions(rowsToInsert, mode, user.id);
+      const results = await categorizeTransactions(rowsToInsert, mode, user.id, undefined, allowedCategories);
 
       let transferCount = 0;
       updateItem(id, { status: 'inserting' });
@@ -419,18 +447,31 @@ export default function Expenses() {
           const transfer = detectTransfer(tx.description_raw);
           if (transfer.isTransfer) transferCount++;
 
+          // Validate transfer category against allowed list
+          let transferCategory: string | null = null;
+          if (transfer.isTransfer) {
+            transferCategory = allowedSet.has('transfer') ? allowedCategories.find(c => c.toLowerCase() === 'transfer') || null : null;
+          }
+
+          const predictedCat = transfer.isTransfer ? transferCategory : result.predicted_category;
+          const finalCat = result.review_status === 'auto_categorized'
+            ? (transfer.isTransfer ? transferCategory : result.predicted_category)
+            : null;
+          // If transfer has no valid category, force needs_review
+          const reviewStatus = (transfer.isTransfer && !transferCategory) ? 'needs_review' : result.review_status;
+
           return {
             upload_batch_id: batch.id, mode, date: tx.date,
             description_raw: tx.description_raw, description_normalized: tx.description_normalized,
             amount: tx.amount,
-            predicted_category: transfer.isTransfer ? 'Transfer' : result.predicted_category,
+            predicted_category: predictedCat,
             predicted_method: txMethod,
             predicted_notes: result.predicted_notes,
-            final_category: result.review_status === 'auto_categorized' ? (transfer.isTransfer ? 'Transfer' : result.predicted_category) : null,
-            final_method: result.review_status === 'auto_categorized' ? txMethod : null,
-            final_notes: result.review_status === 'auto_categorized' ? result.predicted_notes : null,
+            final_category: finalCat,
+            final_method: reviewStatus === 'auto_categorized' ? txMethod : null,
+            final_notes: reviewStatus === 'auto_categorized' ? result.predicted_notes : null,
             confidence: result.confidence, match_source: result.match_source,
-            review_status: result.review_status, owner_id: user.id,
+            review_status: reviewStatus, owner_id: user.id,
             source_row_json: tx.source_row_json, source_file_name: file.name,
             parse_status: tx.parse_status, parse_error: tx.parse_error,
             duplicate_fingerprint: fp, duplicate_status: dupInfo.status,
@@ -773,6 +814,11 @@ export default function Expenses() {
                           )}
                           {tx.parse_status === 'parse_error' && (
                             <Badge variant="destructive" className="text-[9px] h-3.5 px-1">err</Badge>
+                          )}
+                          {!tx.final_category && !tx.predicted_category && tx.match_source && (
+                            <Badge variant="outline" className="text-[9px] h-3.5 gap-0.5 border-destructive/30 text-destructive px-1" title="Category suggestion rejected — not in approved list">
+                              <Ban className="h-2 w-2" /> rejected
+                            </Badge>
                           )}
                         </div>
                       </td>
