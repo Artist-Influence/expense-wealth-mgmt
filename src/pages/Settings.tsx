@@ -497,6 +497,15 @@ export default function SettingsPage() {
                 </div>
               </div>
             </div>
+            <div className="flex gap-2 mt-3">
+              <Button size="sm" variant="outline" className="h-7 text-xs gap-1" disabled={generatingRules} onClick={() => handleGenerateRulesFromMemory('personal')}>
+                <Wand2 className="h-3 w-3" /> Generate Personal Rules
+              </Button>
+              <Button size="sm" variant="outline" className="h-7 text-xs gap-1" disabled={generatingRules} onClick={() => handleGenerateRulesFromMemory('business')}>
+                <Wand2 className="h-3 w-3" /> Generate Business Rules
+              </Button>
+              {generatingRules && <span className="text-xs text-primary animate-pulse self-center">Generating...</span>}
+            </div>
           </div>
 
           <SeedMappingDialog
