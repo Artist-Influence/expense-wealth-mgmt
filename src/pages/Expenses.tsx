@@ -5,8 +5,9 @@ import { AppNav } from '@/components/AppNav';
 import { CsvUploader } from '@/components/CsvUploader';
 import { FileProgressList, type FileQueueItem } from '@/components/FileProgressList';
 import { ImportPreviewDialog, type FilePreviewInfo } from '@/components/ImportPreviewDialog';
+import { TransactionDetailDrawer } from '@/components/TransactionDetailDrawer';
 import { previewCsvFile, parseCsvFileWithMapping, type ParsePreview, type ColumnMapping } from '@/lib/csv-parser';
-import { categorizeTransactions, updateMerchantMemory } from '@/lib/categorization-engine';
+import { categorizeTransactions, categorizeWithAI, updateMerchantMemory } from '@/lib/categorization-engine';
 import { detectMethodFromFilename } from '@/lib/method-detector';
 import { detectTransfer } from '@/lib/transfer-detector';
 import { generateFingerprint, isNearDuplicate } from '@/lib/duplicate-detector';
@@ -39,6 +40,7 @@ interface Transaction {
   final_notes: string | null;
   confidence: number | null;
   match_source: string | null;
+  match_explanation?: string | null;
   review_status: string;
   mode: string;
   parse_status: string | null;
@@ -59,12 +61,11 @@ export default function Expenses() {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [extraFilter, setExtraFilter] = useState<string>('all');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editValues, setEditValues] = useState({ category: '', method: '', notes: '' });
   const [categories, setCategories] = useState<string[]>([]);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [sortCol, setSortCol] = useState<string>('date');
   const [sortAsc, setSortAsc] = useState(false);
+  const [detailTx, setDetailTx] = useState<Transaction | null>(null);
 
   // Upload state
   const [fileQueue, setFileQueue] = useState<FileQueueItem[]>([]);
@@ -157,7 +158,7 @@ export default function Expenses() {
   const stats = useMemo(() => {
     const now = new Date();
     const thisMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-    const needsReview = transactions.filter(t => t.review_status === 'needs_review' || t.review_status === 'suggested').length;
+    const needsReview = transactions.filter(t => t.review_status === 'needs_review' || t.review_status === 'suggested' || t.review_status === 'ai_suggested').length;
     const uncategorized = transactions.filter(t => !t.final_category && !t.predicted_category).length;
     const duplicates = transactions.filter(t => t.duplicate_status === 'possible_duplicate').length;
     const transfersExcluded = transactions.filter(t => t.exclude_from_expense_totals).length;
@@ -186,45 +187,35 @@ export default function Expenses() {
     else setSelectedIds(new Set(filtered.map(t => t.id)));
   };
 
-  // Editing
-  const startEdit = (tx: Transaction) => {
-    setEditingId(tx.id);
-    setEditValues({
-      category: tx.final_category || tx.predicted_category || '',
-      method: tx.final_method || tx.predicted_method || '',
-      notes: tx.final_notes || tx.predicted_notes || '',
-    });
-  };
-
-  const saveEdit = async (tx: Transaction) => {
-    // Validate category against allowed list
-    if (editValues.category && categories.length > 0) {
-      const isAllowed = categories.some(c => c.toLowerCase() === editValues.category.toLowerCase());
+  // Drawer save
+  const handleDrawerSave = async (id: string, values: { category: string; method: string; notes: string }) => {
+    if (values.category && categories.length > 0) {
+      const isAllowed = categories.some(c => c.toLowerCase() === values.category.toLowerCase());
       if (!isAllowed) {
-        toast.error(`"${editValues.category}" is not in your approved category list for ${mode} mode`);
+        toast.error(`"${values.category}" is not in your approved category list for ${mode} mode`);
         return;
       }
-      // Use canonical casing from allowed list
-      const canonical = categories.find(c => c.toLowerCase() === editValues.category.toLowerCase());
-      if (canonical) editValues.category = canonical;
+      const canonical = categories.find(c => c.toLowerCase() === values.category.toLowerCase());
+      if (canonical) values.category = canonical;
     }
 
     const { error } = await supabase
       .from('transactions_uploaded')
-      .update({ final_category: editValues.category, final_method: editValues.method, final_notes: editValues.notes, review_status: 'edited' })
-      .eq('id', tx.id);
+      .update({ final_category: values.category, final_method: values.method, final_notes: values.notes, review_status: 'edited' })
+      .eq('id', id);
+
     if (!error) {
-      // Merchant memory protection
-      if (tx.parse_status === 'ok' && !tx.is_transfer && tx.duplicate_status !== 'possible_duplicate') {
+      const tx = transactions.find(t => t.id === id);
+      if (tx && tx.parse_status === 'ok' && !tx.is_transfer && tx.duplicate_status !== 'possible_duplicate') {
         const desc = tx.description_raw || '';
         if (!isStatementArtifact(desc, tx.amount || 0)) {
           const merchantKey = generateMerchantKey(normalizeDescription(desc));
-          await updateMerchantMemory(merchantKey, tx.mode as 'personal' | 'business', editValues.category, editValues.method || null, editValues.notes || null, desc, user!.id);
+          await updateMerchantMemory(merchantKey, tx.mode as 'personal' | 'business', values.category, values.method || null, values.notes || null, desc, user!.id);
         }
       }
-      setEditingId(null);
       await loadTransactions();
       toast.success('Saved');
+      setDetailTx(null);
     }
   };
 
@@ -236,7 +227,6 @@ export default function Expenses() {
       .update({ final_category: category, final_method: tx.final_method || tx.predicted_method, final_notes: tx.final_notes || tx.predicted_notes, review_status: 'approved' })
       .eq('id', tx.id);
     if (!error) {
-      // Merchant memory protection
       if (tx.parse_status === 'ok' && !tx.is_transfer && tx.duplicate_status !== 'possible_duplicate') {
         const desc = tx.description_raw || '';
         if (!isStatementArtifact(desc, tx.amount || 0)) {
@@ -245,6 +235,7 @@ export default function Expenses() {
         }
       }
       await loadTransactions();
+      setDetailTx(null);
     }
   };
 
@@ -257,7 +248,6 @@ export default function Expenses() {
 
   const bulkMarkTransfer = async () => {
     const ids = [...selectedIds];
-    // Validate 'Transfer' against allowed categories
     const transferCategory = categories.find(c => c.toLowerCase() === 'transfer') || null;
     await supabase.from('transactions_uploaded').update({
       is_transfer: true, exclude_from_expense_totals: true, transfer_type: 'unknown_transfer',
@@ -274,7 +264,6 @@ export default function Expenses() {
     const ids = [...selectedIds];
     if (!confirm(`Delete ${ids.length} selected transaction(s)? This cannot be undone.`)) return;
 
-    // Collect affected batch IDs before deleting
     const affectedTxs = transactions.filter(t => selectedIds.has(t.id));
     const affectedBatchIds = [...new Set(
       affectedTxs.map(t => t.upload_batch_id).filter(Boolean) as string[]
@@ -283,7 +272,6 @@ export default function Expenses() {
     const { error } = await supabase.from('transactions_uploaded').delete().in('id', ids);
     if (error) { toast.error('Failed to delete'); return; }
 
-    // Clean up orphaned upload batches
     for (const batchId of affectedBatchIds) {
       const { count } = await supabase
         .from('transactions_uploaded')
@@ -291,7 +279,6 @@ export default function Expenses() {
         .eq('upload_batch_id', batchId);
       if (count === 0) {
         await supabase.from('upload_batches').delete().eq('id', batchId);
-        // Remove from client-side fileQueue
         setFileQueue(prev => prev.filter(item => item.result?.batchId !== batchId));
       }
     }
@@ -308,6 +295,7 @@ export default function Expenses() {
       transfer_type: newIsTransfer ? 'unknown_transfer' : null,
     }).eq('id', tx.id);
     await loadTransactions();
+    setDetailTx(null);
     toast.success(newIsTransfer ? 'Marked as transfer' : 'Restored to expense');
   };
 
@@ -338,19 +326,20 @@ export default function Expenses() {
     toast.success('CSV exported');
   };
 
-  // Upload processing (from Workspace)
+  // Upload processing
   const updateItem = (id: string, patch: Partial<FileQueueItem>) => {
     setFileQueue(prev => prev.map(item => item.id === id ? { ...item, ...patch } : item));
   };
 
   const loadSettings = async () => {
     const { data } = await supabase.from('app_settings')
-      .select('prevent_exact_duplicates, flag_possible_duplicates, exclude_transfers_from_totals')
+      .select('prevent_exact_duplicates, flag_possible_duplicates, exclude_transfers_from_totals, ai_enabled')
       .eq('owner_id', user!.id).maybeSingle();
     return {
       preventExactDuplicates: data?.prevent_exact_duplicates ?? true,
       flagPossibleDuplicates: data?.flag_possible_duplicates ?? true,
       excludeTransfers: data?.exclude_transfers_from_totals ?? true,
+      aiEnabled: data?.ai_enabled ?? false,
     };
   };
 
@@ -360,7 +349,6 @@ export default function Expenses() {
     try {
       const appSettings = await loadSettings();
 
-      // Load allowed categories for validation
       const { data: catData } = await supabase
         .from('category_options')
         .select('category_name')
@@ -440,10 +428,47 @@ export default function Expenses() {
       updateItem(id, { status: 'categorizing' });
       const results = await categorizeTransactions(rowsToInsert, mode, user.id, undefined, allowedCategories);
 
+      // Layer 5: AI categorization for unmatched rows
+      const aiExplanations = new Map<number, string>();
+      if (appSettings.aiEnabled && allowedCategories.length > 0) {
+        const unmatchedRows: { index: number; description_raw: string; description_normalized: string }[] = [];
+        results.forEach((r, idx) => {
+          if (r.review_status === 'needs_review' && !r.predicted_category) {
+            const tx = rowsToInsert[idx];
+            unmatchedRows.push({
+              index: idx,
+              description_raw: tx.description_raw || '',
+              description_normalized: tx.description_normalized || '',
+            });
+          }
+        });
+
+        if (unmatchedRows.length > 0) {
+          try {
+            const aiResults = await categorizeWithAI(unmatchedRows, mode, user.id, allowedCategories);
+            for (const [idx, aiResult] of aiResults) {
+              if (aiResult.category && aiResult.confidence >= 50) {
+                results[idx].predicted_category = aiResult.category;
+                results[idx].confidence = aiResult.confidence;
+                results[idx].match_source = 'ai';
+                results[idx].match_explanation = aiResult.explanation;
+                results[idx].review_status = aiResult.confidence >= 80 ? 'ai_suggested' : 'needs_review';
+                aiExplanations.set(idx, aiResult.explanation);
+              } else if (aiResult.explanation) {
+                results[idx].match_explanation = aiResult.explanation;
+                aiExplanations.set(idx, aiResult.explanation);
+              }
+            }
+          } catch (err) {
+            console.error('AI categorization failed, continuing without:', err);
+          }
+        }
+      }
+
       let transferCount = 0;
       updateItem(id, { status: 'inserting' });
       const autoCount = results.filter(r => r.review_status === 'auto_categorized').length;
-      const suggestedCount = results.filter(r => r.review_status === 'suggested').length;
+      const suggestedCount = results.filter(r => r.review_status === 'suggested' || r.review_status === 'ai_suggested').length;
       const reviewCount = results.filter(r => r.review_status === 'needs_review').length;
 
       const { data: batch, error: batchError } = await supabase.from('upload_batches').insert({
@@ -455,7 +480,6 @@ export default function Expenses() {
         mapped_columns: mapping as any,
         parse_details: { total_raw_rows: parsed.length, filtered_artifacts: parsed.length - validRows.length - parseErrorRows.length, valid_rows: validRows.length, parse_error_count: parseErrorRows.length, exact_duplicates: exactDupCount, possible_duplicates: possibleDupCount } as any,
       } as any).select().single();
-      if (batchError) throw batchError;
       if (batchError) throw batchError;
 
       const chunkSize = 100;
@@ -469,7 +493,6 @@ export default function Expenses() {
           const transfer = detectTransfer(tx.description_raw);
           if (transfer.isTransfer) transferCount++;
 
-          // Validate transfer category against allowed list
           let transferCategory: string | null = null;
           if (transfer.isTransfer) {
             transferCategory = allowedSet.has('transfer') ? allowedCategories.find(c => c.toLowerCase() === 'transfer') || null : null;
@@ -479,7 +502,6 @@ export default function Expenses() {
           const finalCat = result.review_status === 'auto_categorized'
             ? (transfer.isTransfer ? transferCategory : result.predicted_category)
             : null;
-          // If transfer has no valid category, force needs_review
           const reviewStatus = (transfer.isTransfer && !transferCategory) ? 'needs_review' : result.review_status;
 
           return {
@@ -493,6 +515,7 @@ export default function Expenses() {
             final_method: reviewStatus === 'auto_categorized' ? txMethod : null,
             final_notes: reviewStatus === 'auto_categorized' ? result.predicted_notes : null,
             confidence: result.confidence, match_source: result.match_source,
+            match_explanation: result.match_explanation || null,
             review_status: reviewStatus, owner_id: user.id,
             source_row_json: tx.source_row_json, source_file_name: file.name,
             parse_status: tx.parse_status, parse_error: tx.parse_error,
@@ -524,7 +547,7 @@ export default function Expenses() {
     if (processingRef.current) return;
     processingRef.current = true;
     for (const item of items) {
-      if (item.status === 'error') continue; // skip pre-failed files
+      if (item.status === 'error') continue;
       await processFile(item);
     }
     await loadTransactions();
@@ -558,7 +581,6 @@ export default function Expenses() {
         detectedHeaders: fp.preview!.headers,
       };
     });
-    // Also add errored files to the queue so the user sees them
     const errorItems: FileQueueItem[] = filePreviews
       .filter((fp, i) => !validIndexes.includes(i))
       .map(fp => ({
@@ -586,6 +608,7 @@ export default function Expenses() {
     switch (s) {
       case 'auto_categorized': return 'status-auto';
       case 'suggested': return 'status-suggested';
+      case 'ai_suggested': return 'status-suggested';
       case 'needs_review': return 'status-review';
       case 'approved': case 'edited': return 'status-approved';
       default: return 'match-tag';
@@ -666,6 +689,7 @@ export default function Expenses() {
               <SelectItem value="all">All Status</SelectItem>
               <SelectItem value="needs_review">Needs Review</SelectItem>
               <SelectItem value="suggested">Suggested</SelectItem>
+              <SelectItem value="ai_suggested">AI Suggested</SelectItem>
               <SelectItem value="auto_categorized">Auto</SelectItem>
               <SelectItem value="approved">Approved</SelectItem>
               <SelectItem value="edited">Edited</SelectItem>
@@ -775,42 +799,30 @@ export default function Expenses() {
                   <tr><td colSpan={11} className="px-2 py-12 text-center text-muted-foreground">No transactions found</td></tr>
                 ) : (
                   filtered.map(tx => (
-                    <tr key={tx.id} className={`border-b border-border/10 hover:bg-secondary/20 transition-colors ${tx.exclude_from_expense_totals ? 'opacity-50' : ''}`} style={{ height: '32px' }}>
-                      <td className="px-2 py-1 sticky left-0 bg-card/60">
+                    <tr
+                      key={tx.id}
+                      className={`border-b border-border/10 hover:bg-secondary/20 transition-colors cursor-pointer ${tx.exclude_from_expense_totals ? 'opacity-50' : ''}`}
+                      style={{ height: '32px' }}
+                      onClick={() => setDetailTx(tx)}
+                    >
+                      <td className="px-2 py-1 sticky left-0 bg-card/60" onClick={e => e.stopPropagation()}>
                         <input type="checkbox" checked={selectedIds.has(tx.id)} onChange={() => toggleSelect(tx.id)} className="rounded border-border" />
                       </td>
                       <td className="px-2 py-1 font-mono text-muted-foreground whitespace-nowrap">{tx.date || '—'}</td>
-                      <td className="px-2 py-1 max-w-[220px]">
+                      <td className="px-2 py-1 max-w-[300px]">
                         <p className="text-foreground truncate" title={tx.description_raw || ''}>{tx.description_raw || '—'}</p>
                       </td>
                       <td className="px-2 py-1 text-right font-mono text-foreground whitespace-nowrap">
                         ${tx.amount != null ? Math.abs(tx.amount).toFixed(2) : '0.00'}
                       </td>
                       <td className="px-2 py-1">
-                        {editingId === tx.id ? (
-                          <Input value={editValues.category} onChange={e => setEditValues(v => ({ ...v, category: e.target.value }))} className="glass-input h-6 text-xs w-28 px-1" list="cat-opts" />
-                        ) : (
-                          <span className="text-foreground">{tx.final_category || tx.predicted_category || '—'}</span>
-                        )}
+                        <span className="text-foreground">{tx.final_category || tx.predicted_category || '—'}</span>
                       </td>
                       <td className="px-2 py-1">
-                        {editingId === tx.id ? (
-                          <Input value={editValues.method} onChange={e => setEditValues(v => ({ ...v, method: e.target.value }))} className="glass-input h-6 text-xs w-24 px-1" />
-                        ) : (
-                          <span className="text-muted-foreground">{tx.final_method || tx.predicted_method || '—'}</span>
-                        )}
+                        <span className="text-muted-foreground">{tx.final_method || tx.predicted_method || '—'}</span>
                       </td>
                       <td className="px-2 py-1">
-                        {editingId === tx.id ? (
-                          <Input
-                            value={editValues.notes}
-                            onChange={e => setEditValues(v => ({ ...v, notes: e.target.value }))}
-                            className="glass-input h-6 text-xs w-28 px-1"
-                            onKeyDown={e => { if (e.key === 'Enter') saveEdit(tx); if (e.key === 'Escape') setEditingId(null); }}
-                          />
-                        ) : (
-                          <span className="text-muted-foreground truncate max-w-[100px] block">{tx.final_notes || tx.predicted_notes || '—'}</span>
-                        )}
+                        <span className="text-muted-foreground truncate max-w-[100px] block">{tx.final_notes || tx.predicted_notes || '—'}</span>
                       </td>
                       <td className="px-2 py-1">
                         <span className={getConfidenceClass(tx.confidence)}>
@@ -819,7 +831,7 @@ export default function Expenses() {
                       </td>
                       <td className="px-2 py-1">
                         <span className={getStatusClass(tx.review_status)}>
-                          {tx.review_status.replace(/_/g, ' ')}
+                          {tx.review_status === 'ai_suggested' ? 'AI suggested' : tx.review_status.replace(/_/g, ' ')}
                         </span>
                       </td>
                       <td className="px-2 py-1">
@@ -842,33 +854,27 @@ export default function Expenses() {
                               <Ban className="h-2 w-2" /> rejected
                             </Badge>
                           )}
+                          {tx.match_source === 'ai' && (
+                            <Badge variant="outline" className="text-[9px] h-3.5 gap-0.5 border-purple-400/30 text-purple-400 px-1">
+                              AI
+                            </Badge>
+                          )}
                         </div>
                       </td>
-                      <td className="px-2 py-1 text-right whitespace-nowrap">
-                        {editingId === tx.id ? (
-                          <div className="flex items-center gap-0.5 justify-end">
-                            <Button size="sm" variant="ghost" className="h-5 w-5 p-0" onClick={() => saveEdit(tx)}>
+                      <td className="px-2 py-1 text-right whitespace-nowrap" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center gap-0.5 justify-end">
+                          <Button size="sm" variant="ghost" className="h-5 w-5 p-0" onClick={() => setDetailTx(tx)} title="Edit">
+                            <Edit3 className="h-3 w-3 text-muted-foreground" />
+                          </Button>
+                          <Button size="sm" variant="ghost" className="h-5 w-5 p-0" onClick={() => toggleTransfer(tx)} title={tx.is_transfer ? 'Restore' : 'Transfer'}>
+                            <ArrowLeftRight className={`h-3 w-3 ${tx.is_transfer ? 'text-primary' : 'text-muted-foreground'}`} />
+                          </Button>
+                          {!['approved', 'edited'].includes(tx.review_status) && (
+                            <Button size="sm" variant="ghost" className="h-5 w-5 p-0" onClick={() => approveRow(tx)} title="Approve">
                               <Check className="h-3 w-3 text-success" />
                             </Button>
-                            <Button size="sm" variant="ghost" className="h-5 w-5 p-0" onClick={() => setEditingId(null)}>
-                              <X className="h-3 w-3 text-muted-foreground" />
-                            </Button>
-                          </div>
-                        ) : (
-                          <div className="flex items-center gap-0.5 justify-end">
-                            <Button size="sm" variant="ghost" className="h-5 w-5 p-0" onClick={() => startEdit(tx)} title="Edit">
-                              <Edit3 className="h-3 w-3 text-muted-foreground" />
-                            </Button>
-                            <Button size="sm" variant="ghost" className="h-5 w-5 p-0" onClick={() => toggleTransfer(tx)} title={tx.is_transfer ? 'Restore' : 'Transfer'}>
-                              <ArrowLeftRight className={`h-3 w-3 ${tx.is_transfer ? 'text-primary' : 'text-muted-foreground'}`} />
-                            </Button>
-                            {!['approved', 'edited'].includes(tx.review_status) && (
-                              <Button size="sm" variant="ghost" className="h-5 w-5 p-0" onClick={() => approveRow(tx)} title="Approve">
-                                <Check className="h-3 w-3 text-success" />
-                              </Button>
-                            )}
-                          </div>
-                        )}
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))
@@ -877,11 +883,18 @@ export default function Expenses() {
             </table>
           </div>
         </div>
-
-        <datalist id="cat-opts">
-          {categories.map(c => <option key={c} value={c} />)}
-        </datalist>
       </div>
+
+      {/* Transaction Detail Drawer */}
+      <TransactionDetailDrawer
+        transaction={detailTx}
+        open={!!detailTx}
+        onClose={() => setDetailTx(null)}
+        categories={categories}
+        onSave={handleDrawerSave}
+        onApprove={approveRow}
+        onToggleTransfer={toggleTransfer}
+      />
 
       <ImportPreviewDialog
         open={showPreview}
