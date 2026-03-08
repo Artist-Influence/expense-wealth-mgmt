@@ -242,8 +242,17 @@ export default function SettingsPage() {
       for (const [key, data] of merchantMap) {
         await updateMerchantMemory(key, mode, data.category, data.method, data.notes, data.raw, user!.id);
       }
+      // Auto-generate rules from seeded merchants (expenses only)
+      let ruleCount = 0;
+      if (!isIncome) {
+        const merchantsForRules = [...merchantMap.entries()].map(([key, data]) => ({
+          key, category: data.category, method: data.method,
+        }));
+        ruleCount = await generateRulesFromMerchants(merchantsForRules, mode, user!.id);
+        await loadRules();
+      }
       await loadCategories();
-      toast.success(`Seeded ${merchantMap.size} merchants${!isIncome ? ` and ${newCatCount} new categories` : ''} from ${parsed.length} transactions`);
+      toast.success(`Seeded ${merchantMap.size} merchants${!isIncome ? `, ${newCatCount} new categories, ${ruleCount} auto-rules` : ''} from ${parsed.length} transactions`);
     } catch (err: any) { toast.error(err.message); }
     finally { setLoading(false); }
   };
@@ -258,10 +267,41 @@ export default function SettingsPage() {
     try {
       await supabase.from('merchant_memory').delete().eq('owner_id', user!.id).eq('mode', mode);
       await supabase.from('category_options').delete().eq('owner_id', user!.id).eq('mode', mode);
+      await supabase.from('categorization_rules').delete().eq('owner_id', user!.id).eq('mode', mode).eq('priority', 200);
       await loadCategories();
-      toast.success(`Cleared all ${mode} merchant memory and categories`);
+      await loadRules();
+      toast.success(`Cleared all ${mode} merchant memory, categories, and auto-generated rules`);
     } catch (err: any) {
       toast.error(`Failed to clear: ${err.message}`);
+    }
+  };
+
+  const [generatingRules, setGeneratingRules] = useState(false);
+
+  const handleGenerateRulesFromMemory = async (mode: 'personal' | 'business') => {
+    setGeneratingRules(true);
+    try {
+      const { data: merchants } = await supabase
+        .from('merchant_memory')
+        .select('merchant_key, most_common_category, most_common_method')
+        .eq('owner_id', user!.id)
+        .eq('mode', mode);
+      if (!merchants || merchants.length === 0) {
+        toast.error(`No ${mode} merchant memory found. Seed historical data first.`);
+        return;
+      }
+      const mapped = merchants.map(m => ({
+        key: m.merchant_key,
+        category: m.most_common_category,
+        method: m.most_common_method,
+      }));
+      const count = await generateRulesFromMerchants(mapped, mode, user!.id);
+      await loadRules();
+      toast.success(`Generated ${count} new auto-rules from ${merchants.length} ${mode} merchants`);
+    } catch (err: any) {
+      toast.error(err.message);
+    } finally {
+      setGeneratingRules(false);
     }
   };
 
