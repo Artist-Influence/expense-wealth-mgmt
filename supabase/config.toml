@@ -1,1 +1,4 @@
 project_id = "hqfazvpnthsyxpzytggs"
+
+[functions.categorize-ai]
+verify_jwt = false

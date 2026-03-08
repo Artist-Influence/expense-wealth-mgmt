@@ -27,7 +27,7 @@ export interface CategorizationResult {
   confidence: number;
   match_source: 'exact_history' | 'normalized_history' | 'partial_history' | 'rule' | 'ai' | null;
   match_explanation: string;
-  review_status: 'auto_categorized' | 'suggested' | 'needs_review';
+  review_status: 'auto_categorized' | 'suggested' | 'ai_suggested' | 'needs_review';
   category_rejected: boolean;
 }
 
@@ -290,6 +290,56 @@ function buildResult(
     review_status: reviewStatus,
     category_rejected: categoryRejected,
   };
+}
+
+/**
+ * Call AI edge function to categorize unmatched transactions.
+ */
+export async function categorizeWithAI(
+  unmatched: { index: number; description_raw: string; description_normalized: string }[],
+  mode: 'personal' | 'business',
+  ownerId: string,
+  allowedCategories: string[]
+): Promise<Map<number, { category: string | null; confidence: number; explanation: string }>> {
+  const resultMap = new Map<number, { category: string | null; confidence: number; explanation: string }>();
+  if (unmatched.length === 0) return resultMap;
+
+  const batchSize = 20;
+  for (let i = 0; i < unmatched.length; i += batchSize) {
+    const batch = unmatched.slice(i, i + batchSize);
+    const descriptions = batch.map((item, idx) => ({
+      index: idx,
+      raw: item.description_raw,
+      normalized: item.description_normalized,
+    }));
+
+    try {
+      const { data, error } = await supabase.functions.invoke('categorize-ai', {
+        body: { descriptions, allowedCategories, mode },
+      });
+
+      if (error) {
+        console.error('AI categorization error:', error);
+        continue;
+      }
+
+      const results = data?.results || [];
+      for (const r of results) {
+        const originalItem = batch[r.index];
+        if (originalItem) {
+          resultMap.set(originalItem.index, {
+            category: r.category,
+            confidence: r.confidence,
+            explanation: r.explanation,
+          });
+        }
+      }
+    } catch (err) {
+      console.error('AI categorization batch error:', err);
+    }
+  }
+
+  return resultMap;
 }
 
 /**

@@ -223,6 +223,7 @@ export type Database = {
           final_notes: string | null
           id: string
           is_transfer: boolean
+          match_explanation: string | null
           match_source: string | null
           mode: string
           owner_id: string
@@ -253,6 +254,7 @@ export type Database = {
           final_notes?: string | null
           id?: string
           is_transfer?: boolean
+          match_explanation?: string | null
           match_source?: string | null
           mode: string
           owner_id: string
@@ -283,6 +285,7 @@ export type Database = {
           final_notes?: string | null
           id?: string
           is_transfer?: boolean
+          match_explanation?: string | null
           match_source?: string | null
           mode?: string
           owner_id?: string
