@@ -9,6 +9,7 @@ import { Switch } from '@/components/ui/switch';
 import { Slider } from '@/components/ui/slider';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { Plus, Trash2, ChevronDown, Zap, Save } from 'lucide-react';
 import { previewCsvFile, parseCsvFileWithMapping, type ColumnMapping, type ParsePreview } from '@/lib/csv-parser';
 import { updateMerchantMemory } from '@/lib/categorization-engine';
@@ -141,30 +142,37 @@ export default function SettingsPage() {
     setSeedDialogOpen(false);
     if (!seedFile) return;
     const mode = seedMode;
-    const setLoading = mode === 'personal' ? setSeedingPersonal : setSeedingBusiness;
+    const isIncome = seedLabel.toLowerCase().includes('income');
+    const setLoading = isIncome
+      ? (mode === 'personal' ? setSeedingPersonalIncome : setSeedingBusinessIncome)
+      : (mode === 'personal' ? setSeedingPersonal : setSeedingBusiness);
     setLoading(true);
     try {
       const parsed = await parseCsvFileWithMapping(seedFile, mapping);
-      const merchantMap = new Map<string, { category: string; method: string | null; notes: string | null; raw: string; count: number }>();
+      const merchantMap = new Map<string, { category: string | null; method: string | null; notes: string | null; raw: string; count: number }>();
       const categorySet = new Set<string>();
       for (const tx of parsed) {
-        if (tx.category) {
-          categorySet.add(tx.category);
-          const existing = merchantMap.get(tx.merchant_key);
-          if (existing) existing.count++; else merchantMap.set(tx.merchant_key, { category: tx.category, method: tx.method, notes: tx.notes, raw: tx.description_raw, count: 1 });
-        }
+        if (tx.category) categorySet.add(tx.category);
+        const existing = merchantMap.get(tx.merchant_key);
+        if (existing) existing.count++;
+        else merchantMap.set(tx.merchant_key, { category: tx.category || null, method: tx.method, notes: tx.notes, raw: tx.description_raw, count: 1 });
       }
-      const existingCats = mode === 'personal' ? personalCats : businessCats;
-      const existingNames = new Set(existingCats.map(c => c.category_name));
-      const newCategories = [...categorySet].filter(c => !existingNames.has(c));
-      if (newCategories.length > 0) {
-        await supabase.from('category_options').insert(newCategories.map((name, i) => ({ mode, category_name: name, sort_order: existingCats.length + i, owner_id: user!.id })));
+      // Only insert categories for expense CSVs (not income)
+      let newCatCount = 0;
+      if (!isIncome && categorySet.size > 0) {
+        const existingCats = mode === 'personal' ? personalCats : businessCats;
+        const existingNames = new Set(existingCats.map(c => c.category_name));
+        const newCategories = [...categorySet].filter(c => !existingNames.has(c));
+        newCatCount = newCategories.length;
+        if (newCategories.length > 0) {
+          await supabase.from('category_options').insert(newCategories.map((name, i) => ({ mode, category_name: name, sort_order: existingCats.length + i, owner_id: user!.id })));
+        }
       }
       for (const [key, data] of merchantMap) {
         await updateMerchantMemory(key, mode, data.category, data.method, data.notes, data.raw, user!.id);
       }
       await loadCategories();
-      toast.success(`Seeded ${merchantMap.size} merchants and ${newCategories.length} new categories from ${parsed.length} transactions`);
+      toast.success(`Seeded ${merchantMap.size} merchants${!isIncome ? ` and ${newCatCount} new categories` : ''} from ${parsed.length} transactions`);
     } catch (err: any) { toast.error(err.message); }
     finally { setLoading(false); }
   };
@@ -173,6 +181,17 @@ export default function SettingsPage() {
     setSeedDialogOpen(false);
     setSeedFile(null);
     setSeedPreview(null);
+  };
+
+  const clearSeededData = async (mode: 'personal' | 'business') => {
+    try {
+      await supabase.from('merchant_memory').delete().eq('owner_id', user!.id).eq('mode', mode);
+      await supabase.from('category_options').delete().eq('owner_id', user!.id).eq('mode', mode);
+      await loadCategories();
+      toast.success(`Cleared all ${mode} merchant memory and categories`);
+    } catch (err: any) {
+      toast.error(`Failed to clear: ${err.message}`);
+    }
   };
 
   // Rules functions
