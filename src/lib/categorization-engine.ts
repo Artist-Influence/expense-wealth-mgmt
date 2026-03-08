@@ -25,7 +25,8 @@ export interface CategorizationResult {
   predicted_method: string | null;
   predicted_notes: string | null;
   confidence: number;
-  match_source: 'exact_history' | 'normalized_history' | 'rule' | 'ai' | null;
+  match_source: 'exact_history' | 'normalized_history' | 'partial_history' | 'rule' | 'ai' | null;
+  match_explanation: string;
   review_status: 'auto_categorized' | 'suggested' | 'needs_review';
   category_rejected: boolean;
 }
@@ -43,7 +44,6 @@ function validateCategory(
   allowedSet: Set<string>
 ): { category: string | null; wasRejected: boolean } {
   if (!category) return { category: null, wasRejected: false };
-  // Case-insensitive lookup: find the canonical version from the allowed set
   const lower = category.toLowerCase();
   for (const allowed of allowedSet) {
     if (allowed.toLowerCase() === lower) {
@@ -51,6 +51,75 @@ function validateCategory(
     }
   }
   return { category: null, wasRejected: true };
+}
+
+/**
+ * Try to find a partial/fuzzy match in merchant memory.
+ * Returns the best match if one side contains the other.
+ */
+function findPartialMemoryMatch(
+  merchantKey: string,
+  rawDescription: string,
+  memoryMap: Map<string, MerchantMemoryRecord>
+): MerchantMemoryRecord | null {
+  if (!merchantKey && !rawDescription) return null;
+
+  const keyUpper = (merchantKey || '').toUpperCase();
+  const rawUpper = (rawDescription || '').toUpperCase();
+  let bestMatch: MerchantMemoryRecord | null = null;
+  let bestScore = 0;
+
+  for (const [memKey, record] of memoryMap) {
+    const memUpper = memKey.toUpperCase();
+
+    // Skip very short keys to avoid false positives
+    if (memUpper.length < 3) continue;
+
+    let score = 0;
+
+    // Check if merchant key contains memory key or vice versa
+    if (keyUpper && keyUpper.length >= 3) {
+      if (keyUpper.includes(memUpper)) {
+        score = Math.max(score, memUpper.length / keyUpper.length * 100);
+      } else if (memUpper.includes(keyUpper)) {
+        score = Math.max(score, keyUpper.length / memUpper.length * 100);
+      }
+    }
+
+    // Check if raw description contains the memory key
+    if (rawUpper.includes(memUpper) && memUpper.length >= 4) {
+      score = Math.max(score, 60 + memUpper.length); // Longer matches score higher
+    }
+
+    if (score > bestScore && score >= 50) {
+      bestScore = score;
+      bestMatch = record;
+    }
+  }
+
+  return bestMatch;
+}
+
+/**
+ * Calculate confidence with boosted scoring for consistent history.
+ */
+function calculateHistoryConfidence(record: MerchantMemoryRecord): number {
+  const baseWeight = record.confidence_weight || 80;
+  const timesSeen = record.times_seen || 1;
+
+  // More aggressive confidence boost based on times_seen
+  let timesBonus: number;
+  if (timesSeen >= 5) {
+    timesBonus = 15; // 5+ consistent matches → strong auto-suggest
+  } else if (timesSeen >= 3) {
+    timesBonus = 10; // 3+ → reliable suggest
+  } else if (timesSeen >= 2) {
+    timesBonus = 5;
+  } else {
+    timesBonus = 0;
+  }
+
+  return Math.min(baseWeight + timesBonus, 99);
 }
 
 export async function categorizeTransactions(
@@ -61,6 +130,7 @@ export async function categorizeTransactions(
   allowedCategories: string[] = []
 ): Promise<CategorizationResult[]> {
   const allowedSet = new Set(allowedCategories);
+
   // Load merchant memory for this mode
   const { data: memoryData } = await supabase
     .from('merchant_memory')
@@ -85,50 +155,62 @@ export async function categorizeTransactions(
   const rules = (rulesData || []) as RuleRecord[];
 
   return transactions.map(tx => {
-    // Layer 1: Historical Memory
     const merchantKey = tx.merchant_key || generateMerchantKey(tx.description_normalized);
-    const memory = memoryMap.get(merchantKey);
 
+    // Layer 1: Exact merchant memory match
+    const memory = memoryMap.get(merchantKey);
     if (memory && memory.most_common_category) {
-      const baseConfidence = Math.min(memory.confidence_weight, 99);
-      const timesBonus = Math.min(memory.times_seen * 2, 10);
-      const confidence = Math.min(baseConfidence + timesBonus, 99);
-      
+      const confidence = calculateHistoryConfidence(memory);
       const rawCategory = remapCategory(memory.most_common_category, tx.description_raw);
       const validated = allowedSet.size > 0 ? validateCategory(rawCategory, allowedSet) : { category: rawCategory, wasRejected: false };
 
       if (validated.wasRejected) {
-        return buildResult(null, memory.most_common_method, memory.default_note_template, 0, memory.times_seen > 1 ? 'exact_history' : 'normalized_history', thresholds, true);
+        return buildResult(null, memory.most_common_method, memory.default_note_template, 0,
+          memory.times_seen > 1 ? 'exact_history' : 'normalized_history', thresholds, true,
+          `Exact merchant key "${merchantKey}" matched but category "${rawCategory}" not in allowed list`);
       }
 
-      return buildResult(
-        validated.category,
-        memory.most_common_method,
-        memory.default_note_template,
-        confidence,
-        memory.times_seen > 1 ? 'exact_history' : 'normalized_history',
-        thresholds
-      );
+      const source = memory.times_seen > 1 ? 'exact_history' : 'normalized_history';
+      return buildResult(validated.category, memory.most_common_method, memory.default_note_template,
+        confidence, source, thresholds, false,
+        `Exact merchant key "${merchantKey}" matched (seen ${memory.times_seen}x, confidence ${confidence})`);
     }
 
-    // Layer 2: Rules Engine
+    // Layer 1.5: Partial/fuzzy merchant memory match
+    const partialMatch = findPartialMemoryMatch(merchantKey, tx.description_raw, memoryMap);
+    if (partialMatch && partialMatch.most_common_category) {
+      // Lower confidence for partial matches, but still boost for high times_seen
+      const baseConfidence = Math.min(calculateHistoryConfidence(partialMatch) - 10, 89);
+      const confidence = Math.max(baseConfidence, 65);
+
+      const rawCategory = remapCategory(partialMatch.most_common_category, tx.description_raw);
+      const validated = allowedSet.size > 0 ? validateCategory(rawCategory, allowedSet) : { category: rawCategory, wasRejected: false };
+
+      if (validated.wasRejected) {
+        return buildResult(null, partialMatch.most_common_method, partialMatch.default_note_template, 0,
+          'partial_history', thresholds, true,
+          `Partial match to "${partialMatch.merchant_key}" but category "${rawCategory}" not in allowed list`);
+      }
+
+      return buildResult(validated.category, partialMatch.most_common_method, partialMatch.default_note_template,
+        confidence, 'partial_history', thresholds, false,
+        `Partial match to merchant key "${partialMatch.merchant_key}" (seen ${partialMatch.times_seen}x)`);
+    }
+
+    // Layer 2: Rules Engine — check both normalized AND raw description
     for (const rule of rules) {
       if (matchesRule(tx.description_normalized, tx.description_raw, rule)) {
         const rawCategory = rule.category_output ? remapCategory(rule.category_output, tx.description_raw) : null;
         const validated = allowedSet.size > 0 && rawCategory ? validateCategory(rawCategory, allowedSet) : { category: rawCategory, wasRejected: false };
 
         if (validated.wasRejected) {
-          return buildResult(null, rule.method_output, rule.notes_output, 0, 'rule', thresholds, true);
+          return buildResult(null, rule.method_output, rule.notes_output, 0, 'rule', thresholds, true,
+            `Rule "${rule.pattern}" matched but category "${rawCategory}" not in allowed list`);
         }
 
-        return buildResult(
-          validated.category,
-          rule.method_output,
-          rule.notes_output,
-          85,
-          'rule',
-          thresholds
-        );
+        return buildResult(validated.category, rule.method_output, rule.notes_output,
+          85, 'rule', thresholds, false,
+          `Rule match: "${rule.match_type}" pattern "${rule.pattern}"`);
       }
     }
 
@@ -138,36 +220,36 @@ export async function categorizeTransactions(
       const validated = allowedSet.size > 0 ? validateCategory(rawCategory, allowedSet) : { category: rawCategory, wasRejected: false };
 
       if (validated.wasRejected) {
-        return buildResult(null, tx.method, tx.notes, 0, 'exact_history', thresholds, true);
+        return buildResult(null, tx.method, tx.notes, 0, 'exact_history', thresholds, true,
+          `CSV category "${rawCategory}" not in allowed list`);
       }
 
-      return buildResult(
-        validated.category,
-        tx.method,
-        tx.notes,
-        75,
-        'exact_history',
-        thresholds
-      );
+      return buildResult(validated.category, tx.method, tx.notes,
+        75, 'exact_history', thresholds, false,
+        `Category from CSV data: "${rawCategory}"`);
     }
 
     // No match
-    return buildResult(null, null, null, 0, null, thresholds);
+    return buildResult(null, null, null, 0, null, thresholds, false,
+      'No historical, rule, or CSV match found');
   });
 }
 
 function matchesRule(normalized: string, raw: string, rule: RuleRecord): boolean {
-  const target = normalized || raw;
   const pattern = rule.pattern.toUpperCase();
+
+  // Check against both normalized and raw descriptions
+  const targets = [normalized, raw].filter(Boolean);
 
   switch (rule.match_type) {
     case 'contains':
-      return target.toUpperCase().includes(pattern);
+      return targets.some(t => t.toUpperCase().includes(pattern));
     case 'equals':
-      return target.toUpperCase() === pattern;
+      return targets.some(t => t.toUpperCase() === pattern);
     case 'regex':
       try {
-        return new RegExp(rule.pattern, 'i').test(target);
+        const re = new RegExp(rule.pattern, 'i');
+        return targets.some(t => re.test(t));
       } catch {
         return false;
       }
@@ -183,10 +265,11 @@ function buildResult(
   confidence: number,
   matchSource: CategorizationResult['match_source'],
   thresholds: Thresholds,
-  categoryRejected: boolean = false
+  categoryRejected: boolean = false,
+  matchExplanation: string = ''
 ): CategorizationResult {
   let reviewStatus: CategorizationResult['review_status'];
-  
+
   if (categoryRejected) {
     reviewStatus = 'needs_review';
   } else if (confidence >= thresholds.auto) {
@@ -203,6 +286,7 @@ function buildResult(
     predicted_notes: notes,
     confidence,
     match_source: matchSource,
+    match_explanation: matchExplanation,
     review_status: reviewStatus,
     category_rejected: categoryRejected,
   };
@@ -229,7 +313,8 @@ export async function updateMerchantMemory(
     .maybeSingle();
 
   if (existing) {
-    const newWeight = Math.min((existing.confidence_weight || 80) + 2, 99);
+    // Boost confidence more aggressively on manual approval
+    const newWeight = Math.min((existing.confidence_weight || 80) + 3, 99);
     await supabase
       .from('merchant_memory')
       .update({
@@ -252,7 +337,7 @@ export async function updateMerchantMemory(
         most_common_method: method,
         default_note_template: notes,
         times_seen: 1,
-        confidence_weight: 80,
+        confidence_weight: 82, // Start slightly higher for manual approvals
         owner_id: ownerId,
       });
   }
