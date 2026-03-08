@@ -10,8 +10,9 @@ import { Slider } from '@/components/ui/slider';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Plus, Trash2, ChevronDown, Zap, Save } from 'lucide-react';
-import { parseCsvFile } from '@/lib/csv-parser';
+import { previewCsvFile, parseCsvFileWithMapping, type ColumnMapping, type ParsePreview } from '@/lib/csv-parser';
 import { updateMerchantMemory } from '@/lib/categorization-engine';
+import { SeedMappingDialog } from '@/components/SeedMappingDialog';
 
 interface CategoryOption {
   id: string; mode: string; category_name: string; sort_order: number; is_active: boolean;
@@ -53,6 +54,13 @@ export default function SettingsPage() {
   const [seedingBusiness, setSeedingBusiness] = useState(false);
   const [seedingPersonalIncome, setSeedingPersonalIncome] = useState(false);
   const [seedingBusinessIncome, setSeedingBusinessIncome] = useState(false);
+
+  // Seed mapping dialog state
+  const [seedDialogOpen, setSeedDialogOpen] = useState(false);
+  const [seedPreview, setSeedPreview] = useState<ParsePreview | null>(null);
+  const [seedFile, setSeedFile] = useState<File | null>(null);
+  const [seedMode, setSeedMode] = useState<'personal' | 'business'>('personal');
+  const [seedLabel, setSeedLabel] = useState('');
 
   // Rules state
   const [rules, setRules] = useState<Rule[]>([]);
@@ -116,10 +124,27 @@ export default function SettingsPage() {
     toast.success('Settings saved');
   };
 
-  const handleSeedImport = async (file: File, mode: 'personal' | 'business') => {
-    if (mode === 'personal') setSeedingPersonal(true); else setSeedingBusiness(true);
+  const handleSeedFileSelected = async (file: File, mode: 'personal' | 'business', label: string) => {
     try {
-      const parsed = await parseCsvFile(file);
+      const preview = await previewCsvFile(file);
+      setSeedPreview(preview);
+      setSeedFile(file);
+      setSeedMode(mode);
+      setSeedLabel(label);
+      setSeedDialogOpen(true);
+    } catch (err: any) {
+      toast.error(`Failed to read CSV: ${err.message}`);
+    }
+  };
+
+  const handleSeedConfirm = async (mapping: ColumnMapping) => {
+    setSeedDialogOpen(false);
+    if (!seedFile) return;
+    const mode = seedMode;
+    const setLoading = mode === 'personal' ? setSeedingPersonal : setSeedingBusiness;
+    setLoading(true);
+    try {
+      const parsed = await parseCsvFileWithMapping(seedFile, mapping);
       const merchantMap = new Map<string, { category: string; method: string | null; notes: string | null; raw: string; count: number }>();
       const categorySet = new Set<string>();
       for (const tx of parsed) {
@@ -139,9 +164,15 @@ export default function SettingsPage() {
         await updateMerchantMemory(key, mode, data.category, data.method, data.notes, data.raw, user!.id);
       }
       await loadCategories();
-      toast.success(`Seeded ${merchantMap.size} merchants and ${newCategories.length} categories`);
+      toast.success(`Seeded ${merchantMap.size} merchants and ${newCategories.length} new categories from ${parsed.length} transactions`);
     } catch (err: any) { toast.error(err.message); }
-    finally { if (mode === 'personal') setSeedingPersonal(false); else setSeedingBusiness(false); }
+    finally { setLoading(false); }
+  };
+
+  const handleSeedCancel = () => {
+    setSeedDialogOpen(false);
+    setSeedFile(null);
+    setSeedPreview(null);
   };
 
   // Rules functions
@@ -275,12 +306,12 @@ export default function SettingsPage() {
                 <h4 className="text-xs font-medium text-foreground">Personal</h4>
                 <div>
                   <label className="text-[11px] text-muted-foreground mb-1 block">Expenses CSV</label>
-                  <input type="file" accept=".csv" disabled={seedingPersonal} onChange={e => e.target.files?.[0] && handleSeedImport(e.target.files[0], 'personal')} className="text-xs text-muted-foreground file:mr-2 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-primary/10 file:text-primary hover:file:bg-primary/20 cursor-pointer" />
+                  <input type="file" accept=".csv" disabled={seedingPersonal} onChange={e => e.target.files?.[0] && handleSeedFileSelected(e.target.files[0], 'personal', 'Personal Expenses')} className="text-xs text-muted-foreground file:mr-2 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-primary/10 file:text-primary hover:file:bg-primary/20 cursor-pointer" />
                   {seedingPersonal && <p className="text-xs text-primary mt-1 animate-pulse">Processing...</p>}
                 </div>
                 <div>
                   <label className="text-[11px] text-muted-foreground mb-1 block">Income CSV</label>
-                  <input type="file" accept=".csv" disabled={seedingPersonalIncome} onChange={e => { if (e.target.files?.[0]) { setSeedingPersonalIncome(true); handleSeedImport(e.target.files[0], 'personal').finally(() => setSeedingPersonalIncome(false)); }}} className="text-xs text-muted-foreground file:mr-2 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-primary/10 file:text-primary hover:file:bg-primary/20 cursor-pointer" />
+                  <input type="file" accept=".csv" disabled={seedingPersonalIncome} onChange={e => e.target.files?.[0] && handleSeedFileSelected(e.target.files[0], 'personal', 'Personal Income')} className="text-xs text-muted-foreground file:mr-2 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-primary/10 file:text-primary hover:file:bg-primary/20 cursor-pointer" />
                   {seedingPersonalIncome && <p className="text-xs text-primary mt-1 animate-pulse">Processing...</p>}
                 </div>
               </div>
@@ -288,17 +319,26 @@ export default function SettingsPage() {
                 <h4 className="text-xs font-medium text-foreground">Business</h4>
                 <div>
                   <label className="text-[11px] text-muted-foreground mb-1 block">Expenses CSV</label>
-                  <input type="file" accept=".csv" disabled={seedingBusiness} onChange={e => e.target.files?.[0] && handleSeedImport(e.target.files[0], 'business')} className="text-xs text-muted-foreground file:mr-2 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-primary/10 file:text-primary hover:file:bg-primary/20 cursor-pointer" />
+                  <input type="file" accept=".csv" disabled={seedingBusiness} onChange={e => e.target.files?.[0] && handleSeedFileSelected(e.target.files[0], 'business', 'Business Expenses')} className="text-xs text-muted-foreground file:mr-2 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-primary/10 file:text-primary hover:file:bg-primary/20 cursor-pointer" />
                   {seedingBusiness && <p className="text-xs text-primary mt-1 animate-pulse">Processing...</p>}
                 </div>
                 <div>
                   <label className="text-[11px] text-muted-foreground mb-1 block">Income CSV</label>
-                  <input type="file" accept=".csv" disabled={seedingBusinessIncome} onChange={e => { if (e.target.files?.[0]) { setSeedingBusinessIncome(true); handleSeedImport(e.target.files[0], 'business').finally(() => setSeedingBusinessIncome(false)); }}} className="text-xs text-muted-foreground file:mr-2 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-primary/10 file:text-primary hover:file:bg-primary/20 cursor-pointer" />
+                  <input type="file" accept=".csv" disabled={seedingBusinessIncome} onChange={e => e.target.files?.[0] && handleSeedFileSelected(e.target.files[0], 'business', 'Business Income')} className="text-xs text-muted-foreground file:mr-2 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-primary/10 file:text-primary hover:file:bg-primary/20 cursor-pointer" />
                   {seedingBusinessIncome && <p className="text-xs text-primary mt-1 animate-pulse">Processing...</p>}
                 </div>
               </div>
             </div>
           </div>
+
+          <SeedMappingDialog
+            open={seedDialogOpen}
+            preview={seedPreview}
+            mode={seedMode}
+            label={seedLabel}
+            onConfirm={handleSeedConfirm}
+            onCancel={handleSeedCancel}
+          />
 
           {/* Advanced Rules */}
           <Collapsible open={rulesOpen} onOpenChange={setRulesOpen}>
