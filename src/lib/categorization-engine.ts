@@ -27,6 +27,7 @@ export interface CategorizationResult {
   confidence: number;
   match_source: 'exact_history' | 'normalized_history' | 'rule' | 'ai' | null;
   review_status: 'auto_categorized' | 'suggested' | 'needs_review';
+  category_rejected: boolean;
 }
 
 interface Thresholds {
@@ -34,12 +35,32 @@ interface Thresholds {
   suggest: number;
 }
 
+/**
+ * Validate a category against the allowed set (case-insensitive).
+ */
+function validateCategory(
+  category: string | null,
+  allowedSet: Set<string>
+): { category: string | null; wasRejected: boolean } {
+  if (!category) return { category: null, wasRejected: false };
+  // Case-insensitive lookup: find the canonical version from the allowed set
+  const lower = category.toLowerCase();
+  for (const allowed of allowedSet) {
+    if (allowed.toLowerCase() === lower) {
+      return { category: allowed, wasRejected: false };
+    }
+  }
+  return { category: null, wasRejected: true };
+}
+
 export async function categorizeTransactions(
   transactions: ParsedTransaction[],
   mode: 'personal' | 'business',
   ownerId: string,
-  thresholds: Thresholds = { auto: 90, suggest: 70 }
+  thresholds: Thresholds = { auto: 90, suggest: 70 },
+  allowedCategories: string[] = []
 ): Promise<CategorizationResult[]> {
+  const allowedSet = new Set(allowedCategories);
   // Load merchant memory for this mode
   const { data: memoryData } = await supabase
     .from('merchant_memory')
@@ -73,10 +94,15 @@ export async function categorizeTransactions(
       const timesBonus = Math.min(memory.times_seen * 2, 10);
       const confidence = Math.min(baseConfidence + timesBonus, 99);
       
-      const category = remapCategory(memory.most_common_category, tx.description_raw);
+      const rawCategory = remapCategory(memory.most_common_category, tx.description_raw);
+      const validated = allowedSet.size > 0 ? validateCategory(rawCategory, allowedSet) : { category: rawCategory, wasRejected: false };
+
+      if (validated.wasRejected) {
+        return buildResult(null, memory.most_common_method, memory.default_note_template, 0, memory.times_seen > 1 ? 'exact_history' : 'normalized_history', thresholds, true);
+      }
 
       return buildResult(
-        category,
+        validated.category,
         memory.most_common_method,
         memory.default_note_template,
         confidence,
@@ -88,9 +114,15 @@ export async function categorizeTransactions(
     // Layer 2: Rules Engine
     for (const rule of rules) {
       if (matchesRule(tx.description_normalized, tx.description_raw, rule)) {
-        const category = rule.category_output ? remapCategory(rule.category_output, tx.description_raw) : null;
+        const rawCategory = rule.category_output ? remapCategory(rule.category_output, tx.description_raw) : null;
+        const validated = allowedSet.size > 0 && rawCategory ? validateCategory(rawCategory, allowedSet) : { category: rawCategory, wasRejected: false };
+
+        if (validated.wasRejected) {
+          return buildResult(null, rule.method_output, rule.notes_output, 0, 'rule', thresholds, true);
+        }
+
         return buildResult(
-          category,
+          validated.category,
           rule.method_output,
           rule.notes_output,
           85,
@@ -102,9 +134,15 @@ export async function categorizeTransactions(
 
     // Layer 3: Use CSV-provided category if available
     if (tx.category) {
-      const category = remapCategory(tx.category, tx.description_raw);
+      const rawCategory = remapCategory(tx.category, tx.description_raw);
+      const validated = allowedSet.size > 0 ? validateCategory(rawCategory, allowedSet) : { category: rawCategory, wasRejected: false };
+
+      if (validated.wasRejected) {
+        return buildResult(null, tx.method, tx.notes, 0, 'exact_history', thresholds, true);
+      }
+
       return buildResult(
-        category,
+        validated.category,
         tx.method,
         tx.notes,
         75,
@@ -144,11 +182,14 @@ function buildResult(
   notes: string | null,
   confidence: number,
   matchSource: CategorizationResult['match_source'],
-  thresholds: Thresholds
+  thresholds: Thresholds,
+  categoryRejected: boolean = false
 ): CategorizationResult {
   let reviewStatus: CategorizationResult['review_status'];
   
-  if (confidence >= thresholds.auto) {
+  if (categoryRejected) {
+    reviewStatus = 'needs_review';
+  } else if (confidence >= thresholds.auto) {
     reviewStatus = 'auto_categorized';
   } else if (confidence >= thresholds.suggest) {
     reviewStatus = 'suggested';
@@ -163,6 +204,7 @@ function buildResult(
     confidence,
     match_source: matchSource,
     review_status: reviewStatus,
+    category_rejected: categoryRejected,
   };
 }
 
