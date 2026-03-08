@@ -10,10 +10,81 @@ import { Slider } from '@/components/ui/slider';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
-import { Plus, Trash2, ChevronDown, Zap, Save } from 'lucide-react';
+import { Plus, Trash2, ChevronDown, Zap, Save, Wand2 } from 'lucide-react';
 import { previewCsvFile, parseCsvFileWithMapping, type ColumnMapping, type ParsePreview } from '@/lib/csv-parser';
 import { updateMerchantMemory } from '@/lib/categorization-engine';
 import { SeedMappingDialog } from '@/components/SeedMappingDialog';
+
+const STOP_WORDS = new Set(['THE', 'AND', 'INC', 'LLC', 'LTD', 'FOR', 'FROM', 'WITH', 'COM', 'WWW', 'HTTP', 'HTTPS', 'NET', 'ORG', 'CO', 'USA', 'TST', 'SQ', 'POS', 'DES', 'ACH', 'REF', 'TXN', 'PMT', 'CKS', 'INT', 'FEE', 'TAX', 'PRE', 'ATM', 'WEB', 'TEL', 'PPD', 'CCD']);
+
+async function generateRulesFromMerchants(
+  merchants: { key: string; category: string | null; method: string | null }[],
+  mode: string,
+  ownerId: string
+): Promise<number> {
+  // Group by category
+  const catGroups = new Map<string, string[]>();
+  for (const m of merchants) {
+    if (!m.category) continue;
+    const list = catGroups.get(m.category) || [];
+    list.push(m.key);
+    catGroups.set(m.category, list);
+  }
+
+  // Load existing rules to avoid duplicates
+  const { data: existingRules } = await supabase
+    .from('categorization_rules')
+    .select('pattern, category_output, mode')
+    .eq('owner_id', ownerId);
+  const existingSet = new Set(
+    (existingRules || []).map(r => `${r.pattern?.toUpperCase()}|${r.category_output}|${r.mode}`)
+  );
+
+  const newRules: Array<{
+    rule_name: string; mode: string; match_type: string; pattern: string;
+    category_output: string; priority: number; is_active: boolean; owner_id: string;
+  }> = [];
+
+  for (const [category, keys] of catGroups) {
+    if (keys.length < 2) continue;
+    // Tokenize all keys
+    const wordCounts = new Map<string, number>();
+    for (const key of keys) {
+      const words = key.toUpperCase().split(/[^A-Z0-9]+/).filter(w => w.length >= 3 && !STOP_WORDS.has(w));
+      const unique = new Set(words);
+      for (const w of unique) {
+        wordCounts.set(w, (wordCounts.get(w) || 0) + 1);
+      }
+    }
+    // Keep words appearing in 2+ merchants
+    for (const [word, count] of wordCounts) {
+      if (count < 2) continue;
+      const dupeKey = `${word}|${category}|${mode}`;
+      const dupeKeyBoth = `${word}|${category}|both`;
+      if (existingSet.has(dupeKey) || existingSet.has(dupeKeyBoth)) continue;
+      existingSet.add(dupeKey);
+      newRules.push({
+        rule_name: `Auto: ${word} → ${category}`,
+        mode,
+        match_type: 'contains',
+        pattern: word,
+        category_output: category,
+        priority: 200,
+        is_active: true,
+        owner_id: ownerId,
+      });
+    }
+  }
+
+  if (newRules.length > 0) {
+    // Insert in batches of 50
+    for (let i = 0; i < newRules.length; i += 50) {
+      await supabase.from('categorization_rules').insert(newRules.slice(i, i + 50));
+    }
+  }
+
+  return newRules.length;
+}
 
 interface CategoryOption {
   id: string; mode: string; category_name: string; sort_order: number; is_active: boolean;
@@ -171,8 +242,17 @@ export default function SettingsPage() {
       for (const [key, data] of merchantMap) {
         await updateMerchantMemory(key, mode, data.category, data.method, data.notes, data.raw, user!.id);
       }
+      // Auto-generate rules from seeded merchants (expenses only)
+      let ruleCount = 0;
+      if (!isIncome) {
+        const merchantsForRules = [...merchantMap.entries()].map(([key, data]) => ({
+          key, category: data.category, method: data.method,
+        }));
+        ruleCount = await generateRulesFromMerchants(merchantsForRules, mode, user!.id);
+        await loadRules();
+      }
       await loadCategories();
-      toast.success(`Seeded ${merchantMap.size} merchants${!isIncome ? ` and ${newCatCount} new categories` : ''} from ${parsed.length} transactions`);
+      toast.success(`Seeded ${merchantMap.size} merchants${!isIncome ? `, ${newCatCount} new categories, ${ruleCount} auto-rules` : ''} from ${parsed.length} transactions`);
     } catch (err: any) { toast.error(err.message); }
     finally { setLoading(false); }
   };
@@ -187,10 +267,41 @@ export default function SettingsPage() {
     try {
       await supabase.from('merchant_memory').delete().eq('owner_id', user!.id).eq('mode', mode);
       await supabase.from('category_options').delete().eq('owner_id', user!.id).eq('mode', mode);
+      await supabase.from('categorization_rules').delete().eq('owner_id', user!.id).eq('mode', mode).eq('priority', 200);
       await loadCategories();
-      toast.success(`Cleared all ${mode} merchant memory and categories`);
+      await loadRules();
+      toast.success(`Cleared all ${mode} merchant memory, categories, and auto-generated rules`);
     } catch (err: any) {
       toast.error(`Failed to clear: ${err.message}`);
+    }
+  };
+
+  const [generatingRules, setGeneratingRules] = useState(false);
+
+  const handleGenerateRulesFromMemory = async (mode: 'personal' | 'business') => {
+    setGeneratingRules(true);
+    try {
+      const { data: merchants } = await supabase
+        .from('merchant_memory')
+        .select('merchant_key, most_common_category, most_common_method')
+        .eq('owner_id', user!.id)
+        .eq('mode', mode);
+      if (!merchants || merchants.length === 0) {
+        toast.error(`No ${mode} merchant memory found. Seed historical data first.`);
+        return;
+      }
+      const mapped = merchants.map(m => ({
+        key: m.merchant_key,
+        category: m.most_common_category,
+        method: m.most_common_method,
+      }));
+      const count = await generateRulesFromMerchants(mapped, mode, user!.id);
+      await loadRules();
+      toast.success(`Generated ${count} new auto-rules from ${merchants.length} ${mode} merchants`);
+    } catch (err: any) {
+      toast.error(err.message);
+    } finally {
+      setGeneratingRules(false);
     }
   };
 
@@ -385,6 +496,15 @@ export default function SettingsPage() {
                   {seedingBusinessIncome && <p className="text-xs text-primary mt-1 animate-pulse">Processing...</p>}
                 </div>
               </div>
+            </div>
+            <div className="flex gap-2 mt-3">
+              <Button size="sm" variant="outline" className="h-7 text-xs gap-1" disabled={generatingRules} onClick={() => handleGenerateRulesFromMemory('personal')}>
+                <Wand2 className="h-3 w-3" /> Generate Personal Rules
+              </Button>
+              <Button size="sm" variant="outline" className="h-7 text-xs gap-1" disabled={generatingRules} onClick={() => handleGenerateRulesFromMemory('business')}>
+                <Wand2 className="h-3 w-3" /> Generate Business Rules
+              </Button>
+              {generatingRules && <span className="text-xs text-primary animate-pulse self-center">Generating...</span>}
             </div>
           </div>
 
