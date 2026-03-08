@@ -9,6 +9,7 @@ import { Switch } from '@/components/ui/switch';
 import { Slider } from '@/components/ui/slider';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { Plus, Trash2, ChevronDown, Zap, Save } from 'lucide-react';
 import { previewCsvFile, parseCsvFileWithMapping, type ColumnMapping, type ParsePreview } from '@/lib/csv-parser';
 import { updateMerchantMemory } from '@/lib/categorization-engine';
@@ -141,30 +142,37 @@ export default function SettingsPage() {
     setSeedDialogOpen(false);
     if (!seedFile) return;
     const mode = seedMode;
-    const setLoading = mode === 'personal' ? setSeedingPersonal : setSeedingBusiness;
+    const isIncome = seedLabel.toLowerCase().includes('income');
+    const setLoading = isIncome
+      ? (mode === 'personal' ? setSeedingPersonalIncome : setSeedingBusinessIncome)
+      : (mode === 'personal' ? setSeedingPersonal : setSeedingBusiness);
     setLoading(true);
     try {
       const parsed = await parseCsvFileWithMapping(seedFile, mapping);
-      const merchantMap = new Map<string, { category: string; method: string | null; notes: string | null; raw: string; count: number }>();
+      const merchantMap = new Map<string, { category: string | null; method: string | null; notes: string | null; raw: string; count: number }>();
       const categorySet = new Set<string>();
       for (const tx of parsed) {
-        if (tx.category) {
-          categorySet.add(tx.category);
-          const existing = merchantMap.get(tx.merchant_key);
-          if (existing) existing.count++; else merchantMap.set(tx.merchant_key, { category: tx.category, method: tx.method, notes: tx.notes, raw: tx.description_raw, count: 1 });
-        }
+        if (tx.category) categorySet.add(tx.category);
+        const existing = merchantMap.get(tx.merchant_key);
+        if (existing) existing.count++;
+        else merchantMap.set(tx.merchant_key, { category: tx.category || null, method: tx.method, notes: tx.notes, raw: tx.description_raw, count: 1 });
       }
-      const existingCats = mode === 'personal' ? personalCats : businessCats;
-      const existingNames = new Set(existingCats.map(c => c.category_name));
-      const newCategories = [...categorySet].filter(c => !existingNames.has(c));
-      if (newCategories.length > 0) {
-        await supabase.from('category_options').insert(newCategories.map((name, i) => ({ mode, category_name: name, sort_order: existingCats.length + i, owner_id: user!.id })));
+      // Only insert categories for expense CSVs (not income)
+      let newCatCount = 0;
+      if (!isIncome && categorySet.size > 0) {
+        const existingCats = mode === 'personal' ? personalCats : businessCats;
+        const existingNames = new Set(existingCats.map(c => c.category_name));
+        const newCategories = [...categorySet].filter(c => !existingNames.has(c));
+        newCatCount = newCategories.length;
+        if (newCategories.length > 0) {
+          await supabase.from('category_options').insert(newCategories.map((name, i) => ({ mode, category_name: name, sort_order: existingCats.length + i, owner_id: user!.id })));
+        }
       }
       for (const [key, data] of merchantMap) {
         await updateMerchantMemory(key, mode, data.category, data.method, data.notes, data.raw, user!.id);
       }
       await loadCategories();
-      toast.success(`Seeded ${merchantMap.size} merchants and ${newCategories.length} new categories from ${parsed.length} transactions`);
+      toast.success(`Seeded ${merchantMap.size} merchants${!isIncome ? ` and ${newCatCount} new categories` : ''} from ${parsed.length} transactions`);
     } catch (err: any) { toast.error(err.message); }
     finally { setLoading(false); }
   };
@@ -173,6 +181,17 @@ export default function SettingsPage() {
     setSeedDialogOpen(false);
     setSeedFile(null);
     setSeedPreview(null);
+  };
+
+  const clearSeededData = async (mode: 'personal' | 'business') => {
+    try {
+      await supabase.from('merchant_memory').delete().eq('owner_id', user!.id).eq('mode', mode);
+      await supabase.from('category_options').delete().eq('owner_id', user!.id).eq('mode', mode);
+      await loadCategories();
+      toast.success(`Cleared all ${mode} merchant memory and categories`);
+    } catch (err: any) {
+      toast.error(`Failed to clear: ${err.message}`);
+    }
   };
 
   // Rules functions
@@ -303,7 +322,26 @@ export default function SettingsPage() {
             <p className="text-[11px] text-muted-foreground mb-3">Build merchant memory from historical data. Upload expenses and income separately for each mode.</p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-3">
-                <h4 className="text-xs font-medium text-foreground">Personal</h4>
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-medium text-foreground">Personal</h4>
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button size="sm" variant="ghost" className="h-6 text-[11px] text-destructive/70 hover:text-destructive">
+                        <Trash2 className="h-3 w-3 mr-1" /> Clear
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Clear Personal Seeded Data?</AlertDialogTitle>
+                        <AlertDialogDescription>This will delete all personal merchant memory and categories. You can re-upload CSVs after.</AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction onClick={() => clearSeededData('personal')}>Clear All</AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                </div>
                 <div>
                   <label className="text-[11px] text-muted-foreground mb-1 block">Expenses CSV</label>
                   <input type="file" accept=".csv" disabled={seedingPersonal} onChange={e => e.target.files?.[0] && handleSeedFileSelected(e.target.files[0], 'personal', 'Personal Expenses')} className="text-xs text-muted-foreground file:mr-2 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-primary/10 file:text-primary hover:file:bg-primary/20 cursor-pointer" />
@@ -316,7 +354,26 @@ export default function SettingsPage() {
                 </div>
               </div>
               <div className="space-y-3">
-                <h4 className="text-xs font-medium text-foreground">Business</h4>
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-medium text-foreground">Business</h4>
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button size="sm" variant="ghost" className="h-6 text-[11px] text-destructive/70 hover:text-destructive">
+                        <Trash2 className="h-3 w-3 mr-1" /> Clear
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Clear Business Seeded Data?</AlertDialogTitle>
+                        <AlertDialogDescription>This will delete all business merchant memory and categories. You can re-upload CSVs after.</AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction onClick={() => clearSeededData('business')}>Clear All</AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                </div>
                 <div>
                   <label className="text-[11px] text-muted-foreground mb-1 block">Expenses CSV</label>
                   <input type="file" accept=".csv" disabled={seedingBusiness} onChange={e => e.target.files?.[0] && handleSeedFileSelected(e.target.files[0], 'business', 'Business Expenses')} className="text-xs text-muted-foreground file:mr-2 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-primary/10 file:text-primary hover:file:bg-primary/20 cursor-pointer" />
@@ -336,6 +393,7 @@ export default function SettingsPage() {
             preview={seedPreview}
             mode={seedMode}
             label={seedLabel}
+            isIncome={seedLabel.toLowerCase().includes('income')}
             onConfirm={handleSeedConfirm}
             onCancel={handleSeedCancel}
           />

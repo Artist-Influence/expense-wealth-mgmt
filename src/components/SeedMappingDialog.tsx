@@ -10,6 +10,7 @@ interface SeedMappingDialogProps {
   preview: ParsePreview | null;
   mode: 'personal' | 'business';
   label: string;
+  isIncome?: boolean;
   onConfirm: (mapping: ColumnMapping) => void;
   onCancel: () => void;
 }
@@ -25,7 +26,7 @@ const FIELDS: { key: keyof ColumnMapping; label: string; required: boolean }[] =
   { key: 'notes', label: 'Notes', required: false },
 ];
 
-export function SeedMappingDialog({ open, preview, mode, label, onConfirm, onCancel }: SeedMappingDialogProps) {
+export function SeedMappingDialog({ open, preview, mode, label, isIncome = false, onConfirm, onCancel }: SeedMappingDialogProps) {
   const [mapping, setMapping] = useState<ColumnMapping>(preview?.mapping ?? {
     description: null, amount: null, date: null, category: null, method: null, notes: null,
   });
@@ -39,7 +40,10 @@ export function SeedMappingDialog({ open, preview, mode, label, onConfirm, onCan
 
   if (!preview) return null;
 
-  const missingRequired = FIELDS.filter(f => f.required && !mapping[f.key]);
+  const effectiveFields = FIELDS.map(f =>
+    f.key === 'category' && isIncome ? { ...f, required: false } : f
+  );
+  const missingRequired = effectiveFields.filter(f => f.required && !mapping[f.key]);
 
   return (
     <Dialog open={open} onOpenChange={v => !v && onCancel()}>
@@ -52,7 +56,7 @@ export function SeedMappingDialog({ open, preview, mode, label, onConfirm, onCan
         </DialogHeader>
 
         <div className="space-y-3 py-2">
-          {FIELDS.map(field => (
+          {effectiveFields.map(field => (
             <div key={field.key} className="flex items-center gap-3">
               <Label className="text-xs w-24 shrink-0">
                 {field.label}{field.required && <span className="text-destructive ml-0.5">*</span>}
