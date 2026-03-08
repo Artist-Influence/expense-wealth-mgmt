@@ -51,6 +51,8 @@ export default function SettingsPage() {
   });
   const [seedingPersonal, setSeedingPersonal] = useState(false);
   const [seedingBusiness, setSeedingBusiness] = useState(false);
+  const [seedingPersonalIncome, setSeedingPersonalIncome] = useState(false);
+  const [seedingBusinessIncome, setSeedingBusinessIncome] = useState(false);
 
   // Rules state
   const [rules, setRules] = useState<Rule[]>([]);
@@ -267,17 +269,33 @@ export default function SettingsPage() {
           {/* Historical Seed Import */}
           <div className="glass-panel p-4">
             <h3 className="text-sm font-medium text-foreground mb-3">Import Historical CSV (Seed)</h3>
-            <p className="text-[11px] text-muted-foreground mb-3">Build merchant memory from historical data.</p>
+            <p className="text-[11px] text-muted-foreground mb-3">Build merchant memory from historical data. Upload expenses and income separately for each mode.</p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="text-xs text-muted-foreground mb-2 block">Personal CSV</label>
-                <input type="file" accept=".csv" disabled={seedingPersonal} onChange={e => e.target.files?.[0] && handleSeedImport(e.target.files[0], 'personal')} className="text-xs text-muted-foreground file:mr-2 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-primary/10 file:text-primary hover:file:bg-primary/20 cursor-pointer" />
-                {seedingPersonal && <p className="text-xs text-primary mt-2 animate-pulse">Processing...</p>}
+              <div className="space-y-3">
+                <h4 className="text-xs font-medium text-foreground">Personal</h4>
+                <div>
+                  <label className="text-[11px] text-muted-foreground mb-1 block">Expenses CSV</label>
+                  <input type="file" accept=".csv" disabled={seedingPersonal} onChange={e => e.target.files?.[0] && handleSeedImport(e.target.files[0], 'personal')} className="text-xs text-muted-foreground file:mr-2 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-primary/10 file:text-primary hover:file:bg-primary/20 cursor-pointer" />
+                  {seedingPersonal && <p className="text-xs text-primary mt-1 animate-pulse">Processing...</p>}
+                </div>
+                <div>
+                  <label className="text-[11px] text-muted-foreground mb-1 block">Income CSV</label>
+                  <input type="file" accept=".csv" disabled={seedingPersonalIncome} onChange={e => { if (e.target.files?.[0]) { setSeedingPersonalIncome(true); handleSeedImport(e.target.files[0], 'personal').finally(() => setSeedingPersonalIncome(false)); }}} className="text-xs text-muted-foreground file:mr-2 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-primary/10 file:text-primary hover:file:bg-primary/20 cursor-pointer" />
+                  {seedingPersonalIncome && <p className="text-xs text-primary mt-1 animate-pulse">Processing...</p>}
+                </div>
               </div>
-              <div>
-                <label className="text-xs text-muted-foreground mb-2 block">Business CSV</label>
-                <input type="file" accept=".csv" disabled={seedingBusiness} onChange={e => e.target.files?.[0] && handleSeedImport(e.target.files[0], 'business')} className="text-xs text-muted-foreground file:mr-2 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-primary/10 file:text-primary hover:file:bg-primary/20 cursor-pointer" />
-                {seedingBusiness && <p className="text-xs text-primary mt-2 animate-pulse">Processing...</p>}
+              <div className="space-y-3">
+                <h4 className="text-xs font-medium text-foreground">Business</h4>
+                <div>
+                  <label className="text-[11px] text-muted-foreground mb-1 block">Expenses CSV</label>
+                  <input type="file" accept=".csv" disabled={seedingBusiness} onChange={e => e.target.files?.[0] && handleSeedImport(e.target.files[0], 'business')} className="text-xs text-muted-foreground file:mr-2 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-primary/10 file:text-primary hover:file:bg-primary/20 cursor-pointer" />
+                  {seedingBusiness && <p className="text-xs text-primary mt-1 animate-pulse">Processing...</p>}
+                </div>
+                <div>
+                  <label className="text-[11px] text-muted-foreground mb-1 block">Income CSV</label>
+                  <input type="file" accept=".csv" disabled={seedingBusinessIncome} onChange={e => { if (e.target.files?.[0]) { setSeedingBusinessIncome(true); handleSeedImport(e.target.files[0], 'business').finally(() => setSeedingBusinessIncome(false)); }}} className="text-xs text-muted-foreground file:mr-2 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-primary/10 file:text-primary hover:file:bg-primary/20 cursor-pointer" />
+                  {seedingBusinessIncome && <p className="text-xs text-primary mt-1 animate-pulse">Processing...</p>}
+                </div>
               </div>
             </div>
           </div>
