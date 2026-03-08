@@ -36,11 +36,11 @@ interface CsvRow {
   [key: string]: string;
 }
 
-const DESCRIPTION_CANDIDATES = ['short description', 'description', 'desc', 'merchant', 'name', 'memo', 'transaction description', 'payee'];
+const DESCRIPTION_CANDIDATES = ['short description', 'description', 'desc', 'merchant', 'vendor', 'store', 'name', 'memo', 'transaction description', 'payee'];
 const AMOUNT_CANDIDATES = ['total', 'amount', 'debit', 'credit', 'value', 'sum', 'transaction amount'];
 const DATE_CANDIDATES = ['date & time', 'date', 'transaction date', 'post date', 'posted date', 'trans date'];
-const CATEGORY_CANDIDATES = ['category', 'type', 'expense type', 'expense category'];
-const METHOD_CANDIDATES = ['method', 'payment method', 'card', 'account', 'source'];
+const CATEGORY_CANDIDATES = ['category', 'expense type', 'expense category', 'sub-category', 'subcategory', 'tags'];
+const METHOD_CANDIDATES = ['method', 'payment method', 'card', 'card used', 'paid with', 'account', 'source'];
 const NOTES_CANDIDATES = ['notes', 'note', 'memo', 'comment', 'comments', 'reference'];
 
 const STATEMENT_ARTIFACT_PATTERNS = [
