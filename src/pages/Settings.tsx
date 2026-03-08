@@ -10,10 +10,81 @@ import { Slider } from '@/components/ui/slider';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
-import { Plus, Trash2, ChevronDown, Zap, Save } from 'lucide-react';
+import { Plus, Trash2, ChevronDown, Zap, Save, Wand2 } from 'lucide-react';
 import { previewCsvFile, parseCsvFileWithMapping, type ColumnMapping, type ParsePreview } from '@/lib/csv-parser';
 import { updateMerchantMemory } from '@/lib/categorization-engine';
 import { SeedMappingDialog } from '@/components/SeedMappingDialog';
+
+const STOP_WORDS = new Set(['THE', 'AND', 'INC', 'LLC', 'LTD', 'FOR', 'FROM', 'WITH', 'COM', 'WWW', 'HTTP', 'HTTPS', 'NET', 'ORG', 'CO', 'USA', 'TST', 'SQ', 'POS', 'DES', 'ACH', 'REF', 'TXN', 'PMT', 'CKS', 'INT', 'FEE', 'TAX', 'PRE', 'ATM', 'WEB', 'TEL', 'PPD', 'CCD']);
+
+async function generateRulesFromMerchants(
+  merchants: { key: string; category: string | null; method: string | null }[],
+  mode: string,
+  ownerId: string
+): Promise<number> {
+  // Group by category
+  const catGroups = new Map<string, string[]>();
+  for (const m of merchants) {
+    if (!m.category) continue;
+    const list = catGroups.get(m.category) || [];
+    list.push(m.key);
+    catGroups.set(m.category, list);
+  }
+
+  // Load existing rules to avoid duplicates
+  const { data: existingRules } = await supabase
+    .from('categorization_rules')
+    .select('pattern, category_output, mode')
+    .eq('owner_id', ownerId);
+  const existingSet = new Set(
+    (existingRules || []).map(r => `${r.pattern?.toUpperCase()}|${r.category_output}|${r.mode}`)
+  );
+
+  const newRules: Array<{
+    rule_name: string; mode: string; match_type: string; pattern: string;
+    category_output: string; priority: number; is_active: boolean; owner_id: string;
+  }> = [];
+
+  for (const [category, keys] of catGroups) {
+    if (keys.length < 2) continue;
+    // Tokenize all keys
+    const wordCounts = new Map<string, number>();
+    for (const key of keys) {
+      const words = key.toUpperCase().split(/[^A-Z0-9]+/).filter(w => w.length >= 3 && !STOP_WORDS.has(w));
+      const unique = new Set(words);
+      for (const w of unique) {
+        wordCounts.set(w, (wordCounts.get(w) || 0) + 1);
+      }
+    }
+    // Keep words appearing in 2+ merchants
+    for (const [word, count] of wordCounts) {
+      if (count < 2) continue;
+      const dupeKey = `${word}|${category}|${mode}`;
+      const dupeKeyBoth = `${word}|${category}|both`;
+      if (existingSet.has(dupeKey) || existingSet.has(dupeKeyBoth)) continue;
+      existingSet.add(dupeKey);
+      newRules.push({
+        rule_name: `Auto: ${word} → ${category}`,
+        mode,
+        match_type: 'contains',
+        pattern: word,
+        category_output: category,
+        priority: 200,
+        is_active: true,
+        owner_id: ownerId,
+      });
+    }
+  }
+
+  if (newRules.length > 0) {
+    // Insert in batches of 50
+    for (let i = 0; i < newRules.length; i += 50) {
+      await supabase.from('categorization_rules').insert(newRules.slice(i, i + 50));
+    }
+  }
+
+  return newRules.length;
+}
 
 interface CategoryOption {
   id: string; mode: string; category_name: string; sort_order: number; is_active: boolean;
