@@ -815,6 +815,11 @@ export default function Expenses() {
                           {tx.parse_status === 'parse_error' && (
                             <Badge variant="destructive" className="text-[9px] h-3.5 px-1">err</Badge>
                           )}
+                          {!tx.final_category && !tx.predicted_category && tx.match_source && (
+                            <Badge variant="outline" className="text-[9px] h-3.5 gap-0.5 border-destructive/30 text-destructive px-1" title="Category suggestion rejected — not in approved list">
+                              <Ban className="h-2 w-2" /> rejected
+                            </Badge>
+                          )}
                         </div>
                       </td>
                       <td className="px-2 py-1 text-right whitespace-nowrap">
