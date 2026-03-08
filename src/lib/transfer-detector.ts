@@ -17,6 +17,8 @@ const TRANSFER_PATTERNS: [RegExp, string][] = [
   [/TO\s*CREDIT\s*CARD/i, 'credit_card_payment'],
   [/FROM\s*CHECKING/i, 'credit_card_payment'],
   [/BALANCE\s*PAY/i, 'credit_card_payment'],
+  [/PAYMENT\s*TO\s*.*CARD\s*ENDING/i, 'credit_card_payment'],
+  [/ONLINE\s*ACH\s*PAYMENT\s*TO/i, 'credit_card_payment'],
 
   // Account transfers
   [/TRANSFER\s*TO/i, 'account_transfer'],
@@ -27,6 +29,7 @@ const TRANSFER_PATTERNS: [RegExp, string][] = [
   [/XFER\b/i, 'account_transfer'],
   [/SAVE\s*AS\s*YOU\s*GO/i, 'account_transfer'],
   [/SAVINGS\s*TRANSFER/i, 'account_transfer'],
+  [/ONLINE\s*DOMESTIC\s*WIRE/i, 'account_transfer'],
 ];
 
 export interface TransferDetectionResult {
@@ -36,7 +39,7 @@ export interface TransferDetectionResult {
 
 export function detectTransfer(description: string): TransferDetectionResult {
   if (!description) return { isTransfer: false, transferType: null };
-  
+
   for (const [pattern, type] of TRANSFER_PATTERNS) {
     if (pattern.test(description)) {
       return {
@@ -45,6 +48,6 @@ export function detectTransfer(description: string): TransferDetectionResult {
       };
     }
   }
-  
+
   return { isTransfer: false, transferType: null };
 }
