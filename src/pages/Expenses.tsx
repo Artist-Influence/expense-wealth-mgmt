@@ -47,6 +47,7 @@ interface Transaction {
   exclude_from_expense_totals: boolean | null;
   transfer_type: string | null;
   source_file_name: string | null;
+  upload_batch_id: string | null;
 }
 
 export default function Expenses() {
