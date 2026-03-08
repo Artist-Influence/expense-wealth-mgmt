@@ -47,6 +47,7 @@ interface Transaction {
   exclude_from_expense_totals: boolean | null;
   transfer_type: string | null;
   source_file_name: string | null;
+  upload_batch_id: string | null;
 }
 
 export default function Expenses() {
@@ -272,8 +273,29 @@ export default function Expenses() {
   const bulkDelete = async () => {
     const ids = [...selectedIds];
     if (!confirm(`Delete ${ids.length} selected transaction(s)? This cannot be undone.`)) return;
+
+    // Collect affected batch IDs before deleting
+    const affectedTxs = transactions.filter(t => selectedIds.has(t.id));
+    const affectedBatchIds = [...new Set(
+      affectedTxs.map(t => t.upload_batch_id).filter(Boolean) as string[]
+    )];
+
     const { error } = await supabase.from('transactions_uploaded').delete().in('id', ids);
     if (error) { toast.error('Failed to delete'); return; }
+
+    // Clean up orphaned upload batches
+    for (const batchId of affectedBatchIds) {
+      const { count } = await supabase
+        .from('transactions_uploaded')
+        .select('id', { count: 'exact', head: true })
+        .eq('upload_batch_id', batchId);
+      if (count === 0) {
+        await supabase.from('upload_batches').delete().eq('id', batchId);
+        // Remove from client-side fileQueue
+        setFileQueue(prev => prev.filter(item => item.result?.batchId !== batchId));
+      }
+    }
+
     setSelectedIds(new Set());
     await loadTransactions();
     toast.success(`Deleted ${ids.length} rows`);
