@@ -277,7 +277,7 @@ export default function Expenses() {
     // Collect affected batch IDs before deleting
     const affectedTxs = transactions.filter(t => selectedIds.has(t.id));
     const affectedBatchIds = [...new Set(
-      affectedTxs.map(t => (t as any).upload_batch_id).filter(Boolean) as string[]
+      affectedTxs.map(t => t.upload_batch_id).filter(Boolean) as string[]
     )];
 
     const { error } = await supabase.from('transactions_uploaded').delete().in('id', ids);
