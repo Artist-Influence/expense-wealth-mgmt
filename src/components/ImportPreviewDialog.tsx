@@ -43,7 +43,7 @@ export function ImportPreviewDialog({ open, onConfirm, onCancel, filePreviews }:
 
   return (
     <Dialog open={open} onOpenChange={v => !v && onCancel()}>
-      <DialogContent className="max-w-lg max-h-[80vh] overflow-y-auto">
+      <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="text-base">Batch Import Preview</DialogTitle>
           <DialogDescription className="text-xs">
