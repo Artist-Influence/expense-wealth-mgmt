@@ -322,7 +322,26 @@ export default function SettingsPage() {
             <p className="text-[11px] text-muted-foreground mb-3">Build merchant memory from historical data. Upload expenses and income separately for each mode.</p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-3">
-                <h4 className="text-xs font-medium text-foreground">Personal</h4>
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-medium text-foreground">Personal</h4>
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button size="sm" variant="ghost" className="h-6 text-[11px] text-destructive/70 hover:text-destructive">
+                        <Trash2 className="h-3 w-3 mr-1" /> Clear
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Clear Personal Seeded Data?</AlertDialogTitle>
+                        <AlertDialogDescription>This will delete all personal merchant memory and categories. You can re-upload CSVs after.</AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction onClick={() => clearSeededData('personal')}>Clear All</AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                </div>
                 <div>
                   <label className="text-[11px] text-muted-foreground mb-1 block">Expenses CSV</label>
                   <input type="file" accept=".csv" disabled={seedingPersonal} onChange={e => e.target.files?.[0] && handleSeedFileSelected(e.target.files[0], 'personal', 'Personal Expenses')} className="text-xs text-muted-foreground file:mr-2 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-primary/10 file:text-primary hover:file:bg-primary/20 cursor-pointer" />
@@ -335,7 +354,26 @@ export default function SettingsPage() {
                 </div>
               </div>
               <div className="space-y-3">
-                <h4 className="text-xs font-medium text-foreground">Business</h4>
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-medium text-foreground">Business</h4>
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button size="sm" variant="ghost" className="h-6 text-[11px] text-destructive/70 hover:text-destructive">
+                        <Trash2 className="h-3 w-3 mr-1" /> Clear
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Clear Business Seeded Data?</AlertDialogTitle>
+                        <AlertDialogDescription>This will delete all business merchant memory and categories. You can re-upload CSVs after.</AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction onClick={() => clearSeededData('business')}>Clear All</AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                </div>
                 <div>
                   <label className="text-[11px] text-muted-foreground mb-1 block">Expenses CSV</label>
                   <input type="file" accept=".csv" disabled={seedingBusiness} onChange={e => e.target.files?.[0] && handleSeedFileSelected(e.target.files[0], 'business', 'Business Expenses')} className="text-xs text-muted-foreground file:mr-2 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-primary/10 file:text-primary hover:file:bg-primary/20 cursor-pointer" />
@@ -355,6 +393,7 @@ export default function SettingsPage() {
             preview={seedPreview}
             mode={seedMode}
             label={seedLabel}
+            isIncome={seedLabel.toLowerCase().includes('income')}
             onConfirm={handleSeedConfirm}
             onCancel={handleSeedCancel}
           />
