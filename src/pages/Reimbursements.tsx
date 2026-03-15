@@ -255,7 +255,7 @@ export default function Reimbursements() {
     if (status === 'submitted') updates.submitted_date = new Date().toISOString().split('T')[0];
     if (status === 'reimbursed') updates.received_date = new Date().toISOString().split('T')[0];
 
-    await supabase.from('reimbursement_groups').update(updates).eq('id', groupId);
+    await (supabase as any).from('reimbursement_groups').update(updates).eq('id', groupId);
 
     // Also update linked transactions
     const txStatus = status === 'submitted' ? 'submitted' : status === 'reimbursed' ? 'reimbursed' : status;
