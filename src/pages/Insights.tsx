@@ -197,6 +197,10 @@ export default function Insights() {
       .sort((a, b) => b.monthlyEstimate - a.monthlyEstimate);
   }, [approvedExpenses]);
 
+  // Exclude non-earning income types from savings rate math
+  const NON_EARNING_TYPES = ['reimbursement', 'transfer', 'refund', 'loan_proceeds', 'owner_contribution'];
+  const earnedIncome = useMemo(() => incomeData.filter(t => !NON_EARNING_TYPES.includes(t.income_type)), [incomeData]);
+
   // ─── INCOME & SAVINGS TAB DATA ───
   const incomeVsExpenses = useMemo(() => {
     const monthMap = new Map<string, { income: number; expenses: number }>();
@@ -224,10 +228,6 @@ export default function Insights() {
         net: Math.round((d.income - d.expenses) * 100) / 100,
       }));
   }, [expenses, earnedIncome]);
-
-  // Exclude non-earning income types from savings rate math
-  const NON_EARNING_TYPES = ['reimbursement', 'transfer', 'refund', 'loan_proceeds', 'owner_contribution'];
-  const earnedIncome = useMemo(() => incomeData.filter(t => !NON_EARNING_TYPES.includes(t.income_type)), [incomeData]);
 
   const savingsRate = useMemo(() => {
     const now = new Date();
