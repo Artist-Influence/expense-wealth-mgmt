@@ -360,7 +360,7 @@ export default function Income() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-semibold text-foreground">Income</h1>
-            <p className="text-sm text-muted-foreground">Track inflows, classify by type, and match reimbursements.</p>
+            <p className="text-sm text-muted-foreground">Track inflows, classify by type, and match reimbursements. <span className="text-[10px] text-muted-foreground/70">Summary: This Month</span></p>
           </div>
           <div className="flex gap-2">
             <Button variant="outline" size="sm" onClick={() => setShowUploader(!showUploader)}>
