@@ -16,7 +16,8 @@ const navItems = [
   { to: '/allocations', label: 'Allocate', icon: Target, active: true },
   { to: '/tax', label: 'Tax', icon: Landmark, active: true },
   { to: '/merchants', label: 'Memory', icon: Brain, active: true },
-  { to: '/accountant', label: 'Accountant', icon: FileSpreadsheet, active: false },
+  { to: '/accountant', label: 'Accountant', icon: FileSpreadsheet, active: true },
+  { to: '/close-month', label: 'Close', icon: CalendarCheck, active: true },
   { to: '/settings', label: 'Settings', icon: Settings, active: true },
 ];
 
