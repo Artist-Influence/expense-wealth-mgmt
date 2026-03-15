@@ -564,12 +564,14 @@ export type Database = {
           id: string
           is_non_expense_cash_movement: boolean
           is_reimbursable: boolean
+          is_split_parent: boolean
           is_transfer: boolean
           linked_reimbursement_group_id: string | null
           match_explanation: string | null
           match_source: string | null
           mode: string
           owner_id: string
+          parent_transaction_id: string | null
           parse_error: string | null
           parse_status: string
           predicted_category: string | null
@@ -613,12 +615,14 @@ export type Database = {
           id?: string
           is_non_expense_cash_movement?: boolean
           is_reimbursable?: boolean
+          is_split_parent?: boolean
           is_transfer?: boolean
           linked_reimbursement_group_id?: string | null
           match_explanation?: string | null
           match_source?: string | null
           mode: string
           owner_id: string
+          parent_transaction_id?: string | null
           parse_error?: string | null
           parse_status?: string
           predicted_category?: string | null
@@ -662,12 +666,14 @@ export type Database = {
           id?: string
           is_non_expense_cash_movement?: boolean
           is_reimbursable?: boolean
+          is_split_parent?: boolean
           is_transfer?: boolean
           linked_reimbursement_group_id?: string | null
           match_explanation?: string | null
           match_source?: string | null
           mode?: string
           owner_id?: string
+          parent_transaction_id?: string | null
           parse_error?: string | null
           parse_status?: string
           predicted_category?: string | null
@@ -700,6 +706,13 @@ export type Database = {
             columns: ["linked_reimbursement_group_id"]
             isOneToOne: false
             referencedRelation: "reimbursement_groups"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "transactions_uploaded_parent_transaction_id_fkey"
+            columns: ["parent_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "transactions_uploaded"
             referencedColumns: ["id"]
           },
           {
