@@ -468,7 +468,7 @@ export default function Expenses() {
 
   const exportCsv = () => {
     const rows = filtered
-      .filter(t => ['approved', 'auto_categorized', 'edited'].includes(t.review_status))
+      .filter(t => ['approved', 'auto_categorized', 'edited'].includes(t.review_status) && !t.is_split_parent)
       .map(t => ({
         Date: t.date || '',
         Description: t.description_raw || '',
