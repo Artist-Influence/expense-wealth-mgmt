@@ -207,7 +207,7 @@ export default function Insights() {
       entry.expenses += Math.abs(t.amount || 0);
       monthMap.set(m, entry);
     });
-    incomeData.forEach(t => {
+    earnedIncome.forEach(t => {
       if (!t.date) return;
       const m = t.date.substring(0, 7);
       const entry = monthMap.get(m) || { income: 0, expenses: 0 };
