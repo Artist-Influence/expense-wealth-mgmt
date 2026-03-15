@@ -194,14 +194,16 @@ export default function Income() {
         const cols = allRows[i];
         const rawDesc = descIdx >= 0 ? cols[descIdx] : '';
         const rawAmount = parseFloat((cols[amtIdx] || '0').replace(/[$,]/g, ''));
-        if (isNaN(rawAmount) || rawAmount <= 0) continue;
+        if (isNaN(rawAmount) || rawAmount === 0) continue;
+        // Accept negative amounts (some banks represent credits as negative)
+        const normalizedAmount = Math.abs(rawAmount);
 
         const classification = classifyIncome(rawDesc);
         const normalized = normalizeDescription(rawDesc);
         const dateVal = dateIdx >= 0 ? cols[dateIdx] : null;
 
         // Fingerprint-based dedup
-        const fp = `income|${dateVal || ''}|${rawAmount}|${(normalized || '').toLowerCase()}`;
+        const fp = `income|${dateVal || ''}|${normalizedAmount}|${(normalized || '').toLowerCase()}`;
         if (existingFingerprints.has(fp)) { skippedDupes++; continue; }
         existingFingerprints.add(fp);
 
@@ -210,7 +212,7 @@ export default function Income() {
           date: dateVal,
           description_raw: rawDesc || null,
           description_normalized: normalized || null,
-          amount: rawAmount,
+          amount: normalizedAmount,
           income_type: classification.income_type,
           taxable_status: classification.taxable_status,
           status: classification.confidence >= 80 ? 'auto_classified' : 'needs_review',
@@ -319,7 +321,18 @@ export default function Income() {
       received_date: newStatus === 'reimbursed' ? new Date().toISOString().split('T')[0] : null,
     }).eq('id', groupId);
 
-    toast.success('Matched to reimbursement group');
+    // Cascade reimbursement status to linked expenses when group is reimbursed
+    if (newStatus === 'reimbursed') {
+      await supabase.from('transactions_uploaded')
+        .update({ reimbursement_status: 'reimbursed' })
+        .eq('linked_reimbursement_group_id', groupId);
+    }
+
+    if (newReceived > group.total_expected) {
+      toast.warning(`Matched — but received (${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(newReceived)}) exceeds expected (${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(group.total_expected)})`);
+    } else {
+      toast.success('Matched to reimbursement group');
+    }
     setShowMatchDialog(false);
     setMatchingTxId(null);
     fetchTransactions();
@@ -358,7 +371,7 @@ export default function Income() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-semibold text-foreground">Income</h1>
-            <p className="text-sm text-muted-foreground">Track inflows, classify by type, and match reimbursements.</p>
+            <p className="text-sm text-muted-foreground">Track inflows, classify by type, and match reimbursements. <span className="text-[10px] text-muted-foreground/70">Summary: This Month</span></p>
           </div>
           <div className="flex gap-2">
             <Button variant="outline" size="sm" onClick={() => setShowUploader(!showUploader)}>

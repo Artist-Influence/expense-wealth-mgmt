@@ -63,7 +63,7 @@ export default function CloseMonth() {
         .from('transactions_uploaded')
         .select('id, description_normalized, amount, date, review_status')
         .eq('owner_id', user.id)
-        .eq('review_status', 'needs_review')
+        .in('review_status', ['needs_review', 'suggested', 'ai_suggested'])
         .gte('date', dateRange.start)
         .lte('date', dateRange.end);
       return data || [];
@@ -153,14 +153,17 @@ export default function CloseMonth() {
           <div className="space-y-3">
             <div className="flex items-center gap-2">
               <Badge variant={exceptions?.length ? 'destructive' : 'secondary'} className="text-xs">
-                {exceptions?.length || 0} needing review
+                {exceptions?.length || 0} needing review or confirmation
               </Badge>
             </div>
             {exceptions && exceptions.length > 0 ? (
               <div className="space-y-1.5 max-h-40 overflow-auto">
                 {exceptions.slice(0, 10).map(e => (
                   <div key={e.id} className="flex justify-between items-center text-xs bg-secondary/30 rounded px-2.5 py-1.5">
-                    <span className="text-foreground truncate max-w-[200px]">{e.description_normalized || 'Unknown'}</span>
+                    <div className="flex items-center gap-2">
+                      <Badge variant="outline" className="text-[9px]">{e.review_status.replace(/_/g, ' ')}</Badge>
+                      <span className="text-foreground truncate max-w-[180px]">{e.description_normalized || 'Unknown'}</span>
+                    </div>
                     <span className="text-muted-foreground font-mono">${Number(e.amount || 0).toFixed(2)}</span>
                   </div>
                 ))}
@@ -173,7 +176,15 @@ export default function CloseMonth() {
               <Button size="sm" variant="outline" className="text-xs gap-1" asChild>
                 <Link to="/"><ExternalLink className="h-3 w-3" /> Go to Expenses</Link>
               </Button>
-              <Button size="sm" className="text-xs" onClick={() => markStepComplete(1)}>Mark Done</Button>
+              {exceptions && exceptions.length > 0 ? (
+                <Button size="sm" variant="outline" className="text-xs text-warning border-warning/30" onClick={() => {
+                  if (confirm(`${exceptions.length} transactions still need review. Mark done anyway?`)) markStepComplete(1);
+                }}>
+                  Accept {exceptions.length} Unreviewed
+                </Button>
+              ) : (
+                <Button size="sm" className="text-xs" onClick={() => markStepComplete(1)}>Mark Done</Button>
+              )}
             </div>
           </div>
         );

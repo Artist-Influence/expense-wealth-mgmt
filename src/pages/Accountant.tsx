@@ -17,7 +17,7 @@ import { toast } from 'sonner';
 type ExportType = 'expense_ledger' | 'income_ledger' | 'reimbursement_report' | 'tax_deductions' | 'tax_payments' | 'year_end_summary';
 
 const exportTypes = [
-  { id: 'expense_ledger' as ExportType, label: 'Expense Ledger', icon: Receipt, desc: 'All approved expenses with categories, methods, and notes' },
+  { id: 'expense_ledger' as ExportType, label: 'Expense Ledger', icon: Receipt, desc: 'Approved expenses with categories, modes, and flags' },
   { id: 'income_ledger' as ExportType, label: 'Income Ledger', icon: DollarSign, desc: 'All income transactions with type and taxable status' },
   { id: 'reimbursement_report' as ExportType, label: 'Reimbursement Report', icon: ReceiptText, desc: 'Reimbursement groups with status and amounts' },
   { id: 'tax_deductions' as ExportType, label: 'Tax Deductions', icon: Landmark, desc: 'Tax-deductible expenses grouped by category' },
@@ -159,10 +159,14 @@ export default function Accountant() {
     enabled: !!user,
   });
 
+  // Only include approved/edited/auto_categorized expenses in exports
+  const approvedStatuses = ['approved', 'auto_categorized', 'edited'];
+
   const filteredExpenses = useMemo(() => {
     if (!expenses) return [];
-    if (modeFilter === 'all') return expenses;
-    return expenses.filter(e => e.mode === modeFilter);
+    let result = expenses.filter(e => approvedStatuses.includes(e.review_status));
+    if (modeFilter === 'all') return result;
+    return result.filter(e => e.transaction_mode === modeFilter || (modeFilter === 'personal' && e.transaction_mode === 'reimbursable_work'));
   }, [expenses, modeFilter]);
 
   const taxDeductions = useMemo(() => filteredExpenses.filter(e => e.counts_as_tax_deduction), [filteredExpenses]);
@@ -172,19 +176,25 @@ export default function Accountant() {
     switch (selectedExport) {
       case 'expense_ledger':
         return {
-          headers: ['Date', 'Description', 'Amount', 'Category', 'Method', 'Mode', 'Notes'],
-          rows: filteredExpenses.map(e => [e.date, e.description_normalized || e.description_raw, String(Math.abs(e.amount ?? 0)), e.final_category, e.final_method, e.mode, e.final_notes]),
+          headers: ['Date', 'Description', 'Amount', 'Category', 'Method', 'Mode', 'Transaction Mode', 'Reimbursable', 'Transfer', 'Review Status', 'Notes'],
+          rows: filteredExpenses.map(e => [e.date, e.description_normalized || e.description_raw, String(Math.abs(e.amount ?? 0)), e.final_category, e.final_method, e.mode, e.transaction_mode, e.is_reimbursable ? 'Yes' : 'No', e.is_transfer ? 'Yes' : 'No', e.review_status, e.final_notes]),
         };
       case 'income_ledger':
         return {
           headers: ['Date', 'Description', 'Amount', 'Type', 'Taxable', 'Source', 'Notes'],
           rows: (income || []).map(i => [i.date, i.description_normalized || i.description_raw, String(i.amount ?? 0), i.income_type, i.taxable_status, i.source_account_name, i.notes]),
         };
-      case 'reimbursement_report':
+      case 'reimbursement_report': {
+        // Date-filter reimbursement groups by created_at
+        const filteredReimb = (reimbursements || []).filter(r => {
+          const created = r.created_at?.split('T')[0];
+          return created && created >= dateRange.start && created <= dateRange.end;
+        });
         return {
           headers: ['Title', 'To', 'Status', 'Expected', 'Received', 'Submitted', 'Received Date'],
-          rows: (reimbursements || []).map(r => [r.title, r.reimbursable_to, r.status, String(r.total_expected), String(r.total_received), r.submitted_date, r.received_date]),
+          rows: filteredReimb.map(r => [r.title, r.reimbursable_to, r.status, String(r.total_expected), String(r.total_received), r.submitted_date, r.received_date]),
         };
+      }
       case 'tax_deductions':
         return {
           headers: ['Date', 'Description', 'Amount', 'Category', 'Mode'],
@@ -196,20 +206,26 @@ export default function Accountant() {
           rows: taxPayments.map(e => [e.date, e.description_normalized || e.description_raw, String(e.amount ?? 0), e.final_category, e.final_notes]),
         };
       case 'year_end_summary': {
+        // Use only approved expenses, exclude transfers and reimbursables from net
+        const approved = (expenses || []).filter(e => approvedStatuses.includes(e.review_status));
         const totalIncome = (income || []).reduce((s, i) => s + (i.amount || 0), 0);
-        const totalExpPersonal = (expenses || []).filter(e => e.mode === 'personal').reduce((s, e) => s + Math.abs(e.amount || 0), 0);
-        const totalExpBusiness = (expenses || []).filter(e => e.mode === 'business').reduce((s, e) => s + Math.abs(e.amount || 0), 0);
+        const totalExpPersonal = approved.filter(e => e.transaction_mode === 'personal' && !e.is_transfer).reduce((s, e) => s + Math.abs(e.amount || 0), 0);
+        const totalExpBusiness = approved.filter(e => e.transaction_mode === 'business' && !e.is_transfer).reduce((s, e) => s + Math.abs(e.amount || 0), 0);
+        const totalReimbursable = approved.filter(e => e.transaction_mode === 'reimbursable_work').reduce((s, e) => s + Math.abs(e.amount || 0), 0);
+        const totalTransfers = approved.filter(e => e.is_transfer).reduce((s, e) => s + Math.abs(e.amount || 0), 0);
         const totalDeductions = taxDeductions.reduce((s, e) => s + Math.abs(e.amount || 0), 0);
         const totalTaxPaid = taxPayments.reduce((s, e) => s + Math.abs(e.amount || 0), 0);
         return {
           headers: ['Metric', 'Amount'],
           rows: [
             ['Total Income', totalIncome.toFixed(2)],
-            ['Personal Expenses', totalExpPersonal.toFixed(2)],
-            ['Business Expenses', totalExpBusiness.toFixed(2)],
+            ['Personal Expenses (excl. transfers)', totalExpPersonal.toFixed(2)],
+            ['Business Expenses (excl. transfers)', totalExpBusiness.toFixed(2)],
+            ['Reimbursable Expenses (fronted)', totalReimbursable.toFixed(2)],
+            ['Transfers Excluded', totalTransfers.toFixed(2)],
             ['Tax Deductions', totalDeductions.toFixed(2)],
             ['Tax Payments Made', totalTaxPaid.toFixed(2)],
-            ['Net Position', (totalIncome - totalExpPersonal - totalExpBusiness).toFixed(2)],
+            ['Net Position (Income - Personal - Business)', (totalIncome - totalExpPersonal - totalExpBusiness).toFixed(2)],
           ],
         };
       }

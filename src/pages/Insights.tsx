@@ -110,15 +110,17 @@ export default function Insights() {
     const lastMonthSpend = lastMonthTxns.reduce((s, t) => s + Math.abs(t.amount || 0), 0);
     const momChange = lastMonthSpend > 0 ? ((thisMonthSpend - lastMonthSpend) / lastMonthSpend) * 100 : 0;
 
+    // Only use final_category from approved/edited rows for charts
+    const approvedExpenses = expenses.filter(t => ['approved', 'auto_categorized', 'edited'].includes(t.review_status));
     const catMap = new Map<string, number>();
-    expenses.forEach(t => {
-      const cat = t.final_category || t.predicted_category || 'Uncategorized';
+    approvedExpenses.forEach(t => {
+      const cat = t.final_category || 'Uncategorized';
       catMap.set(cat, (catMap.get(cat) || 0) + Math.abs(t.amount || 0));
     });
     const topCategory = [...catMap.entries()].sort((a, b) => b[1] - a[1])[0];
 
     const merchMap = new Map<string, number>();
-    expenses.forEach(t => {
+    approvedExpenses.forEach(t => {
       const desc = (t.description_normalized || t.description_raw || 'Unknown').substring(0, 30);
       merchMap.set(desc, (merchMap.get(desc) || 0) + Math.abs(t.amount || 0));
     });
@@ -129,14 +131,17 @@ export default function Insights() {
     return { thisMonthSpend, lastMonthSpend, momChange, topCategory, topMerchant, transfersExcluded };
   }, [expenses, transactions]);
 
+  // Only approved/edited data in charts
+  const approvedExpenses = useMemo(() => expenses.filter(t => ['approved', 'auto_categorized', 'edited'].includes(t.review_status)), [expenses]);
+
   const categoryData = useMemo(() => {
     const catMap = new Map<string, number>();
-    expenses.forEach(t => {
-      const cat = t.final_category || t.predicted_category || 'Uncategorized';
+    approvedExpenses.forEach(t => {
+      const cat = t.final_category || 'Uncategorized';
       catMap.set(cat, (catMap.get(cat) || 0) + Math.abs(t.amount || 0));
     });
     return [...catMap.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12).map(([name, total]) => ({ name, total: Math.round(total * 100) / 100 }));
-  }, [expenses]);
+  }, [approvedExpenses]);
 
   const monthlyTrend = useMemo(() => {
     const monthMap = new Map<string, number>();
@@ -275,9 +280,9 @@ export default function Insights() {
   // ─── TRENDS TAB DATA ───
   const categoryTrends = useMemo(() => {
     const catMonthMap = new Map<string, Map<string, number>>();
-    expenses.forEach(t => {
+    approvedExpenses.forEach(t => {
       if (!t.date) return;
-      const cat = t.final_category || t.predicted_category || 'Uncategorized';
+      const cat = t.final_category || 'Uncategorized';
       const month = t.date.substring(0, 7);
       if (!catMonthMap.has(cat)) catMonthMap.set(cat, new Map());
       const monthMap = catMonthMap.get(cat)!;
@@ -336,7 +341,10 @@ export default function Insights() {
       <AppNav />
       <div className="container py-4 animate-fade-in">
         <div className="flex items-center justify-between mb-4">
-          <h1 className="text-lg font-semibold text-foreground">Insights</h1>
+          <div>
+            <h1 className="text-lg font-semibold text-foreground">Insights</h1>
+            <p className="text-[10px] text-muted-foreground">Charts use approved/edited data only · Income is cross-mode</p>
+          </div>
           <div className="flex rounded-lg border border-border/40 overflow-hidden">
             <button onClick={() => setMode('personal')} className={`px-3 py-1.5 text-xs font-medium transition-colors ${mode === 'personal' ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground'}`}>
               Personal

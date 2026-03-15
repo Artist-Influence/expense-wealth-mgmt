@@ -277,13 +277,34 @@ export default function Tax() {
           <SummaryCard icon={reserveGap > 0 ? AlertTriangle : TrendingUp} label="Reserve Gap" value={fmt(reserveGap)} variant={reserveGap > 0 ? 'warning' : 'success'} />
         </div>
 
+        {/* Estimate disclaimer */}
+        <div className="rounded-lg border border-warning/30 bg-warning/5 px-4 py-3 text-xs text-warning flex items-start gap-2">
+          <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+          <div>
+            <p className="font-medium">Estimates only — not a tax calculation</p>
+            <p className="text-warning/80 mt-0.5">Based on flat reserve rates, not progressive tax brackets. Deductions are simplified (no above/below-the-line distinction). Consult your accountant for actual liability.</p>
+          </div>
+        </div>
+
+        {/* Data coverage indicator */}
+        {(() => {
+          const monthsWithData = new Set(incomeRows.map(() => '').filter(Boolean)).size || 
+            new Set((incomeRows as any[]).map(r => r?.date?.substring?.(0, 7)).filter(Boolean)).size;
+          const currentMonth = new Date().getMonth() + 1;
+          return monthsWithData < currentMonth ? (
+            <div className="rounded-lg border border-border/50 bg-secondary/30 px-4 py-2 text-xs text-muted-foreground">
+              ⚠️ Income data may not cover all {currentMonth} months of {currentYear}. Reserve targets may be understated.
+            </div>
+          ) : null;
+        })()}
+
         {/* Adjusted income context */}
         <Card>
           <CardContent className="pt-6">
             <div className="grid grid-cols-3 gap-6 text-sm">
               <div><span className="text-muted-foreground">Taxable Income YTD</span><p className="text-lg font-semibold text-foreground">{fmt(taxableIncome)}</p></div>
-              <div><span className="text-muted-foreground">Deductions YTD</span><p className="text-lg font-semibold text-foreground">−{fmt(totalDeductions)}</p></div>
-              <div><span className="text-muted-foreground">Adjusted Income</span><p className="text-lg font-semibold text-foreground">{fmt(adjustedIncome)}</p></div>
+              <div><span className="text-muted-foreground">Estimated Deductions YTD</span><p className="text-lg font-semibold text-foreground">−{fmt(totalDeductions)}</p></div>
+              <div><span className="text-muted-foreground">Est. Adjusted Income</span><p className="text-lg font-semibold text-foreground">{fmt(adjustedIncome)}</p></div>
             </div>
           </CardContent>
         </Card>

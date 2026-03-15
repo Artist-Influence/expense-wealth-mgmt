@@ -122,6 +122,17 @@ function calculateHistoryConfidence(record: MerchantMemoryRecord): number {
   return Math.min(baseWeight + timesBonus, 99);
 }
 
+// Merchants that span multiple categories and should never auto-approve
+const AMBIGUOUS_MERCHANTS = new Set([
+  'AMAZON', 'PAYPAL', 'VENMO', 'ZELLE', 'SQUARE', 'STRIPE',
+  'WALMART', 'COSTCO', 'TARGET', 'APPLE', 'GOOGLE',
+]);
+
+function isAmbiguousMerchant(merchantKey: string): boolean {
+  const upper = merchantKey.toUpperCase();
+  return [...AMBIGUOUS_MERCHANTS].some(m => upper.includes(m));
+}
+
 export async function categorizeTransactions(
   transactions: ParsedTransaction[],
   mode: 'personal' | 'business',
@@ -167,19 +178,18 @@ export async function categorizeTransactions(
       if (validated.wasRejected) {
         return buildResult(null, memory.most_common_method, memory.default_note_template, 0,
           memory.times_seen > 1 ? 'exact_history' : 'normalized_history', thresholds, true,
-          `Exact merchant key "${merchantKey}" matched but category "${rawCategory}" not in allowed list`);
+          `Exact merchant key "${merchantKey}" matched but category "${rawCategory}" not in allowed list`, merchantKey);
       }
 
       const source = memory.times_seen > 1 ? 'exact_history' : 'normalized_history';
       return buildResult(validated.category, memory.most_common_method, memory.default_note_template,
         confidence, source, thresholds, false,
-        `Exact merchant key "${merchantKey}" matched (seen ${memory.times_seen}x, confidence ${confidence})`);
+        `Exact merchant key "${merchantKey}" matched (seen ${memory.times_seen}x, confidence ${confidence})`, merchantKey);
     }
 
     // Layer 1.5: Partial/fuzzy merchant memory match
     const partialMatch = findPartialMemoryMatch(merchantKey, tx.description_raw, memoryMap);
     if (partialMatch && partialMatch.most_common_category) {
-      // Lower confidence for partial matches, but still boost for high times_seen
       const baseConfidence = Math.min(calculateHistoryConfidence(partialMatch) - 10, 89);
       const confidence = Math.max(baseConfidence, 65);
 
@@ -189,15 +199,15 @@ export async function categorizeTransactions(
       if (validated.wasRejected) {
         return buildResult(null, partialMatch.most_common_method, partialMatch.default_note_template, 0,
           'partial_history', thresholds, true,
-          `Partial match to "${partialMatch.merchant_key}" but category "${rawCategory}" not in allowed list`);
+          `Partial match to "${partialMatch.merchant_key}" but category "${rawCategory}" not in allowed list`, merchantKey);
       }
 
       return buildResult(validated.category, partialMatch.most_common_method, partialMatch.default_note_template,
         confidence, 'partial_history', thresholds, false,
-        `Partial match to merchant key "${partialMatch.merchant_key}" (seen ${partialMatch.times_seen}x)`);
+        `Partial match to merchant key "${partialMatch.merchant_key}" (seen ${partialMatch.times_seen}x)`, merchantKey);
     }
 
-    // Layer 2: Rules Engine — check both normalized AND raw description
+    // Layer 2: Rules Engine
     for (const rule of rules) {
       if (matchesRule(tx.description_normalized, tx.description_raw, rule)) {
         const rawCategory = rule.category_output ? remapCategory(rule.category_output, tx.description_raw) : null;
@@ -205,33 +215,33 @@ export async function categorizeTransactions(
 
         if (validated.wasRejected) {
           return buildResult(null, rule.method_output, rule.notes_output, 0, 'rule', thresholds, true,
-            `Rule "${rule.pattern}" matched but category "${rawCategory}" not in allowed list`);
+            `Rule "${rule.pattern}" matched but category "${rawCategory}" not in allowed list`, merchantKey);
         }
 
         return buildResult(validated.category, rule.method_output, rule.notes_output,
           85, 'rule', thresholds, false,
-          `Rule match: "${rule.match_type}" pattern "${rule.pattern}"`);
+          `Rule match: "${rule.match_type}" pattern "${rule.pattern}"`, merchantKey);
       }
     }
 
-    // Layer 3: Use CSV-provided category if available
+    // Layer 3: CSV-provided category
     if (tx.category) {
       const rawCategory = remapCategory(tx.category, tx.description_raw);
       const validated = allowedSet.size > 0 ? validateCategory(rawCategory, allowedSet) : { category: rawCategory, wasRejected: false };
 
       if (validated.wasRejected) {
         return buildResult(null, tx.method, tx.notes, 0, 'exact_history', thresholds, true,
-          `CSV category "${rawCategory}" not in allowed list`);
+          `CSV category "${rawCategory}" not in allowed list`, merchantKey);
       }
 
       return buildResult(validated.category, tx.method, tx.notes,
         75, 'exact_history', thresholds, false,
-        `Category from CSV data: "${rawCategory}"`);
+        `Category from CSV data: "${rawCategory}"`, merchantKey);
     }
 
     // No match
     return buildResult(null, null, null, 0, null, thresholds, false,
-      'No historical, rule, or CSV match found');
+      'No historical, rule, or CSV match found', merchantKey);
   });
 }
 
@@ -266,14 +276,21 @@ function buildResult(
   matchSource: CategorizationResult['match_source'],
   thresholds: Thresholds,
   categoryRejected: boolean = false,
-  matchExplanation: string = ''
+  matchExplanation: string = '',
+  merchantKey: string = ''
 ): CategorizationResult {
   let reviewStatus: CategorizationResult['review_status'];
 
   if (categoryRejected) {
     reviewStatus = 'needs_review';
   } else if (confidence >= thresholds.auto) {
-    reviewStatus = 'auto_categorized';
+    // Ambiguous merchants should never auto-approve — cap at 'suggested'
+    if (merchantKey && isAmbiguousMerchant(merchantKey)) {
+      reviewStatus = 'suggested';
+      matchExplanation += ' [Ambiguous merchant — requires manual review]';
+    } else {
+      reviewStatus = 'auto_categorized';
+    }
   } else if (confidence >= thresholds.suggest) {
     reviewStatus = 'suggested';
   } else {
