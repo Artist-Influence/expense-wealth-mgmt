@@ -56,30 +56,44 @@ export default function Insights() {
 
   const loadData = async () => {
     setLoading(true);
-    // Parallel fetch expenses + income
     const [expenseResult, incomeResult] = await Promise.all([
-      fetchAllPages<Transaction>('transactions_uploaded', 'date, description_raw, description_normalized, amount, final_category, predicted_category, final_method, predicted_method, review_status, is_transfer, exclude_from_expense_totals, parse_status', mode),
-      fetchAllPages<IncomeTransaction>('income_transactions', 'date, amount, income_type, taxable_status, status'),
+      loadExpenses(),
+      loadIncome(),
     ]);
     setTransactions(expenseResult);
     setIncomeData(incomeResult);
     setLoading(false);
   };
 
-  async function fetchAllPages<T>(table: 'transactions_uploaded' | 'income_transactions', select: string, modeFilter?: string): Promise<T[]> {
-    let from = 0, pageSize = 1000, allData: T[] = [], hasMore = true;
+  const loadExpenses = async (): Promise<Transaction[]> => {
+    let from = 0, pageSize = 1000, allData: Transaction[] = [], hasMore = true;
     while (hasMore) {
-      let query = supabase.from(table).select(select).eq('owner_id', user!.id).range(from, from + pageSize - 1);
-      if (table === 'transactions_uploaded') {
-        query = query.eq('mode', modeFilter!).neq('parse_status', 'parse_error');
-      }
-      const { data } = await query;
-      if (data) allData = [...allData, ...(data as T[])];
+      const { data } = await supabase
+        .from('transactions_uploaded')
+        .select('date, description_raw, description_normalized, amount, final_category, predicted_category, final_method, predicted_method, review_status, is_transfer, exclude_from_expense_totals, parse_status')
+        .eq('owner_id', user!.id).eq('mode', mode).neq('parse_status', 'parse_error')
+        .range(from, from + pageSize - 1);
+      if (data) allData = [...allData, ...(data as Transaction[])];
       hasMore = (data?.length ?? 0) === pageSize;
       from += pageSize;
     }
     return allData;
-  }
+  };
+
+  const loadIncome = async (): Promise<IncomeTransaction[]> => {
+    let from = 0, pageSize = 1000, allData: IncomeTransaction[] = [], hasMore = true;
+    while (hasMore) {
+      const { data } = await supabase
+        .from('income_transactions')
+        .select('date, amount, income_type, taxable_status, status')
+        .eq('owner_id', user!.id)
+        .range(from, from + pageSize - 1);
+      if (data) allData = [...allData, ...(data as IncomeTransaction[])];
+      hasMore = (data?.length ?? 0) === pageSize;
+      from += pageSize;
+    }
+    return allData;
+  };
 
   const expenses = useMemo(() => transactions.filter(t => !t.exclude_from_expense_totals), [transactions]);
 
