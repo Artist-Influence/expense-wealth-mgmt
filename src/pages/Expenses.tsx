@@ -903,6 +903,7 @@ export default function Expenses() {
               <SelectItem value="transfers">Transfers</SelectItem>
               <SelectItem value="possible_transfers">Possible Transfers</SelectItem>
               <SelectItem value="reimbursable">Reimbursable</SelectItem>
+              <SelectItem value="splits">Split Transactions</SelectItem>
               <SelectItem value="possible_duplicates">Duplicates</SelectItem>
               <SelectItem value="parse_errors">Parse Errors</SelectItem>
               <SelectItem value="excluded">Excluded</SelectItem>
