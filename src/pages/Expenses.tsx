@@ -159,6 +159,7 @@ export default function Expenses() {
       if (extraFilter === 'excluded' && !tx.exclude_from_expense_totals) return false;
       if (extraFilter === 'uncategorized' && (tx.final_category || tx.predicted_category)) return false;
       if (extraFilter === 'reimbursable' && !tx.is_reimbursable) return false;
+      if (extraFilter === 'splits' && !tx.is_split_parent && !tx.parent_transaction_id) return false;
       if (search) {
         const s = search.toLowerCase();
         return (
