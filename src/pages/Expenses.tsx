@@ -24,7 +24,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/co
 import {
   Upload, Search, Download, Check, CheckCheck, Edit3, X,
   ArrowLeftRight, AlertTriangle, Ban, FileText, Filter,
-  Calendar, ChevronDown, Trash2, Briefcase, User, Receipt
+  Calendar, ChevronDown, Trash2, Briefcase, User, Receipt, Scissors
 } from 'lucide-react';
 
 type TransactionMode = 'personal' | 'business' | 'reimbursable_work';
