@@ -215,6 +215,51 @@ export type Database = {
         }
         Relationships: []
       }
+      reimbursement_groups: {
+        Row: {
+          created_at: string
+          id: string
+          notes: string | null
+          owner_id: string
+          received_date: string | null
+          reimbursable_to: string
+          report_id: string | null
+          status: string
+          submitted_date: string | null
+          title: string
+          total_expected: number
+          total_received: number
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          notes?: string | null
+          owner_id: string
+          received_date?: string | null
+          reimbursable_to?: string
+          report_id?: string | null
+          status?: string
+          submitted_date?: string | null
+          title: string
+          total_expected?: number
+          total_received?: number
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          notes?: string | null
+          owner_id?: string
+          received_date?: string | null
+          reimbursable_to?: string
+          report_id?: string | null
+          status?: string
+          submitted_date?: string | null
+          title?: string
+          total_expected?: number
+          total_received?: number
+        }
+        Relationships: []
+      }
       transactions_uploaded: {
         Row: {
           amount: number | null
@@ -241,6 +286,7 @@ export type Database = {
           is_non_expense_cash_movement: boolean
           is_reimbursable: boolean
           is_transfer: boolean
+          linked_reimbursement_group_id: string | null
           match_explanation: string | null
           match_source: string | null
           mode: string
@@ -289,6 +335,7 @@ export type Database = {
           is_non_expense_cash_movement?: boolean
           is_reimbursable?: boolean
           is_transfer?: boolean
+          linked_reimbursement_group_id?: string | null
           match_explanation?: string | null
           match_source?: string | null
           mode: string
@@ -337,6 +384,7 @@ export type Database = {
           is_non_expense_cash_movement?: boolean
           is_reimbursable?: boolean
           is_transfer?: boolean
+          linked_reimbursement_group_id?: string | null
           match_explanation?: string | null
           match_source?: string | null
           mode?: string
@@ -366,6 +414,13 @@ export type Database = {
             columns: ["duplicate_of_transaction_id"]
             isOneToOne: false
             referencedRelation: "transactions_uploaded"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "transactions_uploaded_linked_reimbursement_group_id_fkey"
+            columns: ["linked_reimbursement_group_id"]
+            isOneToOne: false
+            referencedRelation: "reimbursement_groups"
             referencedColumns: ["id"]
           },
           {
