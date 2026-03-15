@@ -233,6 +233,7 @@ export default function Expenses() {
     reimbursement_status?: string; business_purpose?: string;
     counts_toward_true_personal_spend?: boolean; counts_toward_true_business_spend?: boolean;
     client_or_project_tag?: string;
+    _keepNeedsReview?: boolean;
   }) => {
     if (values.category && categories.length > 0) {
       const isAllowed = categories.some(c => c.toLowerCase() === values.category.toLowerCase());
@@ -248,7 +249,7 @@ export default function Expenses() {
       final_category: values.category,
       final_method: values.method,
       final_notes: values.notes,
-      review_status: 'edited',
+      review_status: (!values.category && values._keepNeedsReview) ? 'needs_review' : 'edited',
     };
 
     if (values.transaction_mode !== undefined) updatePayload.transaction_mode = values.transaction_mode;
@@ -608,10 +609,17 @@ export default function Expenses() {
           }
 
           const predictedCat = transfer.isTransfer ? transferCategory : result.predicted_category;
-          const finalCat = result.review_status === 'auto_categorized'
+          // Auto-approve: if auto_categorized with high confidence exact match, mark as approved
+          const shouldAutoApprove = result.review_status === 'auto_categorized' 
+            && result.confidence >= 95 
+            && (result.match_source === 'exact_history' || result.match_source === 'normalized_history')
+            && !transfer.isTransfer;
+          const finalCat = (result.review_status === 'auto_categorized' || shouldAutoApprove)
             ? (transfer.isTransfer ? transferCategory : result.predicted_category)
             : null;
-          const reviewStatus = (transfer.isTransfer && !transferCategory) ? 'needs_review' : result.review_status;
+          const reviewStatus = (transfer.isTransfer && !transferCategory) ? 'needs_review' 
+            : shouldAutoApprove ? 'approved' 
+            : result.review_status;
 
           return {
             upload_batch_id: batch.id, mode: categoryMode, date: tx.date,
@@ -827,6 +835,20 @@ export default function Expenses() {
               <SelectItem value="excluded">Excluded</SelectItem>
             </SelectContent>
           </Select>
+
+          {/* Approve All Suggested */}
+          {selectedIds.size === 0 && (() => {
+            const suggestedCount = filtered.filter(t => ['suggested', 'ai_suggested', 'auto_categorized'].includes(t.review_status) && (t.final_category || t.predicted_category)).length;
+            return suggestedCount > 0 ? (
+              <Button size="sm" variant="outline" className="h-8 gap-1 text-xs border-success/30 text-success hover:bg-success/10" onClick={async () => {
+                const toApprove = filtered.filter(t => ['suggested', 'ai_suggested', 'auto_categorized'].includes(t.review_status) && (t.final_category || t.predicted_category));
+                for (const tx of toApprove) await approveRow(tx);
+                toast.success(`Approved ${toApprove.length} suggested rows`);
+              }}>
+                <CheckCheck className="h-3 w-3" /> Approve All Suggested ({suggestedCount})
+              </Button>
+            ) : null;
+          })()}
 
           {/* Bulk Actions */}
           {selectedIds.size > 0 && (

@@ -12,7 +12,7 @@ import {
   FileSpreadsheet, Download, Receipt, DollarSign, ReceiptText,
   Landmark, PiggyBank, BarChart3
 } from 'lucide-react';
-import { toast } from '@/hooks/use-toast';
+import { toast } from 'sonner';
 
 type ExportType = 'expense_ledger' | 'income_ledger' | 'reimbursement_report' | 'tax_deductions' | 'tax_payments' | 'year_end_summary';
 
@@ -222,7 +222,7 @@ export default function Accountant() {
     const exportLabel = exportTypes.find(e => e.id === selectedExport)?.label || selectedExport;
     const filename = `${exportLabel.replace(/\s+/g, '_')}_${selection}.csv`;
     downloadCsv(filename, previewData.headers, previewData.rows);
-    toast({ title: 'Downloaded', description: `${filename} (${previewData.rows.length} rows)` });
+    toast.success(`Downloaded ${filename} (${previewData.rows.length} rows)`);
   };
 
   return (

@@ -8,11 +8,12 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Progress } from '@/components/ui/progress';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import { Plus, Pencil, TrendingUp, Wallet, Target, DollarSign } from 'lucide-react';
+import { Plus, Pencil, TrendingUp, Wallet, Target, DollarSign, Trash2 } from 'lucide-react';
 import { useState } from 'react';
-import { toast } from '@/hooks/use-toast';
+import { toast } from 'sonner';
 
 const ACCOUNT_TYPES = [
   { value: 'roth_ira', label: 'Roth IRA' },
@@ -44,6 +45,7 @@ type Account = {
   priority: number;
   is_active: boolean;
   notes: string | null;
+  updated_at: string;
 };
 
 const emptyForm = {
@@ -105,9 +107,24 @@ export default function Wealth() {
       setDialogOpen(false);
       setEditingId(null);
       setForm(emptyForm);
-      toast({ title: editingId ? 'Account updated' : 'Account added' });
+      toast.success(editingId ? 'Account updated' : 'Account added');
     },
-    onError: (e: any) => toast({ title: 'Error', description: e.message, variant: 'destructive' }),
+    onError: (e: any) => toast.error(e.message),
+  });
+
+  const deleteAccount = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from('investment_accounts').delete().eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['investment_accounts'] });
+      setDialogOpen(false);
+      setEditingId(null);
+      setForm(emptyForm);
+      toast.success('Account deleted');
+    },
+    onError: (e: any) => toast.error(e.message),
   });
 
   const openEdit = (a: Account) => {
@@ -147,6 +164,15 @@ export default function Wealth() {
 
   const fmt = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 });
   const typeLabel = (t: string) => ACCOUNT_TYPES.find(at => at.value === t)?.label || t;
+  const timeAgo = (dateStr: string) => {
+    const d = new Date(dateStr);
+    const diff = Date.now() - d.getTime();
+    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+    if (days === 0) return 'today';
+    if (days === 1) return 'yesterday';
+    if (days < 30) return `${days}d ago`;
+    return `${Math.floor(days / 30)}mo ago`;
+  };
 
   return (
     <div className="min-h-screen bg-background">
@@ -228,6 +254,7 @@ export default function Wealth() {
                       {a.contribution_target_monthly > 0 && (
                         <p className="text-xs text-muted-foreground">Monthly target: {fmt(Number(a.contribution_target_monthly))}</p>
                       )}
+                      <p className="text-[10px] text-muted-foreground/60">Updated {timeAgo(a.updated_at)}</p>
                     </CardContent>
                   </Card>
                 );
@@ -285,12 +312,37 @@ export default function Wealth() {
               <Label>Priority (higher = more important)</Label>
               <Input type="number" value={form.priority} onChange={e => setForm(f => ({ ...f, priority: Number(e.target.value) }))} />
             </div>
+            <div className="space-y-1.5">
+              <Label>Notes</Label>
+              <Input value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} placeholder="Optional notes…" />
+            </div>
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
-            <Button onClick={() => upsert.mutate(form)} disabled={!form.account_name || upsert.isPending}>
-              {upsert.isPending ? 'Saving…' : 'Save'}
-            </Button>
+          <DialogFooter className="flex justify-between">
+            {editingId && (
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="destructive" size="sm" className="mr-auto">
+                    <Trash2 className="h-3.5 w-3.5 mr-1" /> Delete
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Delete account?</AlertDialogTitle>
+                    <AlertDialogDescription>"{form.account_name}" will be permanently removed.</AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction onClick={() => deleteAccount.mutate(editingId!)}>Delete</AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            )}
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
+              <Button onClick={() => upsert.mutate(form)} disabled={!form.account_name || upsert.isPending}>
+                {upsert.isPending ? 'Saving…' : 'Save'}
+              </Button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>

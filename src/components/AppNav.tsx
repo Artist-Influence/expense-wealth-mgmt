@@ -1,5 +1,7 @@
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
+import { supabase } from '@/integrations/supabase/client';
+import { useQuery } from '@tanstack/react-query';
 import {
   Receipt, BarChart3, Brain, Settings, LogOut, Database,
   DollarSign, ReceiptText, TrendingUp, Landmark, FileSpreadsheet, Target, CalendarCheck
@@ -8,7 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 const navItems = [
-  { to: '/', label: 'Expenses', icon: Receipt, active: true },
+  { to: '/', label: 'Expenses', icon: Receipt, active: true, showBadge: true },
   { to: '/income', label: 'Income', icon: DollarSign, active: true },
   { to: '/insights', label: 'Insights', icon: BarChart3, active: true },
   { to: '/reimbursements', label: 'Reimburse', icon: ReceiptText, active: true },
@@ -23,7 +25,22 @@ const navItems = [
 
 export function AppNav() {
   const location = useLocation();
-  const { signOut } = useAuth();
+  const { user, signOut } = useAuth();
+
+  // Fetch needs_review count for badge
+  const { data: reviewCount = 0 } = useQuery({
+    queryKey: ['needs_review_count', user?.id],
+    queryFn: async () => {
+      const { count } = await supabase
+        .from('transactions_uploaded')
+        .select('id', { count: 'exact', head: true })
+        .eq('owner_id', user!.id)
+        .in('review_status', ['needs_review', 'suggested', 'ai_suggested']);
+      return count || 0;
+    },
+    enabled: !!user,
+    refetchInterval: 30000,
+  });
 
   return (
     <nav className="sticky top-0 z-50 glass-panel rounded-none border-x-0 border-t-0">
@@ -34,7 +51,7 @@ export function AppNav() {
             <span className="font-semibold text-foreground text-xs">Expense Memory</span>
           </Link>
           
-          {navItems.map(({ to, label, icon: Icon, active }) => {
+          {navItems.map(({ to, label, icon: Icon, active, showBadge }) => {
             const isActive = to === '/' ? location.pathname === '/' : location.pathname.startsWith(to);
             
             if (!active) {
@@ -60,7 +77,7 @@ export function AppNav() {
               <Link
                 key={to}
                 to={to}
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all relative ${
                   isActive
                     ? 'bg-primary/15 text-primary border border-primary/20'
                     : 'text-muted-foreground hover:text-foreground hover:bg-secondary/50'
@@ -68,6 +85,11 @@ export function AppNav() {
               >
                 <Icon className="h-3.5 w-3.5" />
                 <span className="hidden lg:inline">{label}</span>
+                {showBadge && reviewCount > 0 && (
+                  <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-destructive text-destructive-foreground text-[9px] font-bold flex items-center justify-center">
+                    {reviewCount > 99 ? '99+' : reviewCount}
+                  </span>
+                )}
               </Link>
             );
           })}

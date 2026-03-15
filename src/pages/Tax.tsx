@@ -11,7 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
-import { useToast } from '@/hooks/use-toast';
+import { toast } from 'sonner';
 import { DollarSign, TrendingUp, Shield, AlertTriangle, Settings, Landmark, Building2, Building } from 'lucide-react';
 
 interface TaxProfile {
@@ -62,7 +62,7 @@ const fmt = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', c
 
 export default function Tax() {
   const { user } = useAuth();
-  const { toast } = useToast();
+  // toast imported from sonner at top
   const [profile, setProfile] = useState<TaxProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -163,9 +163,9 @@ export default function Tax() {
     }
 
     if (error) {
-      toast({ title: 'Error saving', description: error.message, variant: 'destructive' });
+      toast.error(`Error saving: ${error.message}`);
     } else {
-      toast({ title: 'Tax profile saved' });
+      toast.success('Tax profile saved');
       setEditOpen(false);
       await loadProfile();
     }

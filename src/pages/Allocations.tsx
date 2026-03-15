@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ArrowDown, ArrowRight, ChevronLeft, ChevronRight, Lock, Sparkles, Minus } from 'lucide-react';
 import { useState, useMemo, useEffect } from 'react';
-import { toast } from '@/hooks/use-toast';
+import { toast } from 'sonner';
 
 const fmt = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 });
 
@@ -187,9 +187,9 @@ export default function Allocations() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['allocation_plan', selectedMonth] });
       qc.invalidateQueries({ queryKey: ['allocation_line_items'] });
-      toast({ title: 'Allocation plan saved' });
+      toast.success('Allocation plan saved');
     },
-    onError: (e: any) => toast({ title: 'Error', description: e.message, variant: 'destructive' }),
+    onError: (e: any) => toast.error(e.message),
   });
 
   const finalizePlan = useMutation({
@@ -199,7 +199,7 @@ export default function Allocations() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['allocation_plan', selectedMonth] });
-      toast({ title: 'Plan finalized' });
+      toast.success('Plan finalized');
     },
   });
 
