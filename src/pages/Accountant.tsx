@@ -159,10 +159,14 @@ export default function Accountant() {
     enabled: !!user,
   });
 
+  // Only include approved/edited/auto_categorized expenses in exports
+  const approvedStatuses = ['approved', 'auto_categorized', 'edited'];
+
   const filteredExpenses = useMemo(() => {
     if (!expenses) return [];
-    if (modeFilter === 'all') return expenses;
-    return expenses.filter(e => e.mode === modeFilter);
+    let result = expenses.filter(e => approvedStatuses.includes(e.review_status));
+    if (modeFilter === 'all') return result;
+    return result.filter(e => e.transaction_mode === modeFilter || (modeFilter === 'personal' && e.transaction_mode === 'reimbursable_work'));
   }, [expenses, modeFilter]);
 
   const taxDeductions = useMemo(() => filteredExpenses.filter(e => e.counts_as_tax_deduction), [filteredExpenses]);
