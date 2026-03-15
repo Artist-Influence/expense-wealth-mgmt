@@ -10,7 +10,7 @@ import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
 import {
   Check, X, ArrowLeftRight, AlertTriangle, Ban, FileText,
-  Brain, History, BookOpen, Zap, Bot, User, Briefcase, Receipt
+  Brain, History, BookOpen, Zap, Bot, User, Briefcase, Receipt, Scissors
 } from 'lucide-react';
 
 interface Transaction {
