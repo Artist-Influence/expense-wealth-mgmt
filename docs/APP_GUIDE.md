@@ -1,5 +1,3 @@
-
-
 # Expense Memory — Complete App Guide
 
 ## 1. What It Is
@@ -402,4 +400,3 @@ One edge function: `categorize-ai`
 - Returns structured output via function calling: category, confidence (capped at 95), explanation, inferred merchant, suggested mode, suggested tax treatment, likely reimbursable flag
 - Validates returned categories against the allowed list
 - Graceful error handling for rate limits (429), payment required (402)
-
