@@ -6,6 +6,7 @@ import { CsvUploader } from '@/components/CsvUploader';
 import { classifyIncome, INCOME_TYPE_OPTIONS, TAXABLE_STATUS_OPTIONS } from '@/lib/income-classifier';
 import { normalizeDescription } from '@/lib/normalizer';
 import { toast } from 'sonner';
+import Papa from 'papaparse';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
