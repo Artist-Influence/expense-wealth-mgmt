@@ -71,6 +71,7 @@ export default function Tax() {
   const [incomeRows, setIncomeRows] = useState<IncomeRow[]>([]);
   const [deductionRows, setDeductionRows] = useState<DeductionRow[]>([]);
   const [taxPayments, setTaxPayments] = useState<TaxPaymentRow[]>([]);
+  const [unreviewedDeductionCount, setUnreviewedDeductionCount] = useState(0);
 
   // Draft for setup/edit form
   const [draft, setDraft] = useState<Partial<TaxProfile>>({});
