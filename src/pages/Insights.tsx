@@ -280,7 +280,7 @@ export default function Insights() {
       incomeChange: pctChange(thisYearIncome, lastYearIncome),
       expenseChange: pctChange(thisYearExpenses, lastYearExpenses),
     };
-  }, [expenses, incomeData]);
+  }, [expenses, earnedIncome]);
 
   // ─── TRENDS TAB DATA ───
   const categoryTrends = useMemo(() => {
