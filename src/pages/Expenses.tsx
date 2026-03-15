@@ -1142,6 +1142,16 @@ export default function Expenses() {
         onSave={handleDrawerSave}
         onApprove={approveRow}
         onToggleTransfer={toggleTransfer}
+        onSplit={(tx) => { setDetailTx(null); setSplitTx(tx); }}
+      />
+
+      {/* Split Transaction Dialog */}
+      <SplitTransactionDialog
+        open={!!splitTx}
+        onClose={() => setSplitTx(null)}
+        transaction={splitTx}
+        categories={categories}
+        onSplit={handleSplit}
       />
 
       <ImportPreviewDialog
