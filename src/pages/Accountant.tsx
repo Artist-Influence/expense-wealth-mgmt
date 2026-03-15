@@ -290,6 +290,7 @@ export default function Accountant() {
                   <SelectItem value="all">All</SelectItem>
                   <SelectItem value="personal">Personal</SelectItem>
                   <SelectItem value="business">Business</SelectItem>
+                  <SelectItem value="reimbursable">Reimbursable</SelectItem>
                 </SelectContent>
               </Select>
             </div>

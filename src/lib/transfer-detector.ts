@@ -22,6 +22,7 @@ const HIGH_CONFIDENCE_PATTERNS: [RegExp, string][] = [
 
 const MEDIUM_CONFIDENCE_PATTERNS: [RegExp, string][] = [
   // These CAN be real expenses — flag for review but don't auto-exclude
+  [/BALANCE\s*PAY(?:MENT)?/i, 'possible_transfer'],
   [/WIRE\s*TRANSFER/i, 'possible_transfer'],
   [/FUNDS\s*TRANSFER/i, 'possible_transfer'],
   [/ONLINE\s*DOMESTIC\s*WIRE/i, 'possible_transfer'],
