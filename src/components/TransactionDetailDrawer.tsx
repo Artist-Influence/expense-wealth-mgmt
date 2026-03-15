@@ -10,7 +10,7 @@ import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
 import {
   Check, X, ArrowLeftRight, AlertTriangle, Ban, FileText,
-  Brain, History, BookOpen, Zap, Bot, User, Briefcase, Receipt
+  Brain, History, BookOpen, Zap, Bot, User, Briefcase, Receipt, Scissors
 } from 'lucide-react';
 
 interface Transaction {
@@ -52,6 +52,13 @@ interface Transaction {
   exclude_from_expense_totals: boolean | null;
   transfer_type: string | null;
   source_file_name: string | null;
+  is_split_parent: boolean;
+  parent_transaction_id: string | null;
+  // Optional fields present on some page-specific interfaces
+  linked_reimbursement_group_id?: string | null;
+  exclude_from_cash_spend_reporting?: boolean;
+  upload_batch_id?: string | null;
+  [key: string]: any;
 }
 
 interface TransactionDetailDrawerProps {
@@ -62,6 +69,7 @@ interface TransactionDetailDrawerProps {
   onSave: (id: string, values: any) => Promise<void>;
   onApprove: (tx: Transaction) => Promise<void>;
   onToggleTransfer: (tx: Transaction) => Promise<void>;
+  onSplit?: (tx: Transaction) => void;
 }
 
 const matchSourceLabels: Record<string, { label: string; icon: React.ReactNode; color: string }> = {
@@ -92,6 +100,7 @@ export function TransactionDetailDrawer({
   onSave,
   onApprove,
   onToggleTransfer,
+  onSplit,
 }: TransactionDetailDrawerProps) {
   const [editValues, setEditValues] = useState({
     category: '', method: '', notes: '',
@@ -434,16 +443,35 @@ export function TransactionDetailDrawer({
           </div>
         )}
 
+        {/* Split parent/child badges */}
+        {tx.is_split_parent && (
+          <div className="rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-xs text-primary flex items-center gap-2 mb-4">
+            <Scissors className="h-3.5 w-3.5" />
+            <span>This transaction has been split. The parent is excluded from reporting — child rows carry the amounts.</span>
+          </div>
+        )}
+        {tx.parent_transaction_id && (
+          <div className="rounded-lg border border-border/50 bg-secondary/20 px-3 py-2 text-xs text-muted-foreground flex items-center gap-2 mb-4">
+            <Scissors className="h-3.5 w-3.5" />
+            <span>Split child row — part of a split transaction.</span>
+          </div>
+        )}
+
         <Separator className="mb-4" />
 
         {/* Actions */}
         <div className="flex items-center gap-2">
-          <Button onClick={handleSave} disabled={saving} className="flex-1 h-9 text-sm gap-1.5">
+          <Button onClick={handleSave} disabled={saving || tx.is_split_parent} className="flex-1 h-9 text-sm gap-1.5">
             <Check className="h-3.5 w-3.5" /> Save
           </Button>
-          {!['approved', 'edited'].includes(tx.review_status) && (
+          {!['approved', 'edited'].includes(tx.review_status) && !tx.is_split_parent && (
             <Button onClick={handleApprove} disabled={saving || !editValues.category} variant="secondary" className="flex-1 h-9 text-sm gap-1.5">
               <Check className="h-3.5 w-3.5" /> Approve
+            </Button>
+          )}
+          {!tx.is_split_parent && !tx.parent_transaction_id && onSplit && (
+            <Button variant="outline" onClick={() => onSplit(tx)} className="h-9 text-sm gap-1.5">
+              <Scissors className="h-3.5 w-3.5" /> Split
             </Button>
           )}
           <Button variant="outline" onClick={() => onToggleTransfer(tx)} className="h-9 text-sm gap-1.5">

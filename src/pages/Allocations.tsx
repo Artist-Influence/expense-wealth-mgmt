@@ -75,7 +75,8 @@ export default function Allocations() {
         .eq('owner_id', user!.id)
         .gte('date', start)
         .lte('date', end)
-        .eq('exclude_from_expense_totals', false);
+        .eq('exclude_from_expense_totals', false)
+        .eq('is_split_parent', false);
       return (data || []).reduce((s, r) => s + Math.abs(Number(r.amount || 0)), 0);
     },
     enabled: !!user,

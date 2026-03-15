@@ -25,6 +25,7 @@ interface Transaction {
   is_transfer: boolean;
   exclude_from_expense_totals: boolean;
   parse_status: string;
+  is_split_parent: boolean;
 }
 
 interface IncomeTransaction {
@@ -70,7 +71,7 @@ export default function Insights() {
     while (hasMore) {
       const { data } = await supabase
         .from('transactions_uploaded')
-        .select('date, description_raw, description_normalized, amount, final_category, predicted_category, final_method, predicted_method, review_status, is_transfer, exclude_from_expense_totals, parse_status')
+        .select('date, description_raw, description_normalized, amount, final_category, predicted_category, final_method, predicted_method, review_status, is_transfer, exclude_from_expense_totals, parse_status, is_split_parent')
         .eq('owner_id', user!.id).eq('mode', mode).neq('parse_status', 'parse_error')
         .range(from, from + pageSize - 1);
       if (data) allData = [...allData, ...(data as Transaction[])];
@@ -95,7 +96,7 @@ export default function Insights() {
     return allData;
   };
 
-  const expenses = useMemo(() => transactions.filter(t => !t.exclude_from_expense_totals), [transactions]);
+  const expenses = useMemo(() => transactions.filter(t => !t.exclude_from_expense_totals && !t.is_split_parent), [transactions]);
 
   // ─── SPENDING TAB DATA ───
   const overview = useMemo(() => {

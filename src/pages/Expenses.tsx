@@ -6,6 +6,7 @@ import { CsvUploader } from '@/components/CsvUploader';
 import { FileProgressList, type FileQueueItem } from '@/components/FileProgressList';
 import { ImportPreviewDialog, type FilePreviewInfo } from '@/components/ImportPreviewDialog';
 import { TransactionDetailDrawer } from '@/components/TransactionDetailDrawer';
+import { SplitTransactionDialog } from '@/components/SplitTransactionDialog';
 import { previewCsvFile, parseCsvFileWithMapping, type ParsePreview, type ColumnMapping } from '@/lib/csv-parser';
 import { categorizeTransactions, categorizeWithAI, updateMerchantMemory } from '@/lib/categorization-engine';
 import { detectMethodFromFilename } from '@/lib/method-detector';
@@ -23,7 +24,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/co
 import {
   Upload, Search, Download, Check, CheckCheck, Edit3, X,
   ArrowLeftRight, AlertTriangle, Ban, FileText, Filter,
-  Calendar, ChevronDown, Trash2, Briefcase, User, Receipt
+  Calendar, ChevronDown, Trash2, Briefcase, User, Receipt, Scissors
 } from 'lucide-react';
 
 type TransactionMode = 'personal' | 'business' | 'reimbursable_work';
@@ -69,6 +70,8 @@ interface Transaction {
   transfer_type: string | null;
   source_file_name: string | null;
   upload_batch_id: string | null;
+  is_split_parent: boolean;
+  parent_transaction_id: string | null;
 }
 
 const MODE_CONFIG: Record<TransactionMode, { label: string; color: string; activeClass: string; icon: React.ElementType }> = {
@@ -91,6 +94,7 @@ export default function Expenses() {
   const [sortCol, setSortCol] = useState<string>('date');
   const [sortAsc, setSortAsc] = useState(false);
   const [detailTx, setDetailTx] = useState<Transaction | null>(null);
+  const [splitTx, setSplitTx] = useState<Transaction | null>(null);
 
   // Upload state
   const [fileQueue, setFileQueue] = useState<FileQueueItem[]>([]);
@@ -155,6 +159,7 @@ export default function Expenses() {
       if (extraFilter === 'excluded' && !tx.exclude_from_expense_totals) return false;
       if (extraFilter === 'uncategorized' && (tx.final_category || tx.predicted_category)) return false;
       if (extraFilter === 'reimbursable' && !tx.is_reimbursable) return false;
+      if (extraFilter === 'splits' && !tx.is_split_parent && !tx.parent_transaction_id) return false;
       if (search) {
         const s = search.toLowerCase();
         return (
@@ -186,23 +191,25 @@ export default function Expenses() {
 
   // Summary stats — V2
   const stats = useMemo(() => {
-    const needsReview = transactions.filter(t => t.review_status === 'needs_review' || t.review_status === 'suggested' || t.review_status === 'ai_suggested').length;
-    const uncategorized = transactions.filter(t => !t.final_category && !t.predicted_category).length;
+    // Exclude split parents from all stats — child rows carry the real amounts
+    const activeTxns = transactions.filter(t => !t.is_split_parent);
+    const needsReview = activeTxns.filter(t => t.review_status === 'needs_review' || t.review_status === 'suggested' || t.review_status === 'ai_suggested').length;
+    const uncategorized = activeTxns.filter(t => !t.final_category && !t.predicted_category).length;
     const transfersExcluded = transactions.filter(t => t.exclude_from_expense_totals).length;
 
-    const totalCashOut = transactions
+    const totalCashOut = activeTxns
       .filter(t => t.parse_status !== 'parse_error' && !t.is_non_expense_cash_movement)
       .reduce((sum, t) => sum + Math.abs(t.amount || 0), 0);
 
-    const truePersonalSpend = transactions
+    const truePersonalSpend = activeTxns
       .filter(t => t.counts_toward_true_personal_spend && t.parse_status !== 'parse_error')
       .reduce((sum, t) => sum + Math.abs(t.amount || 0), 0);
 
-    const trueBusinessSpend = transactions
+    const trueBusinessSpend = activeTxns
       .filter(t => t.counts_toward_true_business_spend && t.parse_status !== 'parse_error')
       .reduce((sum, t) => sum + Math.abs(t.amount || 0), 0);
 
-    const pendingReimbursable = transactions
+    const pendingReimbursable = activeTxns
       .filter(t => t.is_reimbursable && t.reimbursement_status !== 'reimbursed')
       .reduce((sum, t) => sum + Math.abs(t.amount || 0), 0);
 
@@ -272,7 +279,7 @@ export default function Expenses() {
 
     if (!error) {
       const tx = transactions.find(t => t.id === id);
-      if (tx && tx.parse_status === 'ok' && !tx.is_transfer && tx.duplicate_status !== 'possible_duplicate') {
+      if (tx && tx.parse_status === 'ok' && !tx.is_transfer && !tx.is_split_parent && !tx.parent_transaction_id && tx.duplicate_status !== 'possible_duplicate') {
         const desc = tx.description_raw || '';
         if (!isStatementArtifact(desc, tx.amount || 0)) {
           const merchantKey = generateMerchantKey(normalizeDescription(desc));
@@ -293,7 +300,7 @@ export default function Expenses() {
       .update({ final_category: category, final_method: tx.final_method || tx.predicted_method, final_notes: tx.final_notes || tx.predicted_notes, review_status: 'approved' })
       .eq('id', tx.id);
     if (!error) {
-      if (tx.parse_status === 'ok' && !tx.is_transfer && tx.duplicate_status !== 'possible_duplicate') {
+      if (tx.parse_status === 'ok' && !tx.is_transfer && !tx.is_split_parent && !tx.parent_transaction_id && tx.duplicate_status !== 'possible_duplicate') {
         const desc = tx.description_raw || '';
         if (!isStatementArtifact(desc, tx.amount || 0)) {
           const merchantKey = generateMerchantKey(normalizeDescription(desc));
@@ -402,9 +409,66 @@ export default function Expenses() {
     toast.success(newIsTransfer ? 'Marked as transfer' : 'Restored to expense');
   };
 
+  const handleSplit = async (parentId: string, children: Array<{
+    amount: number; mode: string; category: string; notes: string;
+    is_reimbursable: boolean; reimbursable_to: string; tax_treatment: string;
+  }>) => {
+    if (!user) return;
+    // Mark parent as split
+    await supabase.from('transactions_uploaded').update({
+      is_split_parent: true,
+      exclude_from_expense_totals: true,
+      counts_toward_true_personal_spend: false,
+      counts_toward_true_business_spend: false,
+      review_status: 'edited',
+    }).eq('id', parentId);
+
+    const parent = transactions.find(t => t.id === parentId);
+    if (!parent) return;
+
+    // Create child rows
+    const childRows = children.map(c => ({
+      owner_id: user.id,
+      parent_transaction_id: parentId,
+      date: parent.date,
+      description_raw: parent.description_raw,
+      description_normalized: parent.description_normalized,
+      source_file_name: parent.source_file_name,
+      amount: parent.amount && parent.amount < 0 ? -c.amount : c.amount,
+      mode: c.mode === 'reimbursable_work' ? 'personal' : c.mode,
+      transaction_mode: c.mode,
+      economic_owner: c.mode === 'business' ? 'artist_influence' : c.mode === 'reimbursable_work' ? 'employer' : 'personal',
+      treatment_type: c.is_reimbursable ? 'reimbursable_expense' : 'expense',
+      tax_treatment: c.tax_treatment,
+      is_reimbursable: c.is_reimbursable,
+      reimbursable_to: c.reimbursable_to || null,
+      reimbursement_status: c.is_reimbursable ? 'pending' : 'none',
+      counts_toward_true_personal_spend: c.mode === 'personal',
+      counts_toward_true_business_spend: c.mode === 'business',
+      final_category: c.category || null,
+      final_notes: c.notes || null,
+      final_method: parent.final_method || parent.predicted_method,
+      review_status: c.category ? 'edited' : 'needs_review',
+      parse_status: 'ok',
+      duplicate_status: 'unique',
+      is_split_parent: false,
+    }));
+
+    const { error } = await supabase.from('transactions_uploaded').insert(childRows);
+    if (error) {
+      toast.error(`Split failed: ${error.message}`);
+      return;
+    }
+
+    await loadTransactions();
+    setDetailTx(null);
+    setSplitTx(null);
+    toast.success(`Split into ${children.length} rows`);
+  };
+
   const exportCsv = () => {
     const rows = filtered
-      .filter(t => ['approved', 'auto_categorized', 'edited'].includes(t.review_status))
+      .filter(t => ['approved', 'auto_categorized', 'edited'].includes(t.review_status) && !t.is_split_parent)
       .map(t => ({
         Date: t.date || '',
         Description: t.description_raw || '',
@@ -839,6 +903,7 @@ export default function Expenses() {
               <SelectItem value="transfers">Transfers</SelectItem>
               <SelectItem value="possible_transfers">Possible Transfers</SelectItem>
               <SelectItem value="reimbursable">Reimbursable</SelectItem>
+              <SelectItem value="splits">Split Transactions</SelectItem>
               <SelectItem value="possible_duplicates">Duplicates</SelectItem>
               <SelectItem value="parse_errors">Parse Errors</SelectItem>
               <SelectItem value="excluded">Excluded</SelectItem>
@@ -1003,6 +1068,16 @@ export default function Expenses() {
                       </td>
                       <td className="px-2 py-1">
                         <div className="flex items-center gap-0.5 flex-wrap">
+                          {tx.is_split_parent && (
+                            <Badge variant="outline" className="text-[9px] h-3.5 gap-0.5 border-primary/40 text-primary px-1" title="Split parent — excluded from totals">
+                              <Scissors className="h-2 w-2" /> split
+                            </Badge>
+                          )}
+                          {tx.parent_transaction_id && (
+                            <Badge variant="outline" className="text-[9px] h-3.5 gap-0.5 border-muted-foreground/40 text-muted-foreground px-1" title="Child of split transaction">
+                              <Scissors className="h-2 w-2" /> child
+                            </Badge>
+                          )}
                           {tx.is_transfer && (
                             <Badge variant="outline" className="text-[9px] h-3.5 gap-0.5 border-muted-foreground/40 text-muted-foreground px-1">
                               <ArrowLeftRight className="h-2 w-2" /> xfer
@@ -1081,6 +1156,16 @@ export default function Expenses() {
         onSave={handleDrawerSave}
         onApprove={approveRow}
         onToggleTransfer={toggleTransfer}
+        onSplit={(tx) => { setDetailTx(null); setSplitTx(tx as any); }}
+      />
+
+      {/* Split Transaction Dialog */}
+      <SplitTransactionDialog
+        open={!!splitTx}
+        onClose={() => setSplitTx(null)}
+        transaction={splitTx}
+        categories={categories}
+        onSplit={handleSplit}
       />
 
       <ImportPreviewDialog

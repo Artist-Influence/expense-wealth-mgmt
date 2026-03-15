@@ -59,6 +59,8 @@ interface ReimbursableTransaction {
   transfer_type: string | null;
   source_file_name: string | null;
   linked_reimbursement_group_id: string | null;
+  is_split_parent: boolean;
+  parent_transaction_id: string | null;
 }
 
 interface ReimbursementGroup {
