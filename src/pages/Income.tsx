@@ -203,7 +203,7 @@ export default function Income() {
         const dateVal = dateIdx >= 0 ? cols[dateIdx] : null;
 
         // Fingerprint-based dedup
-        const fp = `income|${dateVal || ''}|${rawAmount}|${(normalized || '').toLowerCase()}`;
+        const fp = `income|${dateVal || ''}|${normalizedAmount}|${(normalized || '').toLowerCase()}`;
         if (existingFingerprints.has(fp)) { skippedDupes++; continue; }
         existingFingerprints.add(fp);
 
@@ -212,7 +212,7 @@ export default function Income() {
           date: dateVal,
           description_raw: rawDesc || null,
           description_normalized: normalized || null,
-          amount: rawAmount,
+          amount: normalizedAmount,
           income_type: classification.income_type,
           taxable_status: classification.taxable_status,
           status: classification.confidence >= 80 ? 'auto_classified' : 'needs_review',
