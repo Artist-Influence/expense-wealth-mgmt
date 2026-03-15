@@ -69,6 +69,7 @@ export default function MerchantMemory() {
   };
 
   const deleteMemory = async (id: string) => {
+    if (!confirm('Delete this merchant memory record? This cannot be undone.')) return;
     await supabase.from('merchant_memory').delete().eq('id', id);
     await loadMerchants();
     toast.success('Memory record deleted');
