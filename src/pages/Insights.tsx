@@ -225,6 +225,10 @@ export default function Insights() {
       }));
   }, [expenses, incomeData]);
 
+  // Exclude non-earning income types from savings rate math
+  const NON_EARNING_TYPES = ['reimbursement', 'transfer', 'refund', 'loan_proceeds', 'owner_contribution'];
+  const earnedIncome = useMemo(() => incomeData.filter(t => !NON_EARNING_TYPES.includes(t.income_type)), [incomeData]);
+
   const savingsRate = useMemo(() => {
     const now = new Date();
     const thisMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -236,7 +240,7 @@ export default function Insights() {
 
     const calcRate = (months: string[]) => {
       let inc = 0, exp = 0;
-      incomeData.forEach(t => { if (t.date && months.includes(t.date.substring(0, 7))) inc += Math.abs(t.amount || 0); });
+      earnedIncome.forEach(t => { if (t.date && months.includes(t.date.substring(0, 7))) inc += Math.abs(t.amount || 0); });
       expenses.forEach(t => { if (t.date && months.includes(t.date.substring(0, 7))) exp += Math.abs(t.amount || 0); });
       return inc > 0 ? ((inc - exp) / inc) * 100 : 0;
     };
@@ -244,11 +248,11 @@ export default function Insights() {
     const currentRate = calcRate([thisMonth]);
     const trailing3 = calcRate([getMonthKey(0), getMonthKey(1), getMonthKey(2)]);
 
-    const totalIncome = incomeData.reduce((s, t) => s + Math.abs(t.amount || 0), 0);
+    const totalIncome = earnedIncome.reduce((s, t) => s + Math.abs(t.amount || 0), 0);
     const totalExpenses = expenses.reduce((s, t) => s + Math.abs(t.amount || 0), 0);
 
     return { currentRate, trailing3, totalIncome, totalExpenses };
-  }, [expenses, incomeData]);
+  }, [expenses, earnedIncome]);
 
   const yoyComparison = useMemo(() => {
     const now = new Date();

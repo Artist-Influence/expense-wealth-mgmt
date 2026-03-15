@@ -148,7 +148,8 @@ export default function Expenses() {
   const filtered = useMemo(() => {
     let result = transactions.filter(tx => {
       if (statusFilter !== 'all' && tx.review_status !== statusFilter) return false;
-      if (extraFilter === 'transfers' && !tx.is_transfer) return false;
+      if (extraFilter === 'transfers' && !tx.is_transfer && tx.transfer_type !== 'possible_transfer') return false;
+      if (extraFilter === 'possible_transfers' && tx.transfer_type !== 'possible_transfer') return false;
       if (extraFilter === 'possible_duplicates' && tx.duplicate_status !== 'possible_duplicate') return false;
       if (extraFilter === 'parse_errors' && tx.parse_status !== 'parse_error') return false;
       if (extraFilter === 'excluded' && !tx.exclude_from_expense_totals) return false;
@@ -601,25 +602,32 @@ export default function Expenses() {
           const dupInfo = dupStatuses.get(globalIdx) || { status: 'unique', matchId: null };
           const fp = generateFingerprint(categoryMode, tx.date, tx.amount, tx.description_normalized);
           const transfer = detectTransfer(tx.description_raw);
-          if (transfer.isTransfer) transferCount++;
+          const isHighConfTransfer = transfer.isTransfer && transfer.transferConfidence === 'high';
+          const isMediumTransfer = transfer.transferConfidence === 'medium';
+          if (isHighConfTransfer) transferCount++;
 
           let transferCategory: string | null = null;
-          if (transfer.isTransfer) {
+          if (isHighConfTransfer) {
             transferCategory = allowedSet.has('transfer') ? allowedCategories.find(c => c.toLowerCase() === 'transfer') || null : null;
           }
 
-          const predictedCat = transfer.isTransfer ? transferCategory : result.predicted_category;
+          const predictedCat = isHighConfTransfer ? transferCategory : result.predicted_category;
           // Auto-approve: if auto_categorized with high confidence exact match, mark as approved
           const shouldAutoApprove = result.review_status === 'auto_categorized' 
             && result.confidence >= 95 
             && (result.match_source === 'exact_history' || result.match_source === 'normalized_history')
-            && !transfer.isTransfer;
+            && !isHighConfTransfer;
           const finalCat = (result.review_status === 'auto_categorized' || shouldAutoApprove)
-            ? (transfer.isTransfer ? transferCategory : result.predicted_category)
+            ? (isHighConfTransfer ? transferCategory : result.predicted_category)
             : null;
-          const reviewStatus = (transfer.isTransfer && !transferCategory) ? 'needs_review' 
+          const reviewStatus = (isHighConfTransfer && !transferCategory) ? 'needs_review' 
             : shouldAutoApprove ? 'approved' 
             : result.review_status;
+
+          // Medium-confidence transfers: keep in totals, flag for review
+          const matchExplanation = isMediumTransfer
+            ? `${result.match_explanation || ''} ⚠️ Possible transfer detected (medium confidence) — review if this is a real expense or inter-account movement.`.trim()
+            : result.match_explanation || null;
 
           return {
             upload_batch_id: batch.id, mode: categoryMode, date: tx.date,
@@ -632,22 +640,22 @@ export default function Expenses() {
             final_method: reviewStatus === 'auto_categorized' ? txMethod : null,
             final_notes: reviewStatus === 'auto_categorized' ? result.predicted_notes : null,
             confidence: result.confidence, match_source: result.match_source,
-            match_explanation: result.match_explanation || null,
+            match_explanation: matchExplanation,
             review_status: reviewStatus, owner_id: user.id,
             source_row_json: tx.source_row_json, source_file_name: file.name,
             parse_status: tx.parse_status, parse_error: tx.parse_error,
             duplicate_fingerprint: fp, duplicate_status: dupInfo.status,
             duplicate_of_transaction_id: dupInfo.matchId,
-            is_transfer: transfer.isTransfer,
-            exclude_from_expense_totals: transfer.isTransfer && appSettings.excludeTransfers,
+            is_transfer: isHighConfTransfer,
+            exclude_from_expense_totals: isHighConfTransfer && appSettings.excludeTransfers,
             transfer_type: transfer.transferType,
             // V2 fields
             transaction_mode: mode,
             ...modeDefaults,
-            is_non_expense_cash_movement: transfer.isTransfer,
-            treatment_type: transfer.isTransfer ? 'transfer' : 'expense',
-            counts_toward_true_personal_spend: transfer.isTransfer ? false : modeDefaults.counts_toward_true_personal_spend,
-            counts_toward_true_business_spend: transfer.isTransfer ? false : modeDefaults.counts_toward_true_business_spend,
+            is_non_expense_cash_movement: isHighConfTransfer,
+            treatment_type: isHighConfTransfer ? 'transfer' : 'expense',
+            counts_toward_true_personal_spend: isHighConfTransfer ? false : modeDefaults.counts_toward_true_personal_spend,
+            counts_toward_true_business_spend: isHighConfTransfer ? false : modeDefaults.counts_toward_true_business_spend,
           };
         });
         const { error: txError } = await supabase.from('transactions_uploaded').insert(chunk);
@@ -829,6 +837,7 @@ export default function Expenses() {
               <SelectItem value="all">All Rows</SelectItem>
               <SelectItem value="uncategorized">Uncategorized</SelectItem>
               <SelectItem value="transfers">Transfers</SelectItem>
+              <SelectItem value="possible_transfers">Possible Transfers</SelectItem>
               <SelectItem value="reimbursable">Reimbursable</SelectItem>
               <SelectItem value="possible_duplicates">Duplicates</SelectItem>
               <SelectItem value="parse_errors">Parse Errors</SelectItem>
@@ -994,13 +1003,28 @@ export default function Expenses() {
                       <td className="px-2 py-1">
                         <div className="flex items-center gap-0.5 flex-wrap">
                           {tx.is_transfer && (
-                            <Badge variant="outline" className="text-[9px] h-3.5 gap-0.5 border-primary/30 text-primary px-1">
+                            <Badge variant="outline" className="text-[9px] h-3.5 gap-0.5 border-muted-foreground/40 text-muted-foreground px-1">
                               <ArrowLeftRight className="h-2 w-2" /> xfer
                             </Badge>
                           )}
+                          {!tx.is_transfer && tx.transfer_type === 'possible_transfer' && (
+                            <Badge variant="outline" className="text-[9px] h-3.5 gap-0.5 border-warning/40 text-warning px-1" title="Possible transfer — review needed">
+                              <ArrowLeftRight className="h-2 w-2" /> xfer?
+                            </Badge>
+                          )}
                           {tx.is_reimbursable && (
-                            <Badge variant="outline" className="text-[9px] h-3.5 gap-0.5 border-warning/30 text-warning px-1">
-                              <Receipt className="h-2 w-2" /> reimb
+                            <Badge variant="outline" className={`text-[9px] h-3.5 gap-0.5 px-1 ${
+                              tx.reimbursement_status === 'reimbursed' ? 'border-success/30 text-success' :
+                              tx.reimbursement_status === 'partially_reimbursed' ? 'border-warning/40 text-warning' :
+                              tx.reimbursement_status === 'submitted' ? 'border-primary/30 text-primary' :
+                              'border-warning/30 text-warning'
+                            }`}>
+                              <Receipt className="h-2 w-2" /> {
+                                tx.reimbursement_status === 'reimbursed' ? 'reimbursed' :
+                                tx.reimbursement_status === 'partially_reimbursed' ? 'partial' :
+                                tx.reimbursement_status === 'submitted' ? 'submitted' :
+                                'reimb'
+                              }
                             </Badge>
                           )}
                           {tx.duplicate_status === 'possible_duplicate' && (

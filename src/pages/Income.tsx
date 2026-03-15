@@ -112,7 +112,7 @@ export default function Income() {
       .from('reimbursement_groups')
       .select('id, title, status, total_expected, total_received')
       .eq('owner_id', user.id)
-      .in('status', ['pending', 'submitted']);
+      .in('status', ['pending', 'submitted', 'partially_reimbursed']);
     setReimbursementGroups((data as ReimbursementGroup[]) || []);
   }, [user]);
 
@@ -306,32 +306,51 @@ export default function Income() {
     const group = reimbursementGroups.find(g => g.id === groupId);
     if (!group) return;
 
+    const paymentAmount = tx.amount || 0;
+    const newReceived = group.total_received + paymentAmount;
+    const remaining = group.total_expected - group.total_received;
+
+    // Warn on overpayment
+    if (paymentAmount > remaining && remaining > 0) {
+      const overBy = paymentAmount - remaining;
+      if (!confirm(`This payment ($${paymentAmount.toFixed(2)}) exceeds the remaining balance ($${remaining.toFixed(2)}) by $${overBy.toFixed(2)}. Continue?`)) return;
+    }
+
     // Link income to group
     await supabase.from('income_transactions').update({
       linked_reimbursement_group_id: groupId,
       status: 'approved',
     }).eq('id', matchingTxId);
 
-    // Update group totals
-    const newReceived = group.total_received + (tx.amount || 0);
-    const newStatus = newReceived >= group.total_expected ? 'reimbursed' : group.status;
+    // Determine new group status
+    let newStatus: string;
+    if (newReceived >= group.total_expected) {
+      newStatus = 'reimbursed';
+    } else if (newReceived > 0) {
+      newStatus = 'partially_reimbursed';
+    } else {
+      newStatus = group.status;
+    }
+
     await supabase.from('reimbursement_groups').update({
       total_received: newReceived,
       status: newStatus,
       received_date: newStatus === 'reimbursed' ? new Date().toISOString().split('T')[0] : null,
     }).eq('id', groupId);
 
-    // Cascade reimbursement status to linked expenses when group is reimbursed
-    if (newStatus === 'reimbursed') {
+    // Cascade reimbursement status to linked expenses
+    if (newStatus === 'reimbursed' || newStatus === 'partially_reimbursed') {
       await supabase.from('transactions_uploaded')
-        .update({ reimbursement_status: 'reimbursed' })
+        .update({ reimbursement_status: newStatus })
         .eq('linked_reimbursement_group_id', groupId);
     }
 
     if (newReceived > group.total_expected) {
-      toast.warning(`Matched — but received (${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(newReceived)}) exceeds expected (${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(group.total_expected)})`);
+      toast.warning(`Matched — but received (${fmt(newReceived)}) exceeds expected (${fmt(group.total_expected)})`);
+    } else if (newStatus === 'partially_reimbursed') {
+      toast.success(`Matched — partially reimbursed (${fmt(newReceived)} of ${fmt(group.total_expected)})`);
     } else {
-      toast.success('Matched to reimbursement group');
+      toast.success('Matched to reimbursement group — fully reimbursed!');
     }
     setShowMatchDialog(false);
     setMatchingTxId(null);
@@ -569,21 +588,41 @@ export default function Income() {
       <Dialog open={showMatchDialog} onOpenChange={setShowMatchDialog}>
         <DialogContent className="max-w-md">
           <DialogHeader><DialogTitle>Match to Reimbursement Group</DialogTitle></DialogHeader>
+          {(() => {
+            const matchTx = matchingTxId ? transactions.find(t => t.id === matchingTxId) : null;
+            return matchTx ? (
+              <div className="rounded border border-border bg-secondary/20 p-3 mb-2">
+                <p className="text-xs text-muted-foreground">This payment</p>
+                <p className="text-sm font-semibold text-foreground font-mono">{fmt(matchTx.amount || 0)}</p>
+                <p className="text-xs text-muted-foreground truncate">{matchTx.description_raw}</p>
+              </div>
+            ) : null;
+          })()}
           {reimbursementGroups.length === 0 ? (
             <p className="text-sm text-muted-foreground py-4">No pending reimbursement groups found.</p>
           ) : (
             <div className="space-y-2 max-h-[300px] overflow-y-auto">
               {reimbursementGroups.map(g => {
                 const remaining = g.total_expected - g.total_received;
+                const matchTx = matchingTxId ? transactions.find(t => t.id === matchingTxId) : null;
+                const paymentAmt = matchTx?.amount || 0;
+                const wouldOverpay = paymentAmt > remaining && remaining > 0;
+                const wouldPartial = paymentAmt < remaining;
                 return (
-                  <div key={g.id} className="flex items-center justify-between p-3 rounded-lg border border-border bg-card hover:bg-muted/50 cursor-pointer" onClick={() => matchToGroup(g.id)}>
-                    <div>
+                  <div key={g.id} className={`flex items-center justify-between p-3 rounded-lg border bg-card hover:bg-muted/50 cursor-pointer transition-colors ${wouldOverpay ? 'border-destructive/40' : 'border-border'}`} onClick={() => matchToGroup(g.id)}>
+                    <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-foreground">{g.title}</p>
                       <p className="text-xs text-muted-foreground">
-                        Expected: {fmt(g.total_expected)} · Remaining: {fmt(remaining)}
+                        Expected: {fmt(g.total_expected)} · Received: {fmt(g.total_received)} · Remaining: {fmt(remaining)}
                       </p>
+                      {wouldOverpay && (
+                        <p className="text-[10px] text-destructive mt-0.5">⚠️ Payment exceeds remaining by {fmt(paymentAmt - remaining)}</p>
+                      )}
+                      {wouldPartial && (
+                        <p className="text-[10px] text-warning mt-0.5">→ Will be partially reimbursed ({fmt(g.total_received + paymentAmt)} of {fmt(g.total_expected)})</p>
+                      )}
                     </div>
-                    <Badge variant="outline" className="text-xs">{g.status}</Badge>
+                    <Badge variant="outline" className="text-xs ml-2 shrink-0">{g.status.replace(/_/g, ' ')}</Badge>
                   </div>
                 );
               })}

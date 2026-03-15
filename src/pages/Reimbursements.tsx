@@ -257,15 +257,18 @@ export default function Reimbursements() {
 
     await (supabase as any).from('reimbursement_groups').update(updates).eq('id', groupId);
 
-    // Also update linked transactions
-    const txStatus = status === 'submitted' ? 'submitted' : status === 'reimbursed' ? 'reimbursed' : status;
+    // Cascade to linked transactions with proper status
+    const txStatus = status === 'submitted' ? 'submitted'
+      : status === 'reimbursed' ? 'reimbursed'
+      : status === 'partially_reimbursed' ? 'partially_reimbursed'
+      : status;
     await supabase.from('transactions_uploaded')
       .update({ reimbursement_status: txStatus })
       .eq('linked_reimbursement_group_id', groupId);
 
     setSelectedGroup(null);
     await loadData();
-    toast.success(`Report marked as ${status}`);
+    toast.success(`Report marked as ${status.replace(/_/g, ' ')}`);
   };
 
   const exportCsv = () => {
@@ -404,22 +407,32 @@ export default function Reimbursements() {
           <div>
             <h2 className="text-sm font-medium text-muted-foreground mb-2">Report Groups</h2>
             <div className="flex flex-wrap gap-2">
-              {groups.map(g => (
-                <button
-                  key={g.id}
-                  onClick={() => openGroupDetail(g)}
-                  className="flex items-center gap-2 px-3 py-2 rounded-lg border border-border/40 bg-card hover:bg-secondary/50 transition-colors text-left"
-                >
-                  <FolderOpen className="h-3.5 w-3.5 text-muted-foreground" />
-                  <div>
-                    <span className="text-xs font-medium text-foreground">{g.title}</span>
-                    <span className="text-[10px] text-muted-foreground ml-2">${g.total_expected.toFixed(2)}</span>
-                  </div>
-                  <Badge variant="outline" className={`text-[10px] ml-1 ${STATUS_COLORS[g.status] || ''}`}>
-                    {g.status}
-                  </Badge>
-                </button>
-              ))}
+              {groups.map(g => {
+                const pct = g.total_expected > 0 ? Math.min(100, (g.total_received / g.total_expected) * 100) : 0;
+                return (
+                  <button
+                    key={g.id}
+                    onClick={() => openGroupDetail(g)}
+                    className="flex items-center gap-2 px-3 py-2 rounded-lg border border-border/40 bg-card hover:bg-secondary/50 transition-colors text-left min-w-[200px]"
+                  >
+                    <FolderOpen className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-medium text-foreground truncate">{g.title}</span>
+                        <Badge variant="outline" className={`text-[10px] shrink-0 ${STATUS_COLORS[g.status] || ''}`}>
+                          {g.status.replace(/_/g, ' ')}
+                        </Badge>
+                      </div>
+                      <div className="flex items-center gap-1.5 mt-1">
+                        <div className="flex-1 h-1 bg-secondary rounded-full overflow-hidden">
+                          <div className={`h-full rounded-full transition-all ${pct >= 100 ? 'bg-[hsl(var(--success))]' : 'bg-primary'}`} style={{ width: `${pct}%` }} />
+                        </div>
+                        <span className="text-[10px] text-muted-foreground font-mono shrink-0">${g.total_received.toFixed(0)} / ${g.total_expected.toFixed(0)}</span>
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           </div>
         )}
@@ -618,8 +631,28 @@ export default function Reimbursements() {
                   </div>
                   <div>
                     <span className="text-muted-foreground">Received:</span>
-                    <span className="text-foreground ml-1 font-mono">${selectedGroup.total_received.toFixed(2)}</span>
+                    <span className={`ml-1 font-mono ${selectedGroup.total_received > selectedGroup.total_expected ? 'text-destructive' : 'text-foreground'}`}>
+                      ${selectedGroup.total_received.toFixed(2)}
+                    </span>
+                    {selectedGroup.total_received > selectedGroup.total_expected && (
+                      <span className="text-[10px] text-destructive ml-1">⚠️ overpaid</span>
+                    )}
                   </div>
+                  {selectedGroup.total_expected > 0 && (
+                    <div className="col-span-2">
+                      <div className="flex items-center gap-2">
+                        <div className="flex-1 h-1.5 bg-secondary rounded-full overflow-hidden">
+                          <div
+                            className={`h-full rounded-full ${selectedGroup.total_received >= selectedGroup.total_expected ? 'bg-[hsl(var(--success))]' : 'bg-primary'}`}
+                            style={{ width: `${Math.min(100, (selectedGroup.total_received / selectedGroup.total_expected) * 100)}%` }}
+                          />
+                        </div>
+                        <span className="text-[10px] text-muted-foreground font-mono">
+                          {Math.round((selectedGroup.total_received / selectedGroup.total_expected) * 100)}%
+                        </span>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {selectedGroup.notes && (

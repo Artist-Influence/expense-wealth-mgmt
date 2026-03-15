@@ -181,8 +181,11 @@ export default function Accountant() {
         };
       case 'income_ledger':
         return {
-          headers: ['Date', 'Description', 'Amount', 'Type', 'Taxable', 'Source', 'Notes'],
-          rows: (income || []).map(i => [i.date, i.description_normalized || i.description_raw, String(i.amount ?? 0), i.income_type, i.taxable_status, i.source_account_name, i.notes]),
+          headers: ['Date', 'Description', 'Amount', 'Income Type', 'Taxable', 'Source', 'Is Earning', 'Notes'],
+          rows: (income || []).map(i => {
+            const isEarning = !['reimbursement', 'transfer', 'refund', 'loan_proceeds', 'owner_contribution'].includes(i.income_type);
+            return [i.date, i.description_normalized || i.description_raw, String(i.amount ?? 0), i.income_type, i.taxable_status, i.source_account_name, isEarning ? 'Yes' : 'No', i.notes];
+          }),
         };
       case 'reimbursement_report': {
         // Date-filter reimbursement groups by created_at
@@ -208,7 +211,10 @@ export default function Accountant() {
       case 'year_end_summary': {
         // Use only approved expenses, exclude transfers and reimbursables from net
         const approved = (expenses || []).filter(e => approvedStatuses.includes(e.review_status));
-        const totalIncome = (income || []).reduce((s, i) => s + (i.amount || 0), 0);
+        const nonEarningTypes = ['reimbursement', 'transfer', 'refund', 'loan_proceeds', 'owner_contribution'];
+        const totalInflows = (income || []).reduce((s, i) => s + (i.amount || 0), 0);
+        const totalEarnedIncome = (income || []).filter(i => !nonEarningTypes.includes(i.income_type)).reduce((s, i) => s + (i.amount || 0), 0);
+        const totalReimbInflows = (income || []).filter(i => i.income_type === 'reimbursement').reduce((s, i) => s + (i.amount || 0), 0);
         const totalExpPersonal = approved.filter(e => e.transaction_mode === 'personal' && !e.is_transfer).reduce((s, e) => s + Math.abs(e.amount || 0), 0);
         const totalExpBusiness = approved.filter(e => e.transaction_mode === 'business' && !e.is_transfer).reduce((s, e) => s + Math.abs(e.amount || 0), 0);
         const totalReimbursable = approved.filter(e => e.transaction_mode === 'reimbursable_work').reduce((s, e) => s + Math.abs(e.amount || 0), 0);
@@ -218,14 +224,16 @@ export default function Accountant() {
         return {
           headers: ['Metric', 'Amount'],
           rows: [
-            ['Total Income', totalIncome.toFixed(2)],
+            ['Total Inflows (all sources)', totalInflows.toFixed(2)],
+            ['Total Earned Income (excl. reimbursements/transfers/refunds)', totalEarnedIncome.toFixed(2)],
+            ['Reimbursement Inflows', totalReimbInflows.toFixed(2)],
             ['Personal Expenses (excl. transfers)', totalExpPersonal.toFixed(2)],
             ['Business Expenses (excl. transfers)', totalExpBusiness.toFixed(2)],
             ['Reimbursable Expenses (fronted)', totalReimbursable.toFixed(2)],
             ['Transfers Excluded', totalTransfers.toFixed(2)],
             ['Tax Deductions', totalDeductions.toFixed(2)],
             ['Tax Payments Made', totalTaxPaid.toFixed(2)],
-            ['Net Position (Income - Personal - Business)', (totalIncome - totalExpPersonal - totalExpBusiness).toFixed(2)],
+            ['Net Position (Earned Income - Personal - Business)', (totalEarnedIncome - totalExpPersonal - totalExpBusiness).toFixed(2)],
           ],
         };
       }
