@@ -341,7 +341,10 @@ export default function Insights() {
       <AppNav />
       <div className="container py-4 animate-fade-in">
         <div className="flex items-center justify-between mb-4">
-          <h1 className="text-lg font-semibold text-foreground">Insights</h1>
+          <div>
+            <h1 className="text-lg font-semibold text-foreground">Insights</h1>
+            <p className="text-[10px] text-muted-foreground">Charts use approved/edited data only · Income is cross-mode</p>
+          </div>
           <div className="flex rounded-lg border border-border/40 overflow-hidden">
             <button onClick={() => setMode('personal')} className={`px-3 py-1.5 text-xs font-medium transition-colors ${mode === 'personal' ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground'}`}>
               Personal

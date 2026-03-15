@@ -321,7 +321,18 @@ export default function Income() {
       received_date: newStatus === 'reimbursed' ? new Date().toISOString().split('T')[0] : null,
     }).eq('id', groupId);
 
-    toast.success('Matched to reimbursement group');
+    // Cascade reimbursement status to linked expenses when group is reimbursed
+    if (newStatus === 'reimbursed') {
+      await supabase.from('transactions_uploaded')
+        .update({ reimbursement_status: 'reimbursed' })
+        .eq('linked_reimbursement_group_id', groupId);
+    }
+
+    if (newReceived > group.total_expected) {
+      toast.warning(`Matched — but received (${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(newReceived)}) exceeds expected (${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(group.total_expected)})`);
+    } else {
+      toast.success('Matched to reimbursement group');
+    }
     setShowMatchDialog(false);
     setMatchingTxId(null);
     fetchTransactions();

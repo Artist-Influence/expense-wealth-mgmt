@@ -308,8 +308,16 @@ export default function Allocations() {
                 disabled={isLocked}
               />
             </div>
+            {!taxProfile && (
+              <div className="rounded border border-warning/30 bg-warning/5 px-3 py-2 text-[11px] text-warning">
+                ⚠️ No tax profile configured — using default 35.5% combined rate. <a href="/tax" className="underline">Set up tax profile →</a>
+              </div>
+            )}
             <div className="border-t border-border pt-3 flex items-center justify-between">
-              <span className="text-sm font-semibold text-foreground">Free Cash (Safe to Invest)</span>
+              <div>
+                <span className="text-sm font-semibold text-foreground">Estimated Available</span>
+                <p className="text-[10px] text-muted-foreground">Based on recorded data · Expenses are cross-mode</p>
+              </div>
               <span className={`text-lg font-bold ${freeCash > 0 ? 'text-[hsl(var(--success))]' : 'text-destructive'}`}>
                 {fmt(freeCash)}
               </span>

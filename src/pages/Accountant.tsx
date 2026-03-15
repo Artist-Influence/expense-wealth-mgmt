@@ -17,7 +17,7 @@ import { toast } from 'sonner';
 type ExportType = 'expense_ledger' | 'income_ledger' | 'reimbursement_report' | 'tax_deductions' | 'tax_payments' | 'year_end_summary';
 
 const exportTypes = [
-  { id: 'expense_ledger' as ExportType, label: 'Expense Ledger', icon: Receipt, desc: 'All approved expenses with categories, methods, and notes' },
+  { id: 'expense_ledger' as ExportType, label: 'Expense Ledger', icon: Receipt, desc: 'Approved expenses with categories, modes, and flags' },
   { id: 'income_ledger' as ExportType, label: 'Income Ledger', icon: DollarSign, desc: 'All income transactions with type and taxable status' },
   { id: 'reimbursement_report' as ExportType, label: 'Reimbursement Report', icon: ReceiptText, desc: 'Reimbursement groups with status and amounts' },
   { id: 'tax_deductions' as ExportType, label: 'Tax Deductions', icon: Landmark, desc: 'Tax-deductible expenses grouped by category' },
