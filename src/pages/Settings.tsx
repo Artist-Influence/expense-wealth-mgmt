@@ -177,6 +177,11 @@ export default function SettingsPage() {
   const addCategory = async (mode: 'personal' | 'business', name: string) => {
     if (!name.trim()) return;
     const cats = mode === 'personal' ? personalCats : businessCats;
+    const duplicate = cats.find(c => c.category_name.toLowerCase() === name.trim().toLowerCase());
+    if (duplicate) {
+      toast.error(`Category "${duplicate.category_name}" already exists`);
+      return;
+    }
     await supabase.from('category_options').insert({ mode, category_name: name.trim(), sort_order: cats.length, owner_id: user!.id });
     if (mode === 'personal') setNewCatPersonal(''); else setNewCatBusiness('');
     await loadCategories();

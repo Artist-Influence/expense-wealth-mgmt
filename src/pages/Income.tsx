@@ -161,7 +161,7 @@ export default function Income() {
     setSelectedIds(next);
   };
 
-  // CSV upload handler
+  // CSV upload handler with duplicate detection
   const handleCsvFiles = async (files: File[]) => {
     if (!user) return;
     for (const file of files) {
@@ -170,7 +170,6 @@ export default function Income() {
       const allRows = parsed.data as string[][];
       if (allRows.length < 2) { toast.error(`${file.name}: No data rows`); continue; }
 
-
       const headers = allRows[0].map(h => (h || '').trim().toLowerCase());
       const dateIdx = headers.findIndex(h => /date/i.test(h));
       const descIdx = headers.findIndex(h => /desc|memo|narr|detail/i.test(h));
@@ -178,19 +177,37 @@ export default function Income() {
 
       if (amtIdx === -1) { toast.error(`${file.name}: No amount column found`); continue; }
 
+      // Load existing income for dedup
+      const existingFingerprints = new Set<string>();
+      const { data: existingTxs } = await supabase
+        .from('income_transactions')
+        .select('date, amount, description_normalized')
+        .eq('owner_id', user.id);
+      for (const ex of (existingTxs || [])) {
+        const fp = `income|${ex.date || ''}|${ex.amount || 0}|${(ex.description_normalized || '').toLowerCase()}`;
+        existingFingerprints.add(fp);
+      }
+
       const rows: any[] = [];
+      let skippedDupes = 0;
       for (let i = 1; i < allRows.length; i++) {
         const cols = allRows[i];
         const rawDesc = descIdx >= 0 ? cols[descIdx] : '';
         const rawAmount = parseFloat((cols[amtIdx] || '0').replace(/[$,]/g, ''));
-        if (isNaN(rawAmount) || rawAmount <= 0) continue; // income = positive amounts
+        if (isNaN(rawAmount) || rawAmount <= 0) continue;
 
         const classification = classifyIncome(rawDesc);
         const normalized = normalizeDescription(rawDesc);
+        const dateVal = dateIdx >= 0 ? cols[dateIdx] : null;
+
+        // Fingerprint-based dedup
+        const fp = `income|${dateVal || ''}|${rawAmount}|${(normalized || '').toLowerCase()}`;
+        if (existingFingerprints.has(fp)) { skippedDupes++; continue; }
+        existingFingerprints.add(fp);
 
         rows.push({
           owner_id: user.id,
-          date: dateIdx >= 0 ? cols[dateIdx] : null,
+          date: dateVal,
           description_raw: rawDesc || null,
           description_normalized: normalized || null,
           amount: rawAmount,
@@ -201,11 +218,12 @@ export default function Income() {
         });
       }
 
+      if (rows.length === 0 && skippedDupes > 0) { toast.info(`${file.name}: All ${skippedDupes} rows are duplicates`); continue; }
       if (rows.length === 0) { toast.error(`${file.name}: No valid income rows`); continue; }
 
       const { error } = await supabase.from('income_transactions').insert(rows);
       if (error) { toast.error(`${file.name}: Import failed`); console.error(error); }
-      else toast.success(`${file.name}: ${rows.length} income rows imported`);
+      else toast.success(`${file.name}: ${rows.length} imported${skippedDupes > 0 ? `, ${skippedDupes} duplicates skipped` : ''}`);
     }
     setShowUploader(false);
     fetchTransactions();

@@ -12,7 +12,7 @@ import {
   FileSpreadsheet, Download, Receipt, DollarSign, ReceiptText,
   Landmark, PiggyBank, BarChart3
 } from 'lucide-react';
-import { toast } from '@/hooks/use-toast';
+import { toast } from 'sonner';
 
 type ExportType = 'expense_ledger' | 'income_ledger' | 'reimbursement_report' | 'tax_deductions' | 'tax_payments' | 'year_end_summary';
 

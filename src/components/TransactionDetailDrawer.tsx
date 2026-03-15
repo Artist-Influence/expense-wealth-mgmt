@@ -127,6 +127,16 @@ export function TransactionDetailDrawer({
   if (!tx) return null;
 
   const handleSave = async () => {
+    if (!editValues.category) {
+      // Keep as needs_review if no category set
+      setSaving(true);
+      try {
+        await onSave(tx.id, { ...editValues, _keepNeedsReview: true });
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
     setSaving(true);
     try {
       await onSave(tx.id, editValues);

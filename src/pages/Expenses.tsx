@@ -248,7 +248,7 @@ export default function Expenses() {
       final_category: values.category,
       final_method: values.method,
       final_notes: values.notes,
-      review_status: 'edited',
+      review_status: (!values.category && values._keepNeedsReview) ? 'needs_review' : 'edited',
     };
 
     if (values.transaction_mode !== undefined) updatePayload.transaction_mode = values.transaction_mode;
