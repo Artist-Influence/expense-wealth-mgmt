@@ -531,6 +531,9 @@ export default function Insights() {
                     <PiggyBank className="h-4 w-4 text-success" />
                     <h3 className="text-sm font-medium text-foreground">Net Savings Rate</h3>
                   </div>
+                  <p className="text-[9px] text-muted-foreground mb-2">(Earned Income − {mode} Expenses) / Earned Income · Excludes reimbursements, transfers, refunds</p>
+                  <div className="space-y-3" style={{ marginTop: 0 }}>
+                  </div>
                   <div className="space-y-3">
                     <div>
                       <p className="text-[11px] text-muted-foreground mb-0.5">Current Month</p>
