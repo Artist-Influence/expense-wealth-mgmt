@@ -168,13 +168,13 @@ export default function Insights() {
 
   const recurringCharges = useMemo(() => {
     const merchMap = new Map<string, { amounts: number[]; dates: string[]; category: string }>();
-    expenses.forEach(t => {
+    approvedExpenses.forEach(t => {
       if (!t.date) return;
       const desc = (t.description_normalized || t.description_raw || '').substring(0, 40);
       const existing = merchMap.get(desc) || { amounts: [], dates: [], category: '' };
       existing.amounts.push(Math.abs(t.amount || 0));
       existing.dates.push(t.date);
-      existing.category = t.final_category || t.predicted_category || '';
+      existing.category = t.final_category || '';
       merchMap.set(desc, existing);
     });
     return [...merchMap.entries()]
@@ -195,7 +195,7 @@ export default function Insights() {
         return { name, avg: Math.round(avg * 100) / 100, frequency, category: data.category, lastCharged, monthlyEstimate: Math.round(monthlyEstimate * 100) / 100, count: data.amounts.length };
       })
       .sort((a, b) => b.monthlyEstimate - a.monthlyEstimate);
-  }, [expenses]);
+  }, [approvedExpenses]);
 
   // ─── INCOME & SAVINGS TAB DATA ───
   const incomeVsExpenses = useMemo(() => {
