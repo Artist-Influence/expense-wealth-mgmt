@@ -601,25 +601,32 @@ export default function Expenses() {
           const dupInfo = dupStatuses.get(globalIdx) || { status: 'unique', matchId: null };
           const fp = generateFingerprint(categoryMode, tx.date, tx.amount, tx.description_normalized);
           const transfer = detectTransfer(tx.description_raw);
-          if (transfer.isTransfer) transferCount++;
+          const isHighConfTransfer = transfer.isTransfer && transfer.transferConfidence === 'high';
+          const isMediumTransfer = transfer.transferConfidence === 'medium';
+          if (isHighConfTransfer) transferCount++;
 
           let transferCategory: string | null = null;
-          if (transfer.isTransfer) {
+          if (isHighConfTransfer) {
             transferCategory = allowedSet.has('transfer') ? allowedCategories.find(c => c.toLowerCase() === 'transfer') || null : null;
           }
 
-          const predictedCat = transfer.isTransfer ? transferCategory : result.predicted_category;
+          const predictedCat = isHighConfTransfer ? transferCategory : result.predicted_category;
           // Auto-approve: if auto_categorized with high confidence exact match, mark as approved
           const shouldAutoApprove = result.review_status === 'auto_categorized' 
             && result.confidence >= 95 
             && (result.match_source === 'exact_history' || result.match_source === 'normalized_history')
-            && !transfer.isTransfer;
+            && !isHighConfTransfer;
           const finalCat = (result.review_status === 'auto_categorized' || shouldAutoApprove)
-            ? (transfer.isTransfer ? transferCategory : result.predicted_category)
+            ? (isHighConfTransfer ? transferCategory : result.predicted_category)
             : null;
-          const reviewStatus = (transfer.isTransfer && !transferCategory) ? 'needs_review' 
+          const reviewStatus = (isHighConfTransfer && !transferCategory) ? 'needs_review' 
             : shouldAutoApprove ? 'approved' 
             : result.review_status;
+
+          // Medium-confidence transfers: keep in totals, flag for review
+          const matchExplanation = isMediumTransfer
+            ? `${result.match_explanation || ''} ⚠️ Possible transfer detected (medium confidence) — review if this is a real expense or inter-account movement.`.trim()
+            : result.match_explanation || null;
 
           return {
             upload_batch_id: batch.id, mode: categoryMode, date: tx.date,
@@ -632,22 +639,22 @@ export default function Expenses() {
             final_method: reviewStatus === 'auto_categorized' ? txMethod : null,
             final_notes: reviewStatus === 'auto_categorized' ? result.predicted_notes : null,
             confidence: result.confidence, match_source: result.match_source,
-            match_explanation: result.match_explanation || null,
+            match_explanation: matchExplanation,
             review_status: reviewStatus, owner_id: user.id,
             source_row_json: tx.source_row_json, source_file_name: file.name,
             parse_status: tx.parse_status, parse_error: tx.parse_error,
             duplicate_fingerprint: fp, duplicate_status: dupInfo.status,
             duplicate_of_transaction_id: dupInfo.matchId,
-            is_transfer: transfer.isTransfer,
-            exclude_from_expense_totals: transfer.isTransfer && appSettings.excludeTransfers,
+            is_transfer: isHighConfTransfer,
+            exclude_from_expense_totals: isHighConfTransfer && appSettings.excludeTransfers,
             transfer_type: transfer.transferType,
             // V2 fields
             transaction_mode: mode,
             ...modeDefaults,
-            is_non_expense_cash_movement: transfer.isTransfer,
-            treatment_type: transfer.isTransfer ? 'transfer' : 'expense',
-            counts_toward_true_personal_spend: transfer.isTransfer ? false : modeDefaults.counts_toward_true_personal_spend,
-            counts_toward_true_business_spend: transfer.isTransfer ? false : modeDefaults.counts_toward_true_business_spend,
+            is_non_expense_cash_movement: isHighConfTransfer,
+            treatment_type: isHighConfTransfer ? 'transfer' : 'expense',
+            counts_toward_true_personal_spend: isHighConfTransfer ? false : modeDefaults.counts_toward_true_personal_spend,
+            counts_toward_true_business_spend: isHighConfTransfer ? false : modeDefaults.counts_toward_true_business_spend,
           };
         });
         const { error: txError } = await supabase.from('transactions_uploaded').insert(chunk);
