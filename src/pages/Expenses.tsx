@@ -190,23 +190,25 @@ export default function Expenses() {
 
   // Summary stats — V2
   const stats = useMemo(() => {
-    const needsReview = transactions.filter(t => t.review_status === 'needs_review' || t.review_status === 'suggested' || t.review_status === 'ai_suggested').length;
-    const uncategorized = transactions.filter(t => !t.final_category && !t.predicted_category).length;
+    // Exclude split parents from all stats — child rows carry the real amounts
+    const activeTxns = transactions.filter(t => !t.is_split_parent);
+    const needsReview = activeTxns.filter(t => t.review_status === 'needs_review' || t.review_status === 'suggested' || t.review_status === 'ai_suggested').length;
+    const uncategorized = activeTxns.filter(t => !t.final_category && !t.predicted_category).length;
     const transfersExcluded = transactions.filter(t => t.exclude_from_expense_totals).length;
 
-    const totalCashOut = transactions
+    const totalCashOut = activeTxns
       .filter(t => t.parse_status !== 'parse_error' && !t.is_non_expense_cash_movement)
       .reduce((sum, t) => sum + Math.abs(t.amount || 0), 0);
 
-    const truePersonalSpend = transactions
+    const truePersonalSpend = activeTxns
       .filter(t => t.counts_toward_true_personal_spend && t.parse_status !== 'parse_error')
       .reduce((sum, t) => sum + Math.abs(t.amount || 0), 0);
 
-    const trueBusinessSpend = transactions
+    const trueBusinessSpend = activeTxns
       .filter(t => t.counts_toward_true_business_spend && t.parse_status !== 'parse_error')
       .reduce((sum, t) => sum + Math.abs(t.amount || 0), 0);
 
-    const pendingReimbursable = transactions
+    const pendingReimbursable = activeTxns
       .filter(t => t.is_reimbursable && t.reimbursement_status !== 'reimbursed')
       .reduce((sum, t) => sum + Math.abs(t.amount || 0), 0);
 
