@@ -62,7 +62,7 @@ const fmt = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', c
 
 export default function Tax() {
   const { user } = useAuth();
-  const { toast } = useToast();
+  // toast imported from sonner at top
   const [profile, setProfile] = useState<TaxProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
