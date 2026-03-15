@@ -112,7 +112,7 @@ export default function Income() {
       .from('reimbursement_groups')
       .select('id, title, status, total_expected, total_received')
       .eq('owner_id', user.id)
-      .in('status', ['pending', 'submitted']);
+      .in('status', ['pending', 'submitted', 'partially_reimbursed']);
     setReimbursementGroups((data as ReimbursementGroup[]) || []);
   }, [user]);
 
