@@ -69,6 +69,8 @@ interface Transaction {
   transfer_type: string | null;
   source_file_name: string | null;
   upload_batch_id: string | null;
+  is_split_parent: boolean;
+  parent_transaction_id: string | null;
 }
 
 const MODE_CONFIG: Record<TransactionMode, { label: string; color: string; activeClass: string; icon: React.ElementType }> = {
