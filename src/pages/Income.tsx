@@ -85,13 +85,23 @@ export default function Income() {
   const fetchTransactions = useCallback(async () => {
     if (!user) return;
     setLoading(true);
-    const { data, error } = await supabase
-      .from('income_transactions')
-      .select('*')
-      .eq('owner_id', user.id)
-      .order('date', { ascending: false });
-    if (error) { toast.error('Failed to load income'); console.error(error); }
-    else setTransactions((data as IncomeTransaction[]) || []);
+    let allData: IncomeTransaction[] = [];
+    let from = 0;
+    const pageSize = 1000;
+    let hasMore = true;
+    while (hasMore) {
+      const { data, error } = await supabase
+        .from('income_transactions')
+        .select('*')
+        .eq('owner_id', user.id)
+        .order('date', { ascending: false })
+        .range(from, from + pageSize - 1);
+      if (error) { toast.error('Failed to load income'); console.error(error); break; }
+      if (data) allData = [...allData, ...(data as IncomeTransaction[])];
+      hasMore = (data?.length ?? 0) === pageSize;
+      from += pageSize;
+    }
+    setTransactions(allData);
     setLoading(false);
   }, [user]);
 
