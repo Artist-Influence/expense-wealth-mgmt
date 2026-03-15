@@ -1,18 +1,299 @@
 import { AppNav } from '@/components/AppNav';
-import { Construction } from 'lucide-react';
+import { useAuth } from '@/hooks/useAuth';
+import { supabase } from '@/integrations/supabase/client';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Progress } from '@/components/ui/progress';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Badge } from '@/components/ui/badge';
+import { Plus, Pencil, TrendingUp, Wallet, Target, DollarSign } from 'lucide-react';
+import { useState } from 'react';
+import { toast } from '@/hooks/use-toast';
+
+const ACCOUNT_TYPES = [
+  { value: 'roth_ira', label: 'Roth IRA' },
+  { value: 'traditional_ira', label: 'Traditional IRA' },
+  { value: 'brokerage', label: 'Brokerage' },
+  { value: 'crypto', label: 'Crypto' },
+  { value: 'collectibles', label: 'Collectibles' },
+  { value: 'savings', label: 'Savings' },
+  { value: 'other', label: 'Other' },
+];
+
+const TYPE_GROUPS: Record<string, { label: string; types: string[] }> = {
+  retirement: { label: 'Retirement', types: ['roth_ira', 'traditional_ira'] },
+  brokerage: { label: 'Brokerage', types: ['brokerage'] },
+  alternative: { label: 'Alternative', types: ['crypto', 'collectibles'] },
+  other: { label: 'Other', types: ['savings', 'other'] },
+};
+
+type Account = {
+  id: string;
+  owner_id: string;
+  account_name: string;
+  account_type: string;
+  platform: string | null;
+  current_balance: number;
+  contribution_target_monthly: number;
+  contribution_target_yearly: number;
+  contributions_ytd: number;
+  priority: number;
+  is_active: boolean;
+  notes: string | null;
+};
+
+const emptyForm = {
+  account_name: '',
+  account_type: 'brokerage',
+  platform: '',
+  current_balance: 0,
+  contribution_target_monthly: 0,
+  contribution_target_yearly: 0,
+  contributions_ytd: 0,
+  priority: 0,
+  is_active: true,
+  notes: '',
+};
 
 export default function Wealth() {
+  const { user } = useAuth();
+  const qc = useQueryClient();
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [form, setForm] = useState(emptyForm);
+
+  const { data: accounts = [], isLoading } = useQuery({
+    queryKey: ['investment_accounts'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('investment_accounts')
+        .select('*')
+        .order('priority', { ascending: false });
+      if (error) throw error;
+      return data as Account[];
+    },
+    enabled: !!user,
+  });
+
+  const upsert = useMutation({
+    mutationFn: async (values: typeof form) => {
+      const payload = {
+        ...values,
+        owner_id: user!.id,
+        current_balance: Number(values.current_balance),
+        contribution_target_monthly: Number(values.contribution_target_monthly),
+        contribution_target_yearly: Number(values.contribution_target_yearly),
+        contributions_ytd: Number(values.contributions_ytd),
+        priority: Number(values.priority),
+        platform: values.platform || null,
+        notes: values.notes || null,
+      };
+      if (editingId) {
+        const { error } = await supabase.from('investment_accounts').update(payload).eq('id', editingId);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from('investment_accounts').insert(payload);
+        if (error) throw error;
+      }
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['investment_accounts'] });
+      setDialogOpen(false);
+      setEditingId(null);
+      setForm(emptyForm);
+      toast({ title: editingId ? 'Account updated' : 'Account added' });
+    },
+    onError: (e: any) => toast({ title: 'Error', description: e.message, variant: 'destructive' }),
+  });
+
+  const openEdit = (a: Account) => {
+    setEditingId(a.id);
+    setForm({
+      account_name: a.account_name,
+      account_type: a.account_type,
+      platform: a.platform || '',
+      current_balance: a.current_balance,
+      contribution_target_monthly: a.contribution_target_monthly,
+      contribution_target_yearly: a.contribution_target_yearly,
+      contributions_ytd: a.contributions_ytd,
+      priority: a.priority,
+      is_active: a.is_active,
+      notes: a.notes || '',
+    });
+    setDialogOpen(true);
+  };
+
+  const openAdd = () => {
+    setEditingId(null);
+    setForm(emptyForm);
+    setDialogOpen(true);
+  };
+
+  const totalBalance = accounts.reduce((s, a) => s + Number(a.current_balance), 0);
+  const totalYtd = accounts.reduce((s, a) => s + Number(a.contributions_ytd), 0);
+  const totalYearlyTarget = accounts.reduce((s, a) => s + Number(a.contribution_target_yearly), 0);
+
+  const grouped = Object.entries(TYPE_GROUPS)
+    .map(([key, g]) => ({
+      key,
+      label: g.label,
+      accounts: accounts.filter(a => g.types.includes(a.account_type)),
+    }))
+    .filter(g => g.accounts.length > 0);
+
+  const fmt = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 });
+  const typeLabel = (t: string) => ACCOUNT_TYPES.find(at => at.value === t)?.label || t;
+
   return (
     <div className="min-h-screen bg-background">
       <AppNav />
-      <div className="container py-12 flex flex-col items-center justify-center gap-4 text-center">
-        <Construction className="h-12 w-12 text-muted-foreground" />
-        <h1 className="text-2xl font-semibold text-foreground">Wealth</h1>
-        <p className="text-muted-foreground text-sm max-w-md">
-          Track investment accounts, contribution targets, and get monthly allocation recommendations across Roth IRA, Wealthfront, Dub, Gemini, and Collectr.
-        </p>
-        <span className="text-xs text-muted-foreground/60 font-mono">Coming in Phase 5</span>
+      <div className="container py-6 space-y-6">
+        <div className="flex items-center justify-between">
+          <h1 className="text-2xl font-semibold text-foreground">Wealth</h1>
+          <Button size="sm" onClick={openAdd}><Plus className="h-4 w-4 mr-1" />Add Account</Button>
+        </div>
+
+        {/* Summary cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <Card>
+            <CardHeader className="pb-2 flex flex-row items-center gap-2">
+              <Wallet className="h-4 w-4 text-primary" />
+              <CardTitle className="text-sm font-medium text-muted-foreground">Total Balance</CardTitle>
+            </CardHeader>
+            <CardContent><span className="text-2xl font-bold text-foreground">{fmt(totalBalance)}</span></CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2 flex flex-row items-center gap-2">
+              <TrendingUp className="h-4 w-4 text-primary" />
+              <CardTitle className="text-sm font-medium text-muted-foreground">Contributions YTD</CardTitle>
+            </CardHeader>
+            <CardContent><span className="text-2xl font-bold text-foreground">{fmt(totalYtd)}</span></CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2 flex flex-row items-center gap-2">
+              <Target className="h-4 w-4 text-primary" />
+              <CardTitle className="text-sm font-medium text-muted-foreground">Yearly Target</CardTitle>
+            </CardHeader>
+            <CardContent><span className="text-2xl font-bold text-foreground">{fmt(totalYearlyTarget)}</span></CardContent>
+          </Card>
+        </div>
+
+        {isLoading && <p className="text-muted-foreground text-sm">Loading…</p>}
+        {!isLoading && accounts.length === 0 && (
+          <Card className="p-8 text-center">
+            <DollarSign className="h-10 w-10 mx-auto text-muted-foreground mb-2" />
+            <p className="text-muted-foreground text-sm">No investment accounts yet. Add one to start tracking.</p>
+          </Card>
+        )}
+
+        {/* Grouped accounts */}
+        {grouped.map(g => (
+          <div key={g.key} className="space-y-3">
+            <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">{g.label}</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {g.accounts.map(a => {
+                const pct = a.contribution_target_yearly > 0
+                  ? Math.min(100, (Number(a.contributions_ytd) / Number(a.contribution_target_yearly)) * 100)
+                  : 0;
+                return (
+                  <Card key={a.id} className="relative group">
+                    <CardHeader className="pb-2 flex flex-row items-start justify-between">
+                      <div>
+                        <CardTitle className="text-base font-semibold text-foreground">{a.account_name}</CardTitle>
+                        <div className="flex items-center gap-2 mt-1">
+                          <Badge variant="secondary" className="text-xs">{typeLabel(a.account_type)}</Badge>
+                          {a.platform && <span className="text-xs text-muted-foreground">{a.platform}</span>}
+                          {!a.is_active && <Badge variant="outline" className="text-xs text-destructive border-destructive/30">Inactive</Badge>}
+                        </div>
+                      </div>
+                      <Button variant="ghost" size="icon" className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity" onClick={() => openEdit(a)}>
+                        <Pencil className="h-3.5 w-3.5" />
+                      </Button>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      <div className="text-xl font-bold text-foreground">{fmt(Number(a.current_balance))}</div>
+                      {a.contribution_target_yearly > 0 && (
+                        <div className="space-y-1">
+                          <div className="flex justify-between text-xs text-muted-foreground">
+                            <span>{fmt(Number(a.contributions_ytd))} contributed</span>
+                            <span>{fmt(Number(a.contribution_target_yearly))} target</span>
+                          </div>
+                          <Progress value={pct} className="h-2" />
+                        </div>
+                      )}
+                      {a.contribution_target_monthly > 0 && (
+                        <p className="text-xs text-muted-foreground">Monthly target: {fmt(Number(a.contribution_target_monthly))}</p>
+                      )}
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          </div>
+        ))}
       </div>
+
+      {/* Add/Edit Dialog */}
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{editingId ? 'Edit Account' : 'Add Account'}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <Label>Account Name</Label>
+              <Input value={form.account_name} onChange={e => setForm(f => ({ ...f, account_name: e.target.value }))} placeholder="e.g. Roth IRA — Fidelity" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Type</Label>
+                <Select value={form.account_type} onValueChange={v => setForm(f => ({ ...f, account_type: v }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>{ACCOUNT_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Platform</Label>
+                <Input value={form.platform} onChange={e => setForm(f => ({ ...f, platform: e.target.value }))} placeholder="Fidelity, Wealthfront…" />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Current Balance</Label>
+                <Input type="number" value={form.current_balance} onChange={e => setForm(f => ({ ...f, current_balance: Number(e.target.value) }))} />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Contributions YTD</Label>
+                <Input type="number" value={form.contributions_ytd} onChange={e => setForm(f => ({ ...f, contributions_ytd: Number(e.target.value) }))} />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Monthly Target</Label>
+                <Input type="number" value={form.contribution_target_monthly} onChange={e => setForm(f => ({ ...f, contribution_target_monthly: Number(e.target.value) }))} />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Yearly Target</Label>
+                <Input type="number" value={form.contribution_target_yearly} onChange={e => setForm(f => ({ ...f, contribution_target_yearly: Number(e.target.value) }))} />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Priority (higher = more important)</Label>
+              <Input type="number" value={form.priority} onChange={e => setForm(f => ({ ...f, priority: Number(e.target.value) }))} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
+            <Button onClick={() => upsert.mutate(form)} disabled={!form.account_name || upsert.isPending}>
+              {upsert.isPending ? 'Saving…' : 'Save'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
