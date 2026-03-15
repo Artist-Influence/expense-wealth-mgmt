@@ -94,6 +94,7 @@ export default function Expenses() {
   const [sortCol, setSortCol] = useState<string>('date');
   const [sortAsc, setSortAsc] = useState(false);
   const [detailTx, setDetailTx] = useState<Transaction | null>(null);
+  const [splitTx, setSplitTx] = useState<Transaction | null>(null);
 
   // Upload state
   const [fileQueue, setFileQueue] = useState<FileQueueItem[]>([]);
