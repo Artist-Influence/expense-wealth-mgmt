@@ -2,18 +2,19 @@ import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import {
   Receipt, BarChart3, Brain, Settings, LogOut, Database,
-  DollarSign, ReceiptText, TrendingUp, Landmark, FileSpreadsheet
+  DollarSign, ReceiptText, TrendingUp, Landmark, FileSpreadsheet, Target
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 const navItems = [
   { to: '/', label: 'Expenses', icon: Receipt, active: true },
-  { to: '/income', label: 'Income', icon: DollarSign, active: false },
+  { to: '/income', label: 'Income', icon: DollarSign, active: true },
   { to: '/insights', label: 'Insights', icon: BarChart3, active: true },
-  { to: '/reimbursements', label: 'Reimburse', icon: ReceiptText, active: false },
-  { to: '/wealth', label: 'Wealth', icon: TrendingUp, active: false },
-  { to: '/tax', label: 'Tax', icon: Landmark, active: false },
+  { to: '/reimbursements', label: 'Reimburse', icon: ReceiptText, active: true },
+  { to: '/wealth', label: 'Wealth', icon: TrendingUp, active: true },
+  { to: '/allocations', label: 'Allocate', icon: Target, active: true },
+  { to: '/tax', label: 'Tax', icon: Landmark, active: true },
   { to: '/merchants', label: 'Memory', icon: Brain, active: true },
   { to: '/accountant', label: 'Accountant', icon: FileSpreadsheet, active: false },
   { to: '/settings', label: 'Settings', icon: Settings, active: true },

@@ -14,6 +14,96 @@ export type Database = {
   }
   public: {
     Tables: {
+      allocation_line_items: {
+        Row: {
+          allocation_plan_id: string
+          amount: number
+          executed: boolean
+          id: string
+          notes: string | null
+          owner_id: string
+          target_account_id: string | null
+        }
+        Insert: {
+          allocation_plan_id: string
+          amount?: number
+          executed?: boolean
+          id?: string
+          notes?: string | null
+          owner_id: string
+          target_account_id?: string | null
+        }
+        Update: {
+          allocation_plan_id?: string
+          amount?: number
+          executed?: boolean
+          id?: string
+          notes?: string | null
+          owner_id?: string
+          target_account_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "allocation_line_items_allocation_plan_id_fkey"
+            columns: ["allocation_plan_id"]
+            isOneToOne: false
+            referencedRelation: "allocation_plans"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "allocation_line_items_target_account_id_fkey"
+            columns: ["target_account_id"]
+            isOneToOne: false
+            referencedRelation: "investment_accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      allocation_plans: {
+        Row: {
+          created_at: string
+          emergency_fund_amount: number
+          free_cash: number
+          id: string
+          month: string
+          notes: string | null
+          owner_id: string
+          status: string
+          tax_reserve_amount: number
+          total_expenses: number
+          total_income: number
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          emergency_fund_amount?: number
+          free_cash?: number
+          id?: string
+          month: string
+          notes?: string | null
+          owner_id: string
+          status?: string
+          tax_reserve_amount?: number
+          total_expenses?: number
+          total_income?: number
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          emergency_fund_amount?: number
+          free_cash?: number
+          id?: string
+          month?: string
+          notes?: string | null
+          owner_id?: string
+          status?: string
+          tax_reserve_amount?: number
+          total_expenses?: number
+          total_income?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       app_settings: {
         Row: {
           ai_enabled: boolean
@@ -208,6 +298,57 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      investment_accounts: {
+        Row: {
+          account_name: string
+          account_type: string
+          contribution_target_monthly: number
+          contribution_target_yearly: number
+          contributions_ytd: number
+          created_at: string
+          current_balance: number
+          id: string
+          is_active: boolean
+          notes: string | null
+          owner_id: string
+          platform: string | null
+          priority: number
+          updated_at: string
+        }
+        Insert: {
+          account_name: string
+          account_type?: string
+          contribution_target_monthly?: number
+          contribution_target_yearly?: number
+          contributions_ytd?: number
+          created_at?: string
+          current_balance?: number
+          id?: string
+          is_active?: boolean
+          notes?: string | null
+          owner_id: string
+          platform?: string | null
+          priority?: number
+          updated_at?: string
+        }
+        Update: {
+          account_name?: string
+          account_type?: string
+          contribution_target_monthly?: number
+          contribution_target_yearly?: number
+          contributions_ytd?: number
+          created_at?: string
+          current_balance?: number
+          id?: string
+          is_active?: boolean
+          notes?: string | null
+          owner_id?: string
+          platform?: string | null
+          priority?: number
+          updated_at?: string
+        }
+        Relationships: []
       }
       merchant_memory: {
         Row: {
