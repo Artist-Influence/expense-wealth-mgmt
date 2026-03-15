@@ -223,7 +223,7 @@ export default function Insights() {
         expenses: Math.round(d.expenses * 100) / 100,
         net: Math.round((d.income - d.expenses) * 100) / 100,
       }));
-  }, [expenses, incomeData]);
+  }, [expenses, earnedIncome]);
 
   // Exclude non-earning income types from savings rate math
   const NON_EARNING_TYPES = ['reimbursement', 'transfer', 'refund', 'loan_proceeds', 'owner_contribution'];
