@@ -260,7 +260,8 @@ export default function Insights() {
     const lastYear = (now.getFullYear() - 1).toString();
 
     let thisYearIncome = 0, lastYearIncome = 0, thisYearExpenses = 0, lastYearExpenses = 0;
-    incomeData.forEach(t => {
+    // Use earnedIncome (excludes reimbursements, transfers, refunds) for YoY
+    earnedIncome.forEach(t => {
       if (!t.date) return;
       if (t.date.startsWith(thisYear)) thisYearIncome += Math.abs(t.amount || 0);
       if (t.date.startsWith(lastYear)) lastYearIncome += Math.abs(t.amount || 0);

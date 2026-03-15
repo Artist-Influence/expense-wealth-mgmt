@@ -45,6 +45,7 @@ interface ReimbursementGroup {
   status: string;
   total_expected: number;
   total_received: number;
+  received_date: string | null;
 }
 
 const INCOME_TYPE_BADGE: Record<string, { class: string }> = {
@@ -259,11 +260,51 @@ export default function Income() {
     }
   };
 
-  // Inline update
+  // Inline update with reimbursement guard
   const updateField = async (id: string, field: string, value: string) => {
+    const tx = transactions.find(t => t.id === id);
+
+    // Guard: if changing income_type away from 'reimbursement' while linked to a group, warn and unlink
+    if (field === 'income_type' && value !== 'reimbursement' && tx?.linked_reimbursement_group_id) {
+      if (!confirm('This transaction is matched to a reimbursement group. Changing the type will unlink it and reverse the received amount. Continue?')) return;
+      await unlinkFromGroup(tx);
+    }
+
     const { error } = await supabase.from('income_transactions').update({ [field]: value }).eq('id', id);
     if (error) toast.error('Update failed');
     else setTransactions(prev => prev.map(t => t.id === id ? { ...t, [field]: value } : t));
+  };
+
+  // Unlink income transaction from reimbursement group
+  const unlinkFromGroup = async (tx: IncomeTransaction) => {
+    if (!tx.linked_reimbursement_group_id) return;
+    const group = reimbursementGroups.find(g => g.id === tx.linked_reimbursement_group_id);
+    if (!group) return;
+
+    const newReceived = Math.max(0, group.total_received - (tx.amount || 0));
+    let newStatus: string;
+    if (newReceived >= group.total_expected) newStatus = 'reimbursed';
+    else if (newReceived > 0) newStatus = 'partially_reimbursed';
+    else newStatus = 'pending';
+
+    await supabase.from('income_transactions').update({
+      linked_reimbursement_group_id: null,
+    }).eq('id', tx.id);
+
+    await supabase.from('reimbursement_groups').update({
+      total_received: newReceived,
+      status: newStatus,
+      received_date: newStatus === 'reimbursed' ? group.received_date : null,
+    }).eq('id', group.id);
+
+    // Cascade status to linked expenses
+    await supabase.from('transactions_uploaded')
+      .update({ reimbursement_status: newStatus === 'reimbursed' ? 'reimbursed' : newStatus === 'partially_reimbursed' ? 'partially_reimbursed' : 'pending' })
+      .eq('linked_reimbursement_group_id', group.id);
+
+    setTransactions(prev => prev.map(t => t.id === tx.id ? { ...t, linked_reimbursement_group_id: null } : t));
+    fetchReimbursementGroups();
+    toast.success('Unlinked from reimbursement group');
   };
 
   // Bulk actions
@@ -528,6 +569,13 @@ export default function Income() {
                       {tx.income_type === 'reimbursement' && !tx.linked_reimbursement_group_id && (
                         <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openMatchDialog(tx.id)} title="Match to reimbursement">
                           <Link2 className="h-3.5 w-3.5 text-warning" />
+                        </Button>
+                      )}
+                      {tx.linked_reimbursement_group_id && (
+                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => {
+                          if (confirm('Unlink this income from its reimbursement group? This will reverse the received amount.')) unlinkFromGroup(tx);
+                        }} title="Unlink from reimbursement group">
+                          <Link2 className="h-3.5 w-3.5 text-destructive" />
                         </Button>
                       )}
                       {tx.status !== 'approved' && (

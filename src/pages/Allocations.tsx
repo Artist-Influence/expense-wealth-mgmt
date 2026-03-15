@@ -67,9 +67,11 @@ export default function Allocations() {
       const [y, m] = selectedMonth.split('-');
       const start = `${y}-${m}-01`;
       const end = new Date(Number(y), Number(m), 0).toISOString().split('T')[0];
+      // Defense-in-depth: explicit owner_id filter alongside RLS
       const { data } = await supabase
         .from('transactions_uploaded')
         .select('amount')
+        .eq('owner_id', user!.id)
         .gte('date', start)
         .lte('date', end)
         .eq('exclude_from_expense_totals', false);

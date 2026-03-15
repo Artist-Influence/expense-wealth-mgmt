@@ -9,7 +9,7 @@ const HIGH_CONFIDENCE_PATTERNS: [RegExp, string][] = [
   [/(?:^|\s)(?:PMT|PYMT)\s*(?:RECEIVED|THANK|REC'?D)/i, 'credit_card_payment'],
   [/PAYMENT\s*RECEIVED\s*-?\s*THANK/i, 'credit_card_payment'],
   [/TO\s*CREDIT\s*CARD/i, 'credit_card_payment'],
-  [/BALANCE\s*PAY(?:MENT)?/i, 'credit_card_payment'],
+  
   [/PAYMENT\s*TO\s*.*CARD\s*ENDING/i, 'credit_card_payment'],
   [/ONLINE\s*PAYMENT\s*-?\s*THANK/i, 'credit_card_payment'],
 
@@ -22,6 +22,7 @@ const HIGH_CONFIDENCE_PATTERNS: [RegExp, string][] = [
 
 const MEDIUM_CONFIDENCE_PATTERNS: [RegExp, string][] = [
   // These CAN be real expenses — flag for review but don't auto-exclude
+  [/BALANCE\s*PAY(?:MENT)?/i, 'possible_transfer'],
   [/WIRE\s*TRANSFER/i, 'possible_transfer'],
   [/FUNDS\s*TRANSFER/i, 'possible_transfer'],
   [/ONLINE\s*DOMESTIC\s*WIRE/i, 'possible_transfer'],
