@@ -181,8 +181,11 @@ export default function Accountant() {
         };
       case 'income_ledger':
         return {
-          headers: ['Date', 'Description', 'Amount', 'Type', 'Taxable', 'Source', 'Notes'],
-          rows: (income || []).map(i => [i.date, i.description_normalized || i.description_raw, String(i.amount ?? 0), i.income_type, i.taxable_status, i.source_account_name, i.notes]),
+          headers: ['Date', 'Description', 'Amount', 'Income Type', 'Taxable', 'Source', 'Is Earning', 'Notes'],
+          rows: (income || []).map(i => {
+            const isEarning = !['reimbursement', 'transfer', 'refund', 'loan_proceeds', 'owner_contribution'].includes(i.income_type);
+            return [i.date, i.description_normalized || i.description_raw, String(i.amount ?? 0), i.income_type, i.taxable_status, i.source_account_name, isEarning ? 'Yes' : 'No', i.notes];
+          }),
         };
       case 'reimbursement_report': {
         // Date-filter reimbursement groups by created_at
