@@ -166,8 +166,9 @@ export default function Income() {
     if (!user) return;
     for (const file of files) {
       const text = await file.text();
-      const lines = text.split('\n').filter(l => l.trim());
-      if (lines.length < 2) { toast.error(`${file.name}: No data rows`); continue; }
+      const parsed = Papa.parse(text, { header: false, skipEmptyLines: true });
+      const allRows = parsed.data as string[][];
+      if (allRows.length < 2) { toast.error(`${file.name}: No data rows`); continue; }
 
       const parsed = Papa.parse(text, { header: false, skipEmptyLines: true });
       const allRows = parsed.data as string[][];
