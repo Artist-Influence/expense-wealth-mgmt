@@ -163,9 +163,9 @@ export default function Tax() {
     }
 
     if (error) {
-      toast({ title: 'Error saving', description: error.message, variant: 'destructive' });
+      toast.error(`Error saving: ${error.message}`);
     } else {
-      toast({ title: 'Tax profile saved' });
+      toast.success('Tax profile saved');
       setEditOpen(false);
       await loadProfile();
     }

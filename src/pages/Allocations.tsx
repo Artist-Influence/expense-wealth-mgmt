@@ -199,7 +199,7 @@ export default function Allocations() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['allocation_plan', selectedMonth] });
-      toast({ title: 'Plan finalized' });
+      toast.success('Plan finalized');
     },
   });
 
