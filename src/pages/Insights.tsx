@@ -310,7 +310,7 @@ export default function Insights() {
       category: c.cat,
       data: sortedMonths.map(m => ({ month: m, amount: Math.round((c.months.get(m) || 0) * 100) / 100 })),
     }));
-  }, [expenses]);
+  }, [approvedExpenses]);
 
   const methodBreakdown = useMemo(() => {
     const methodMap = new Map<string, number>();
