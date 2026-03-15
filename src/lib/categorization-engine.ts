@@ -277,14 +277,21 @@ function buildResult(
   matchSource: CategorizationResult['match_source'],
   thresholds: Thresholds,
   categoryRejected: boolean = false,
-  matchExplanation: string = ''
+  matchExplanation: string = '',
+  merchantKey: string = ''
 ): CategorizationResult {
   let reviewStatus: CategorizationResult['review_status'];
 
   if (categoryRejected) {
     reviewStatus = 'needs_review';
   } else if (confidence >= thresholds.auto) {
-    reviewStatus = 'auto_categorized';
+    // Ambiguous merchants should never auto-approve — cap at 'suggested'
+    if (merchantKey && isAmbiguousMerchant(merchantKey)) {
+      reviewStatus = 'suggested';
+      matchExplanation += ' [Ambiguous merchant — requires manual review]';
+    } else {
+      reviewStatus = 'auto_categorized';
+    }
   } else if (confidence >= thresholds.suggest) {
     reviewStatus = 'suggested';
   } else {
