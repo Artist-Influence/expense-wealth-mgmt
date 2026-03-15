@@ -81,6 +81,25 @@ export default function Allocations() {
     enabled: !!user,
   });
 
+  // Fetch unreviewed transaction count for data quality warning
+  const { data: unreviewedCount = 0 } = useQuery({
+    queryKey: ['alloc_unreviewed', selectedMonth],
+    queryFn: async () => {
+      const [y, m] = selectedMonth.split('-');
+      const start = `${y}-${m}-01`;
+      const end = new Date(Number(y), Number(m), 0).toISOString().split('T')[0];
+      const { count } = await supabase
+        .from('transactions_uploaded')
+        .select('id', { count: 'exact', head: true })
+        .eq('owner_id', user!.id)
+        .gte('date', start)
+        .lte('date', end)
+        .in('review_status', ['needs_review', 'suggested', 'ai_suggested']);
+      return count || 0;
+    },
+    enabled: !!user,
+  });
+
   // Fetch tax profile for reserve calc
   const { data: taxProfile } = useQuery({
     queryKey: ['tax_profile_alloc'],
