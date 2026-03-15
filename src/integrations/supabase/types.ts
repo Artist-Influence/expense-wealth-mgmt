@@ -139,6 +139,9 @@ export type Database = {
           confidence_weight: number
           created_at: string
           default_note_template: string | null
+          default_reimbursable: boolean
+          default_tax_treatment: string | null
+          default_transaction_mode: string | null
           id: string
           last_seen: string
           merchant_key: string
@@ -154,6 +157,9 @@ export type Database = {
           confidence_weight?: number
           created_at?: string
           default_note_template?: string | null
+          default_reimbursable?: boolean
+          default_tax_treatment?: string | null
+          default_transaction_mode?: string | null
           id?: string
           last_seen?: string
           merchant_key: string
@@ -169,6 +175,9 @@ export type Database = {
           confidence_weight?: number
           created_at?: string
           default_note_template?: string | null
+          default_reimbursable?: boolean
+          default_tax_treatment?: string | null
+          default_transaction_mode?: string | null
           id?: string
           last_seen?: string
           merchant_key?: string
@@ -209,7 +218,12 @@ export type Database = {
       transactions_uploaded: {
         Row: {
           amount: number | null
+          business_purpose: string | null
+          client_or_project_tag: string | null
           confidence: number | null
+          counts_as_tax_deduction: boolean
+          counts_toward_true_business_spend: boolean
+          counts_toward_true_personal_spend: boolean
           created_at: string
           date: string | null
           description_normalized: string | null
@@ -217,11 +231,15 @@ export type Database = {
           duplicate_fingerprint: string | null
           duplicate_of_transaction_id: string | null
           duplicate_status: string
+          economic_owner: string
+          exclude_from_cash_spend_reporting: boolean
           exclude_from_expense_totals: boolean
           final_category: string | null
           final_method: string | null
           final_notes: string | null
           id: string
+          is_non_expense_cash_movement: boolean
+          is_reimbursable: boolean
           is_transfer: boolean
           match_explanation: string | null
           match_source: string | null
@@ -232,15 +250,28 @@ export type Database = {
           predicted_category: string | null
           predicted_method: string | null
           predicted_notes: string | null
+          receipt_attached: boolean
+          receipt_required: boolean
+          reimbursable_to: string | null
+          reimbursement_status: string
           review_status: string
           source_file_name: string | null
           source_row_json: Json | null
+          tax_entity: string | null
+          tax_treatment: string
+          transaction_mode: string
           transfer_type: string | null
+          treatment_type: string
           upload_batch_id: string | null
         }
         Insert: {
           amount?: number | null
+          business_purpose?: string | null
+          client_or_project_tag?: string | null
           confidence?: number | null
+          counts_as_tax_deduction?: boolean
+          counts_toward_true_business_spend?: boolean
+          counts_toward_true_personal_spend?: boolean
           created_at?: string
           date?: string | null
           description_normalized?: string | null
@@ -248,11 +279,15 @@ export type Database = {
           duplicate_fingerprint?: string | null
           duplicate_of_transaction_id?: string | null
           duplicate_status?: string
+          economic_owner?: string
+          exclude_from_cash_spend_reporting?: boolean
           exclude_from_expense_totals?: boolean
           final_category?: string | null
           final_method?: string | null
           final_notes?: string | null
           id?: string
+          is_non_expense_cash_movement?: boolean
+          is_reimbursable?: boolean
           is_transfer?: boolean
           match_explanation?: string | null
           match_source?: string | null
@@ -263,15 +298,28 @@ export type Database = {
           predicted_category?: string | null
           predicted_method?: string | null
           predicted_notes?: string | null
+          receipt_attached?: boolean
+          receipt_required?: boolean
+          reimbursable_to?: string | null
+          reimbursement_status?: string
           review_status?: string
           source_file_name?: string | null
           source_row_json?: Json | null
+          tax_entity?: string | null
+          tax_treatment?: string
+          transaction_mode?: string
           transfer_type?: string | null
+          treatment_type?: string
           upload_batch_id?: string | null
         }
         Update: {
           amount?: number | null
+          business_purpose?: string | null
+          client_or_project_tag?: string | null
           confidence?: number | null
+          counts_as_tax_deduction?: boolean
+          counts_toward_true_business_spend?: boolean
+          counts_toward_true_personal_spend?: boolean
           created_at?: string
           date?: string | null
           description_normalized?: string | null
@@ -279,11 +327,15 @@ export type Database = {
           duplicate_fingerprint?: string | null
           duplicate_of_transaction_id?: string | null
           duplicate_status?: string
+          economic_owner?: string
+          exclude_from_cash_spend_reporting?: boolean
           exclude_from_expense_totals?: boolean
           final_category?: string | null
           final_method?: string | null
           final_notes?: string | null
           id?: string
+          is_non_expense_cash_movement?: boolean
+          is_reimbursable?: boolean
           is_transfer?: boolean
           match_explanation?: string | null
           match_source?: string | null
@@ -294,10 +346,18 @@ export type Database = {
           predicted_category?: string | null
           predicted_method?: string | null
           predicted_notes?: string | null
+          receipt_attached?: boolean
+          receipt_required?: boolean
+          reimbursable_to?: string | null
+          reimbursement_status?: string
           review_status?: string
           source_file_name?: string | null
           source_row_json?: Json | null
+          tax_entity?: string | null
+          tax_treatment?: string
+          transaction_mode?: string
           transfer_type?: string | null
+          treatment_type?: string
           upload_batch_id?: string | null
         }
         Relationships: [

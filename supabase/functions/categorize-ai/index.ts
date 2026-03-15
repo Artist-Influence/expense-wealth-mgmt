@@ -47,9 +47,13 @@ Rules:
 - Infer the merchant/entity from the description (e.g. "AMZN MKTP US" = Amazon, "SQ *JOES COFFEE" = coffee shop).
 - Use common merchant knowledge to pick the best category.
 - If truly ambiguous, return null for category with low confidence.
-- Return a brief explanation of your reasoning.`;
+- Return a brief explanation of your reasoning.
+- For each transaction, also suggest:
+  - The most likely transaction mode: "personal", "business", or "reimbursable_work"
+  - The most likely tax treatment: "unknown", "likely_deductible", "likely_nondeductible", "capital_or_investment", "transfer_nonexpense"
+  - Whether this is likely a reimbursable work expense (true/false)`;
 
-    const userPrompt = `Categorize these ${descriptions.length} transactions. For each, return the best category from the allowed list, a confidence score (0-95), and a brief explanation.
+    const userPrompt = `Categorize these ${descriptions.length} transactions. For each, return the best category, confidence, explanation, inferred merchant, suggested mode, suggested tax treatment, and whether likely reimbursable.
 
 Transactions:
 ${descriptionList}`;
@@ -85,8 +89,11 @@ ${descriptionList}`;
                         confidence: { type: "number", description: "Confidence score 0-95" },
                         explanation: { type: "string", description: "Brief reason for the categorization" },
                         inferred_merchant: { type: "string", description: "What merchant/entity this likely is" },
+                        suggested_mode: { type: "string", description: "Suggested transaction mode: personal, business, or reimbursable_work", enum: ["personal", "business", "reimbursable_work"] },
+                        suggested_tax_treatment: { type: "string", description: "Suggested tax treatment", enum: ["unknown", "likely_deductible", "likely_nondeductible", "capital_or_investment", "transfer_nonexpense"] },
+                        likely_reimbursable: { type: "boolean", description: "Whether this is likely a reimbursable work expense" },
                       },
-                      required: ["index", "category", "confidence", "explanation", "inferred_merchant"],
+                      required: ["index", "category", "confidence", "explanation", "inferred_merchant", "suggested_mode", "suggested_tax_treatment", "likely_reimbursable"],
                       additionalProperties: false,
                     },
                   },
@@ -124,7 +131,6 @@ ${descriptionList}`;
 
     const data = await response.json();
 
-    // Extract tool call result
     const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
     if (!toolCall) {
       console.error("No tool call in response:", JSON.stringify(data));
@@ -145,8 +151,6 @@ ${descriptionList}`;
       });
     }
 
-    // Validate categories against allowed list
-    const allowedSet = new Set(allowedCategories.map((c: string) => c.toLowerCase()));
     const validated = (parsed.results || []).map((r: any) => {
       const catLower = r.category ? r.category.toLowerCase() : null;
       const matchedCategory = catLower
@@ -155,9 +159,12 @@ ${descriptionList}`;
       return {
         index: r.index,
         category: matchedCategory,
-        confidence: Math.min(r.confidence || 0, 95), // Cap at 95 for AI
+        confidence: Math.min(r.confidence || 0, 95),
         explanation: `AI: ${r.inferred_merchant || 'Unknown'} → ${matchedCategory || 'unresolved'}. ${r.explanation || ''}`,
         inferred_merchant: r.inferred_merchant || null,
+        suggested_mode: r.suggested_mode || null,
+        suggested_tax_treatment: r.suggested_tax_treatment || null,
+        likely_reimbursable: r.likely_reimbursable || false,
       };
     });
 

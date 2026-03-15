@@ -9,6 +9,13 @@ import Expenses from "./pages/Expenses";
 import Insights from "./pages/Insights";
 import MerchantMemory from "./pages/MerchantMemory";
 import SettingsPage from "./pages/Settings";
+import Income from "./pages/Income";
+import Reimbursements from "./pages/Reimbursements";
+import Wealth from "./pages/Wealth";
+import Tax from "./pages/Tax";
+import Accountant from "./pages/Accountant";
+import Allocations from "./pages/Allocations";
+import CloseMonth from "./pages/CloseMonth";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -25,6 +32,13 @@ const App = () => (
           <Route path="/insights" element={<AuthGuard><Insights /></AuthGuard>} />
           <Route path="/merchants" element={<AuthGuard><MerchantMemory /></AuthGuard>} />
           <Route path="/settings" element={<AuthGuard><SettingsPage /></AuthGuard>} />
+          <Route path="/income" element={<AuthGuard><Income /></AuthGuard>} />
+          <Route path="/reimbursements" element={<AuthGuard><Reimbursements /></AuthGuard>} />
+          <Route path="/wealth" element={<AuthGuard><Wealth /></AuthGuard>} />
+          <Route path="/tax" element={<AuthGuard><Tax /></AuthGuard>} />
+          <Route path="/accountant" element={<AuthGuard><Accountant /></AuthGuard>} />
+          <Route path="/allocations" element={<AuthGuard><Allocations /></AuthGuard>} />
+          <Route path="/close-month" element={<AuthGuard><CloseMonth /></AuthGuard>} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>

@@ -23,8 +23,10 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/co
 import {
   Upload, Search, Download, Check, CheckCheck, Edit3, X,
   ArrowLeftRight, AlertTriangle, Ban, FileText, Filter,
-  Calendar, ChevronDown, Trash2
+  Calendar, ChevronDown, Trash2, Briefcase, User, Receipt
 } from 'lucide-react';
+
+type TransactionMode = 'personal' | 'business' | 'reimbursable_work';
 
 interface Transaction {
   id: string;
@@ -43,6 +45,23 @@ interface Transaction {
   match_explanation?: string | null;
   review_status: string;
   mode: string;
+  transaction_mode: string;
+  economic_owner: string;
+  treatment_type: string;
+  counts_toward_true_personal_spend: boolean;
+  counts_toward_true_business_spend: boolean;
+  is_reimbursable: boolean;
+  reimbursable_to: string | null;
+  reimbursement_status: string;
+  tax_treatment: string;
+  tax_entity: string | null;
+  counts_as_tax_deduction: boolean;
+  is_non_expense_cash_movement: boolean;
+  client_or_project_tag: string | null;
+  business_purpose: string | null;
+  receipt_required: boolean;
+  receipt_attached: boolean;
+  exclude_from_cash_spend_reporting: boolean;
   parse_status: string | null;
   duplicate_status: string | null;
   is_transfer: boolean | null;
@@ -52,9 +71,15 @@ interface Transaction {
   upload_batch_id: string | null;
 }
 
+const MODE_CONFIG: Record<TransactionMode, { label: string; color: string; activeClass: string; icon: React.ElementType }> = {
+  personal: { label: 'Personal', color: 'text-foreground', activeClass: 'bg-secondary text-foreground border-border', icon: User },
+  business: { label: 'Business', color: 'text-primary', activeClass: 'bg-primary/20 text-primary border-primary/30', icon: Briefcase },
+  reimbursable_work: { label: 'Reimbursable/Work', color: 'text-warning', activeClass: 'bg-warning/15 text-warning border-warning/30', icon: Receipt },
+};
+
 export default function Expenses() {
   const { user } = useAuth();
-  const [mode, setMode] = useState<'personal' | 'business'>('personal');
+  const [mode, setMode] = useState<TransactionMode>('personal');
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -79,6 +104,9 @@ export default function Expenses() {
   const completedFiles = fileQueue.filter(f => f.status === 'done' || f.status === 'error').length;
   const overallProgress = totalFiles > 0 ? Math.round((completedFiles / totalFiles) * 100) : 0;
 
+  // For category loading, use the base mode (personal/business) — reimbursable uses personal categories
+  const categoryMode = mode === 'reimbursable_work' ? 'personal' : mode;
+
   useEffect(() => {
     if (user) { loadTransactions(); loadCategories(); }
   }, [user, mode]);
@@ -87,7 +115,7 @@ export default function Expenses() {
     const { data } = await supabase
       .from('category_options')
       .select('category_name')
-      .eq('mode', mode)
+      .eq('mode', categoryMode)
       .eq('is_active', true)
       .eq('owner_id', user!.id)
       .order('sort_order');
@@ -105,10 +133,10 @@ export default function Expenses() {
         .from('transactions_uploaded')
         .select('*')
         .eq('owner_id', user!.id)
-        .eq('mode', mode)
+        .eq('transaction_mode', mode)
         .order('date', { ascending: false })
         .range(from, from + pageSize - 1);
-      if (data) allData = [...allData, ...(data as Transaction[])];
+      if (data) allData = [...allData, ...(data as unknown as Transaction[])];
       hasMore = (data?.length ?? 0) === pageSize;
       from += pageSize;
     }
@@ -125,6 +153,7 @@ export default function Expenses() {
       if (extraFilter === 'parse_errors' && tx.parse_status !== 'parse_error') return false;
       if (extraFilter === 'excluded' && !tx.exclude_from_expense_totals) return false;
       if (extraFilter === 'uncategorized' && (tx.final_category || tx.predicted_category)) return false;
+      if (extraFilter === 'reimbursable' && !tx.is_reimbursable) return false;
       if (search) {
         const s = search.toLowerCase();
         return (
@@ -154,27 +183,36 @@ export default function Expenses() {
     return result;
   }, [transactions, statusFilter, extraFilter, search, sortCol, sortAsc]);
 
-  // Summary stats
+  // Summary stats — V2
   const stats = useMemo(() => {
-    const now = new Date();
-    const thisMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     const needsReview = transactions.filter(t => t.review_status === 'needs_review' || t.review_status === 'suggested' || t.review_status === 'ai_suggested').length;
     const uncategorized = transactions.filter(t => !t.final_category && !t.predicted_category).length;
-    const duplicates = transactions.filter(t => t.duplicate_status === 'possible_duplicate').length;
     const transfersExcluded = transactions.filter(t => t.exclude_from_expense_totals).length;
-    const thisMonthSpend = transactions
-      .filter(t => t.date?.startsWith(thisMonth) && !t.exclude_from_expense_totals && t.parse_status !== 'parse_error')
+
+    const totalCashOut = transactions
+      .filter(t => t.parse_status !== 'parse_error' && !t.is_non_expense_cash_movement)
       .reduce((sum, t) => sum + Math.abs(t.amount || 0), 0);
-    return { total: transactions.length, needsReview, uncategorized, duplicates, transfersExcluded, thisMonthSpend };
+
+    const truePersonalSpend = transactions
+      .filter(t => t.counts_toward_true_personal_spend && t.parse_status !== 'parse_error')
+      .reduce((sum, t) => sum + Math.abs(t.amount || 0), 0);
+
+    const trueBusinessSpend = transactions
+      .filter(t => t.counts_toward_true_business_spend && t.parse_status !== 'parse_error')
+      .reduce((sum, t) => sum + Math.abs(t.amount || 0), 0);
+
+    const pendingReimbursable = transactions
+      .filter(t => t.is_reimbursable && t.reimbursement_status !== 'reimbursed')
+      .reduce((sum, t) => sum + Math.abs(t.amount || 0), 0);
+
+    return { total: transactions.length, needsReview, uncategorized, transfersExcluded, totalCashOut, truePersonalSpend, trueBusinessSpend, pendingReimbursable };
   }, [transactions]);
 
-  // Sort handler
   const handleSort = (col: string) => {
     if (sortCol === col) setSortAsc(!sortAsc);
     else { setSortCol(col); setSortAsc(true); }
   };
 
-  // Selection
   const toggleSelect = (id: string) => {
     setSelectedIds(prev => {
       const next = new Set(prev);
@@ -188,20 +226,46 @@ export default function Expenses() {
   };
 
   // Drawer save
-  const handleDrawerSave = async (id: string, values: { category: string; method: string; notes: string }) => {
+  const handleDrawerSave = async (id: string, values: {
+    category: string; method: string; notes: string;
+    transaction_mode?: string; economic_owner?: string; treatment_type?: string;
+    tax_treatment?: string; is_reimbursable?: boolean; reimbursable_to?: string;
+    reimbursement_status?: string; business_purpose?: string;
+    counts_toward_true_personal_spend?: boolean; counts_toward_true_business_spend?: boolean;
+    client_or_project_tag?: string;
+  }) => {
     if (values.category && categories.length > 0) {
       const isAllowed = categories.some(c => c.toLowerCase() === values.category.toLowerCase());
       if (!isAllowed) {
-        toast.error(`"${values.category}" is not in your approved category list for ${mode} mode`);
+        toast.error(`"${values.category}" is not in your approved category list for ${categoryMode} mode`);
         return;
       }
       const canonical = categories.find(c => c.toLowerCase() === values.category.toLowerCase());
       if (canonical) values.category = canonical;
     }
 
+    const updatePayload: Record<string, any> = {
+      final_category: values.category,
+      final_method: values.method,
+      final_notes: values.notes,
+      review_status: 'edited',
+    };
+
+    if (values.transaction_mode !== undefined) updatePayload.transaction_mode = values.transaction_mode;
+    if (values.economic_owner !== undefined) updatePayload.economic_owner = values.economic_owner;
+    if (values.treatment_type !== undefined) updatePayload.treatment_type = values.treatment_type;
+    if (values.tax_treatment !== undefined) updatePayload.tax_treatment = values.tax_treatment;
+    if (values.is_reimbursable !== undefined) updatePayload.is_reimbursable = values.is_reimbursable;
+    if (values.reimbursable_to !== undefined) updatePayload.reimbursable_to = values.reimbursable_to;
+    if (values.reimbursement_status !== undefined) updatePayload.reimbursement_status = values.reimbursement_status;
+    if (values.business_purpose !== undefined) updatePayload.business_purpose = values.business_purpose;
+    if (values.counts_toward_true_personal_spend !== undefined) updatePayload.counts_toward_true_personal_spend = values.counts_toward_true_personal_spend;
+    if (values.counts_toward_true_business_spend !== undefined) updatePayload.counts_toward_true_business_spend = values.counts_toward_true_business_spend;
+    if (values.client_or_project_tag !== undefined) updatePayload.client_or_project_tag = values.client_or_project_tag;
+
     const { error } = await supabase
       .from('transactions_uploaded')
-      .update({ final_category: values.category, final_method: values.method, final_notes: values.notes, review_status: 'edited' })
+      .update(updatePayload)
       .eq('id', id);
 
     if (!error) {
@@ -210,7 +274,7 @@ export default function Expenses() {
         const desc = tx.description_raw || '';
         if (!isStatementArtifact(desc, tx.amount || 0)) {
           const merchantKey = generateMerchantKey(normalizeDescription(desc));
-          await updateMerchantMemory(merchantKey, tx.mode as 'personal' | 'business', values.category, values.method || null, values.notes || null, desc, user!.id);
+          await updateMerchantMemory(merchantKey, categoryMode as 'personal' | 'business', values.category, values.method || null, values.notes || null, desc, user!.id);
         }
       }
       await loadTransactions();
@@ -231,7 +295,7 @@ export default function Expenses() {
         const desc = tx.description_raw || '';
         if (!isStatementArtifact(desc, tx.amount || 0)) {
           const merchantKey = generateMerchantKey(normalizeDescription(desc));
-          await updateMerchantMemory(merchantKey, tx.mode as 'personal' | 'business', category, tx.final_method || tx.predicted_method || null, tx.final_notes || tx.predicted_notes || null, desc, user!.id);
+          await updateMerchantMemory(merchantKey, categoryMode as 'personal' | 'business', category, tx.final_method || tx.predicted_method || null, tx.final_notes || tx.predicted_notes || null, desc, user!.id);
         }
       }
       await loadTransactions();
@@ -251,6 +315,10 @@ export default function Expenses() {
     const transferCategory = categories.find(c => c.toLowerCase() === 'transfer') || null;
     await supabase.from('transactions_uploaded').update({
       is_transfer: true, exclude_from_expense_totals: true, transfer_type: 'unknown_transfer',
+      is_non_expense_cash_movement: true,
+      counts_toward_true_personal_spend: false,
+      counts_toward_true_business_spend: false,
+      treatment_type: 'transfer',
       predicted_category: transferCategory,
       final_category: transferCategory,
       review_status: transferCategory ? 'edited' : 'needs_review',
@@ -258,6 +326,35 @@ export default function Expenses() {
     setSelectedIds(new Set());
     await loadTransactions();
     toast.success(`Marked ${ids.length} rows as transfer`);
+  };
+
+  const bulkSwitchMode = async (targetMode: TransactionMode) => {
+    const ids = [...selectedIds];
+    const updates: Record<string, any> = {
+      transaction_mode: targetMode,
+      mode: targetMode === 'reimbursable_work' ? 'personal' : targetMode,
+    };
+    if (targetMode === 'personal') {
+      updates.economic_owner = 'personal';
+      updates.counts_toward_true_personal_spend = true;
+      updates.counts_toward_true_business_spend = false;
+      updates.is_reimbursable = false;
+    } else if (targetMode === 'business') {
+      updates.economic_owner = 'artist_influence';
+      updates.counts_toward_true_personal_spend = false;
+      updates.counts_toward_true_business_spend = true;
+      updates.is_reimbursable = false;
+    } else {
+      updates.economic_owner = 'employer';
+      updates.counts_toward_true_personal_spend = false;
+      updates.counts_toward_true_business_spend = false;
+      updates.is_reimbursable = true;
+      updates.reimbursement_status = 'pending';
+    }
+    await supabase.from('transactions_uploaded').update(updates).in('id', ids);
+    setSelectedIds(new Set());
+    await loadTransactions();
+    toast.success(`Switched ${ids.length} rows to ${MODE_CONFIG[targetMode].label}`);
   };
 
   const bulkDelete = async () => {
@@ -293,6 +390,10 @@ export default function Expenses() {
     await supabase.from('transactions_uploaded').update({
       is_transfer: newIsTransfer, exclude_from_expense_totals: newIsTransfer,
       transfer_type: newIsTransfer ? 'unknown_transfer' : null,
+      is_non_expense_cash_movement: newIsTransfer,
+      treatment_type: newIsTransfer ? 'transfer' : 'expense',
+      counts_toward_true_personal_spend: newIsTransfer ? false : (tx.transaction_mode === 'personal'),
+      counts_toward_true_business_spend: newIsTransfer ? false : (tx.transaction_mode === 'business'),
     }).eq('id', tx.id);
     await loadTransactions();
     setDetailTx(null);
@@ -308,13 +409,17 @@ export default function Expenses() {
         Amount: t.amount != null ? `$${Math.abs(t.amount).toFixed(2)}` : '',
         Category: t.final_category || t.predicted_category || '',
         Method: t.final_method || t.predicted_method || '',
-        Notes: t.final_notes || t.predicted_notes || '',
+        Mode: t.transaction_mode || t.mode || '',
+        'Economic Owner': t.economic_owner || '',
+        'Tax Treatment': t.tax_treatment || '',
+        Reimbursable: t.is_reimbursable ? 'Yes' : 'No',
         Transfer: t.is_transfer ? 'Yes' : 'No',
+        Notes: t.final_notes || t.predicted_notes || '',
       }));
-    const headers = ['Date', 'Description', 'Amount', 'Category', 'Method', 'Notes', 'Transfer'];
+    const headers = Object.keys(rows[0] || {});
     const csv = [
       headers.join(','),
-      ...rows.map(r => headers.map(h => `"${(r[h as keyof typeof r] || '').replace(/"/g, '""')}"`).join(',')),
+      ...rows.map(r => headers.map(h => `"${(r[h as keyof typeof r] || '').toString().replace(/"/g, '""')}"`).join(',')),
     ].join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
@@ -352,7 +457,7 @@ export default function Expenses() {
       const { data: catData } = await supabase
         .from('category_options')
         .select('category_name')
-        .eq('mode', mode)
+        .eq('mode', categoryMode)
         .eq('is_active', true)
         .eq('owner_id', user.id)
         .order('sort_order');
@@ -385,12 +490,12 @@ export default function Expenses() {
           const { data: existing } = await supabase
             .from('transactions_uploaded')
             .select('id, date, description_normalized, amount, duplicate_fingerprint')
-            .eq('mode', mode).eq('owner_id', user.id)
+            .eq('mode', categoryMode).eq('owner_id', user.id)
             .gte('date', minDate).lte('date', maxDate)
             .range(from, from + pageSize - 1);
           if (existing) {
             for (const row of existing) {
-              const fp = row.duplicate_fingerprint || generateFingerprint(mode, row.date, row.amount ?? 0, row.description_normalized || '');
+              const fp = row.duplicate_fingerprint || generateFingerprint(categoryMode, row.date, row.amount ?? 0, row.description_normalized || '');
               existingFingerprints.add(fp);
               existingForNearDup.push({ date: row.date, amount: row.amount ?? 0, description_normalized: row.description_normalized || '', id: row.id, fingerprint: fp });
             }
@@ -405,7 +510,7 @@ export default function Expenses() {
       const dupStatuses: Map<number, { status: string; matchId: string | null }> = new Map();
 
       for (const tx of validRows) {
-        const fp = generateFingerprint(mode, tx.date, tx.amount, tx.description_normalized);
+        const fp = generateFingerprint(categoryMode, tx.date, tx.amount, tx.description_normalized);
         if (appSettings.preventExactDuplicates && existingFingerprints.has(fp)) { exactDupCount++; continue; }
         let nearDupMatch: string | null = null;
         if (appSettings.flagPossibleDuplicates) {
@@ -426,7 +531,7 @@ export default function Expenses() {
       }
 
       updateItem(id, { status: 'categorizing' });
-      const results = await categorizeTransactions(rowsToInsert, mode, user.id, undefined, allowedCategories);
+      const results = await categorizeTransactions(rowsToInsert, categoryMode as 'personal' | 'business', user.id, undefined, allowedCategories);
 
       // Layer 5: AI categorization for unmatched rows
       const aiExplanations = new Map<number, string>();
@@ -445,7 +550,7 @@ export default function Expenses() {
 
         if (unmatchedRows.length > 0) {
           try {
-            const aiResults = await categorizeWithAI(unmatchedRows, mode, user.id, allowedCategories);
+            const aiResults = await categorizeWithAI(unmatchedRows, categoryMode as 'personal' | 'business', user.id, allowedCategories);
             for (const [idx, aiResult] of aiResults) {
               if (aiResult.category && aiResult.confidence >= 50) {
                 results[idx].predicted_category = aiResult.category;
@@ -472,7 +577,7 @@ export default function Expenses() {
       const reviewCount = results.filter(r => r.review_status === 'needs_review').length;
 
       const { data: batch, error: batchError } = await supabase.from('upload_batches').insert({
-        mode, file_name: file.name, total_rows: rowsToInsert.length,
+        mode: categoryMode, file_name: file.name, total_rows: rowsToInsert.length,
         auto_categorized_count: autoCount, suggested_count: suggestedCount, needs_review_count: reviewCount,
         exact_duplicates_skipped: exactDupCount, possible_duplicates_flagged: possibleDupCount,
         transfers_detected: 0, parse_errors: parseErrorRows.length, owner_id: user.id,
@@ -482,6 +587,9 @@ export default function Expenses() {
       } as any).select().single();
       if (batchError) throw batchError;
 
+      // V2 mode defaults for new rows
+      const modeDefaults = getModeDefaults(mode);
+
       const chunkSize = 100;
       for (let i = 0; i < rowsToInsert.length; i += chunkSize) {
         const chunk = rowsToInsert.slice(i, i + chunkSize).map((tx, idx) => {
@@ -489,7 +597,7 @@ export default function Expenses() {
           const result = results[globalIdx];
           const txMethod = method || result.predicted_method;
           const dupInfo = dupStatuses.get(globalIdx) || { status: 'unique', matchId: null };
-          const fp = generateFingerprint(mode, tx.date, tx.amount, tx.description_normalized);
+          const fp = generateFingerprint(categoryMode, tx.date, tx.amount, tx.description_normalized);
           const transfer = detectTransfer(tx.description_raw);
           if (transfer.isTransfer) transferCount++;
 
@@ -505,7 +613,7 @@ export default function Expenses() {
           const reviewStatus = (transfer.isTransfer && !transferCategory) ? 'needs_review' : result.review_status;
 
           return {
-            upload_batch_id: batch.id, mode, date: tx.date,
+            upload_batch_id: batch.id, mode: categoryMode, date: tx.date,
             description_raw: tx.description_raw, description_normalized: tx.description_normalized,
             amount: tx.amount,
             predicted_category: predictedCat,
@@ -524,6 +632,13 @@ export default function Expenses() {
             is_transfer: transfer.isTransfer,
             exclude_from_expense_totals: transfer.isTransfer && appSettings.excludeTransfers,
             transfer_type: transfer.transferType,
+            // V2 fields
+            transaction_mode: mode,
+            ...modeDefaults,
+            is_non_expense_cash_movement: transfer.isTransfer,
+            treatment_type: transfer.isTransfer ? 'transfer' : 'expense',
+            counts_toward_true_personal_spend: transfer.isTransfer ? false : modeDefaults.counts_toward_true_personal_spend,
+            counts_toward_true_business_spend: transfer.isTransfer ? false : modeDefaults.counts_toward_true_business_spend,
           };
         });
         const { error: txError } = await supabase.from('transactions_uploaded').insert(chunk);
@@ -625,26 +740,27 @@ export default function Expenses() {
     </th>
   );
 
+  const fmtMoney = (n: number) => `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
   return (
     <div className="min-h-screen bg-background">
       <AppNav />
       <div className="container py-4 animate-fade-in">
         {/* Top Control Bar */}
         <div className="glass-panel p-3 mb-3 flex flex-wrap items-center gap-2 sticky top-14 z-40">
-          {/* Mode Toggle */}
+          {/* 3-Way Mode Toggle */}
           <div className="flex rounded-lg border border-border/40 overflow-hidden">
-            <button
-              onClick={() => setMode('personal')}
-              className={`px-3 py-1.5 text-xs font-medium transition-colors ${mode === 'personal' ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground'}`}
-            >
-              Personal
-            </button>
-            <button
-              onClick={() => setMode('business')}
-              className={`px-3 py-1.5 text-xs font-medium transition-colors ${mode === 'business' ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground'}`}
-            >
-              Business
-            </button>
+            {(Object.entries(MODE_CONFIG) as [TransactionMode, typeof MODE_CONFIG[TransactionMode]][]).map(([key, cfg]) => (
+              <button
+                key={key}
+                onClick={() => setMode(key)}
+                className={`px-3 py-1.5 text-xs font-medium transition-colors border-r border-border/20 last:border-r-0 ${
+                  mode === key ? cfg.activeClass : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                {cfg.label}
+              </button>
+            ))}
           </div>
 
           {/* Upload */}
@@ -669,7 +785,7 @@ export default function Expenses() {
                     <Progress value={overallProgress} className="h-1.5" />
                   </div>
                 )}
-                <FileProgressList items={fileQueue} mode={mode} />
+                <FileProgressList items={fileQueue} mode={categoryMode} />
               </div>
             </SheetContent>
           </Sheet>
@@ -704,6 +820,7 @@ export default function Expenses() {
               <SelectItem value="all">All Rows</SelectItem>
               <SelectItem value="uncategorized">Uncategorized</SelectItem>
               <SelectItem value="transfers">Transfers</SelectItem>
+              <SelectItem value="reimbursable">Reimbursable</SelectItem>
               <SelectItem value="possible_duplicates">Duplicates</SelectItem>
               <SelectItem value="parse_errors">Parse Errors</SelectItem>
               <SelectItem value="excluded">Excluded</SelectItem>
@@ -719,6 +836,21 @@ export default function Expenses() {
               <Button size="sm" variant="outline" onClick={bulkMarkTransfer} className="h-8 gap-1 text-xs">
                 <ArrowLeftRight className="h-3 w-3" /> Transfer
               </Button>
+              {mode !== 'personal' && (
+                <Button size="sm" variant="outline" onClick={() => bulkSwitchMode('personal')} className="h-8 gap-1 text-xs">
+                  <User className="h-3 w-3" /> → Personal
+                </Button>
+              )}
+              {mode !== 'business' && (
+                <Button size="sm" variant="outline" onClick={() => bulkSwitchMode('business')} className="h-8 gap-1 text-xs text-primary border-primary/30">
+                  <Briefcase className="h-3 w-3" /> → Business
+                </Button>
+              )}
+              {mode !== 'reimbursable_work' && (
+                <Button size="sm" variant="outline" onClick={() => bulkSwitchMode('reimbursable_work')} className="h-8 gap-1 text-xs text-warning border-warning/30">
+                  <Receipt className="h-3 w-3" /> → Reimburse
+                </Button>
+              )}
               <Button size="sm" variant="destructive" onClick={bulkDelete} className="h-8 gap-1 text-xs">
                 <Trash2 className="h-3 w-3" /> Delete {selectedIds.size}
               </Button>
@@ -732,28 +864,30 @@ export default function Expenses() {
           <span className="text-[11px] text-muted-foreground font-mono">{filtered.length} rows</span>
         </div>
 
-        {/* Summary Chips */}
+        {/* V2 Stats Row */}
         <div className="flex flex-wrap gap-2 mb-3">
           <div className="glass-panel-sm px-3 py-1.5 text-xs">
-            <span className="text-muted-foreground">Total</span>{' '}
-            <span className="font-mono font-medium text-foreground">{stats.total}</span>
+            <span className="text-muted-foreground">Total Cash Out</span>{' '}
+            <span className="font-mono font-medium text-foreground">{fmtMoney(stats.totalCashOut)}</span>
           </div>
-          {stats.uncategorized > 0 && (
-            <div className="glass-panel-sm px-3 py-1.5 text-xs cursor-pointer" onClick={() => setExtraFilter('uncategorized')}>
-              <span className="text-muted-foreground">Uncategorized</span>{' '}
-              <span className="font-mono font-medium text-warning">{stats.uncategorized}</span>
+          <div className="glass-panel-sm px-3 py-1.5 text-xs">
+            <span className="text-muted-foreground">True Personal</span>{' '}
+            <span className="font-mono font-medium text-foreground">{fmtMoney(stats.truePersonalSpend)}</span>
+          </div>
+          <div className="glass-panel-sm px-3 py-1.5 text-xs">
+            <span className="text-muted-foreground">True Business</span>{' '}
+            <span className="font-mono font-medium text-primary">{fmtMoney(stats.trueBusinessSpend)}</span>
+          </div>
+          {stats.pendingReimbursable > 0 && (
+            <div className="glass-panel-sm px-3 py-1.5 text-xs">
+              <span className="text-muted-foreground">Pending Reimburse</span>{' '}
+              <span className="font-mono font-medium text-warning">{fmtMoney(stats.pendingReimbursable)}</span>
             </div>
           )}
           {stats.needsReview > 0 && (
             <div className="glass-panel-sm px-3 py-1.5 text-xs cursor-pointer" onClick={() => setStatusFilter('needs_review')}>
               <span className="text-muted-foreground">Needs Review</span>{' '}
               <span className="font-mono font-medium text-destructive">{stats.needsReview}</span>
-            </div>
-          )}
-          {stats.duplicates > 0 && (
-            <div className="glass-panel-sm px-3 py-1.5 text-xs cursor-pointer" onClick={() => setExtraFilter('possible_duplicates')}>
-              <span className="text-muted-foreground">Duplicates</span>{' '}
-              <span className="font-mono font-medium text-warning">{stats.duplicates}</span>
             </div>
           )}
           {stats.transfersExcluded > 0 && (
@@ -763,8 +897,8 @@ export default function Expenses() {
             </div>
           )}
           <div className="glass-panel-sm px-3 py-1.5 text-xs">
-            <span className="text-muted-foreground">This Month</span>{' '}
-            <span className="font-mono font-medium text-primary">${stats.thisMonthSpend.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+            <span className="text-muted-foreground">Total</span>{' '}
+            <span className="font-mono font-medium text-foreground">{stats.total}</span>
           </div>
         </div>
 
@@ -782,7 +916,7 @@ export default function Expenses() {
                   <SortHeader col="amount" label="Amount" className="text-right" />
                   <SortHeader col="category" label="Category" />
                   <th className="px-2 py-2 text-left text-[11px] font-medium text-muted-foreground">Method</th>
-                  <th className="px-2 py-2 text-left text-[11px] font-medium text-muted-foreground">Notes</th>
+                  <th className="px-2 py-2 text-left text-[11px] font-medium text-muted-foreground">Owner</th>
                   <SortHeader col="confidence" label="Conf" />
                   <th className="px-2 py-2 text-left text-[11px] font-medium text-muted-foreground">Status</th>
                   <th className="px-2 py-2 text-left text-[11px] font-medium text-muted-foreground">Flags</th>
@@ -822,7 +956,7 @@ export default function Expenses() {
                         <span className="text-muted-foreground">{tx.final_method || tx.predicted_method || '—'}</span>
                       </td>
                       <td className="px-2 py-1">
-                        <span className="text-muted-foreground truncate max-w-[100px] block">{tx.final_notes || tx.predicted_notes || '—'}</span>
+                        <span className="text-muted-foreground text-[10px]">{tx.economic_owner || '—'}</span>
                       </td>
                       <td className="px-2 py-1">
                         <span className={getConfidenceClass(tx.confidence)}>
@@ -839,6 +973,11 @@ export default function Expenses() {
                           {tx.is_transfer && (
                             <Badge variant="outline" className="text-[9px] h-3.5 gap-0.5 border-primary/30 text-primary px-1">
                               <ArrowLeftRight className="h-2 w-2" /> xfer
+                            </Badge>
+                          )}
+                          {tx.is_reimbursable && (
+                            <Badge variant="outline" className="text-[9px] h-3.5 gap-0.5 border-warning/30 text-warning px-1">
+                              <Receipt className="h-2 w-2" /> reimb
                             </Badge>
                           )}
                           {tx.duplicate_status === 'possible_duplicate' && (
@@ -904,4 +1043,33 @@ export default function Expenses() {
       />
     </div>
   );
+}
+
+function getModeDefaults(mode: TransactionMode) {
+  switch (mode) {
+    case 'personal':
+      return {
+        economic_owner: 'personal',
+        counts_toward_true_personal_spend: true,
+        counts_toward_true_business_spend: false,
+        is_reimbursable: false,
+        reimbursement_status: 'none',
+      };
+    case 'business':
+      return {
+        economic_owner: 'artist_influence',
+        counts_toward_true_personal_spend: false,
+        counts_toward_true_business_spend: true,
+        is_reimbursable: false,
+        reimbursement_status: 'none',
+      };
+    case 'reimbursable_work':
+      return {
+        economic_owner: 'employer',
+        counts_toward_true_personal_spend: false,
+        counts_toward_true_business_spend: false,
+        is_reimbursable: true,
+        reimbursement_status: 'pending',
+      };
+  }
 }
