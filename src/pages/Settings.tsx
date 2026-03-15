@@ -345,9 +345,23 @@ export default function SettingsPage() {
         {cats.map(c => (
           <div key={c.id} className="flex items-center justify-between py-1 px-2 rounded hover:bg-secondary/30">
             <span className="text-xs text-foreground">{c.category_name}</span>
-            <Button size="sm" variant="ghost" className="h-5 w-5 p-0" onClick={() => deleteCategory(c.id)}>
-              <Trash2 className="h-3 w-3 text-muted-foreground" />
-            </Button>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button size="sm" variant="ghost" className="h-5 w-5 p-0">
+                  <Trash2 className="h-3 w-3 text-muted-foreground" />
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Delete category?</AlertDialogTitle>
+                  <AlertDialogDescription>"{c.category_name}" will be permanently removed. Existing transactions using it won't be affected.</AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction onClick={() => deleteCategory(c.id)}>Delete</AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           </div>
         ))}
       </div>

@@ -173,7 +173,7 @@ export default function Accountant() {
       case 'expense_ledger':
         return {
           headers: ['Date', 'Description', 'Amount', 'Category', 'Method', 'Mode', 'Notes'],
-          rows: filteredExpenses.map(e => [e.date, e.description_normalized || e.description_raw, String(e.amount ?? 0), e.final_category, e.final_method, e.mode, e.final_notes]),
+          rows: filteredExpenses.map(e => [e.date, e.description_normalized || e.description_raw, String(Math.abs(e.amount ?? 0)), e.final_category, e.final_method, e.mode, e.final_notes]),
         };
       case 'income_ledger':
         return {
@@ -197,10 +197,10 @@ export default function Accountant() {
         };
       case 'year_end_summary': {
         const totalIncome = (income || []).reduce((s, i) => s + (i.amount || 0), 0);
-        const totalExpPersonal = (expenses || []).filter(e => e.mode === 'personal').reduce((s, e) => s + (e.amount || 0), 0);
-        const totalExpBusiness = (expenses || []).filter(e => e.mode === 'business').reduce((s, e) => s + (e.amount || 0), 0);
-        const totalDeductions = taxDeductions.reduce((s, e) => s + (e.amount || 0), 0);
-        const totalTaxPaid = taxPayments.reduce((s, e) => s + (e.amount || 0), 0);
+        const totalExpPersonal = (expenses || []).filter(e => e.mode === 'personal').reduce((s, e) => s + Math.abs(e.amount || 0), 0);
+        const totalExpBusiness = (expenses || []).filter(e => e.mode === 'business').reduce((s, e) => s + Math.abs(e.amount || 0), 0);
+        const totalDeductions = taxDeductions.reduce((s, e) => s + Math.abs(e.amount || 0), 0);
+        const totalTaxPaid = taxPayments.reduce((s, e) => s + Math.abs(e.amount || 0), 0);
         return {
           headers: ['Metric', 'Amount'],
           rows: [

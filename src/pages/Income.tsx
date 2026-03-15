@@ -6,6 +6,7 @@ import { CsvUploader } from '@/components/CsvUploader';
 import { classifyIncome, INCOME_TYPE_OPTIONS, TAXABLE_STATUS_OPTIONS } from '@/lib/income-classifier';
 import { normalizeDescription } from '@/lib/normalizer';
 import { toast } from 'sonner';
+import Papa from 'papaparse';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -85,13 +86,23 @@ export default function Income() {
   const fetchTransactions = useCallback(async () => {
     if (!user) return;
     setLoading(true);
-    const { data, error } = await supabase
-      .from('income_transactions')
-      .select('*')
-      .eq('owner_id', user.id)
-      .order('date', { ascending: false });
-    if (error) { toast.error('Failed to load income'); console.error(error); }
-    else setTransactions((data as IncomeTransaction[]) || []);
+    let allData: IncomeTransaction[] = [];
+    let from = 0;
+    const pageSize = 1000;
+    let hasMore = true;
+    while (hasMore) {
+      const { data, error } = await supabase
+        .from('income_transactions')
+        .select('*')
+        .eq('owner_id', user.id)
+        .order('date', { ascending: false })
+        .range(from, from + pageSize - 1);
+      if (error) { toast.error('Failed to load income'); console.error(error); break; }
+      if (data) allData = [...allData, ...(data as IncomeTransaction[])];
+      hasMore = (data?.length ?? 0) === pageSize;
+      from += pageSize;
+    }
+    setTransactions(allData);
     setLoading(false);
   }, [user]);
 
@@ -155,10 +166,12 @@ export default function Income() {
     if (!user) return;
     for (const file of files) {
       const text = await file.text();
-      const lines = text.split('\n').filter(l => l.trim());
-      if (lines.length < 2) { toast.error(`${file.name}: No data rows`); continue; }
+      const parsed = Papa.parse(text, { header: false, skipEmptyLines: true });
+      const allRows = parsed.data as string[][];
+      if (allRows.length < 2) { toast.error(`${file.name}: No data rows`); continue; }
 
-      const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+
+      const headers = allRows[0].map(h => (h || '').trim().toLowerCase());
       const dateIdx = headers.findIndex(h => /date/i.test(h));
       const descIdx = headers.findIndex(h => /desc|memo|narr|detail/i.test(h));
       const amtIdx = headers.findIndex(h => /amount|credit|deposit/i.test(h));
@@ -166,8 +179,8 @@ export default function Income() {
       if (amtIdx === -1) { toast.error(`${file.name}: No amount column found`); continue; }
 
       const rows: any[] = [];
-      for (let i = 1; i < lines.length; i++) {
-        const cols = lines[i].split(',').map(c => c.trim().replace(/^"|"$/g, ''));
+      for (let i = 1; i < allRows.length; i++) {
+        const cols = allRows[i];
         const rawDesc = descIdx >= 0 ? cols[descIdx] : '';
         const rawAmount = parseFloat((cols[amtIdx] || '0').replace(/[$,]/g, ''));
         if (isNaN(rawAmount) || rawAmount <= 0) continue; // income = positive amounts
@@ -248,6 +261,7 @@ export default function Income() {
 
   const bulkDelete = async () => {
     if (selectedIds.size === 0) return;
+    if (!confirm(`Delete ${selectedIds.size} income transaction(s)? This cannot be undone.`)) return;
     const ids = Array.from(selectedIds);
     const { error } = await supabase.from('income_transactions').delete().in('id', ids);
     if (error) toast.error('Delete failed');

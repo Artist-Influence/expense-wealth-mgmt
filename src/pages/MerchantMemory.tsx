@@ -69,6 +69,7 @@ export default function MerchantMemory() {
   };
 
   const deleteMemory = async (id: string) => {
+    if (!confirm('Delete this merchant memory record? This cannot be undone.')) return;
     await supabase.from('merchant_memory').delete().eq('id', id);
     await loadMerchants();
     toast.success('Memory record deleted');
@@ -95,6 +96,10 @@ export default function MerchantMemory() {
           </div>
         </div>
 
+        {merchants.length >= 200 && (
+          <p className="text-xs text-muted-foreground mb-2">Showing first 200 records. Some merchants may not be listed.</p>
+        )}
+        <p className="text-xs text-muted-foreground mb-2">{filtered.length} merchant{filtered.length !== 1 ? 's' : ''} {search ? 'matching' : 'total'}</p>
         <div className="glass-panel overflow-hidden">
           <div className="overflow-x-auto scrollbar-thin">
             <table className="w-full text-sm">
