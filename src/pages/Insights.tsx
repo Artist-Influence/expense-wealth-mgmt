@@ -145,13 +145,13 @@ export default function Insights() {
 
   const monthlyTrend = useMemo(() => {
     const monthMap = new Map<string, number>();
-    expenses.forEach(t => {
+    approvedExpenses.forEach(t => {
       if (!t.date) return;
       const month = t.date.substring(0, 7);
       monthMap.set(month, (monthMap.get(month) || 0) + Math.abs(t.amount || 0));
     });
     return [...monthMap.entries()].sort((a, b) => a[0].localeCompare(b[0])).slice(-12).map(([month, total]) => ({ month, total: Math.round(total * 100) / 100 }));
-  }, [expenses]);
+  }, [approvedExpenses]);
 
   const topMerchants = useMemo(() => {
     const merchMap = new Map<string, { total: number; count: number; category: string }>();
