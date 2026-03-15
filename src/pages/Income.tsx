@@ -571,6 +571,13 @@ export default function Income() {
                           <Link2 className="h-3.5 w-3.5 text-warning" />
                         </Button>
                       )}
+                      {tx.linked_reimbursement_group_id && (
+                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => {
+                          if (confirm('Unlink this income from its reimbursement group? This will reverse the received amount.')) unlinkFromGroup(tx);
+                        }} title="Unlink from reimbursement group">
+                          <Link2 className="h-3.5 w-3.5 text-destructive" />
+                        </Button>
+                      )}
                       {tx.status !== 'approved' && (
                         <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => updateField(tx.id, 'status', 'approved')} title="Approve">
                           <Check className="h-3.5 w-3.5 text-success" />
