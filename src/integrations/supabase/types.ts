@@ -335,6 +335,69 @@ export type Database = {
         }
         Relationships: []
       }
+      tax_profiles: {
+        Row: {
+          business_owner_income_enabled: boolean
+          city: string
+          created_at: string
+          custom_effective_tax_rate_optional: number | null
+          default_federal_reserve_percent: number
+          default_nyc_reserve_percent: number
+          default_nys_reserve_percent: number
+          estimated_tax_payments_ytd: number
+          estimated_w2_withholding_ytd: number
+          filing_status: string
+          id: string
+          notes: string | null
+          owner_id: string
+          resident_city_tax_enabled: boolean
+          self_employment_income_enabled: boolean
+          state: string
+          updated_at: string
+          w2_income_enabled: boolean
+        }
+        Insert: {
+          business_owner_income_enabled?: boolean
+          city?: string
+          created_at?: string
+          custom_effective_tax_rate_optional?: number | null
+          default_federal_reserve_percent?: number
+          default_nyc_reserve_percent?: number
+          default_nys_reserve_percent?: number
+          estimated_tax_payments_ytd?: number
+          estimated_w2_withholding_ytd?: number
+          filing_status?: string
+          id?: string
+          notes?: string | null
+          owner_id: string
+          resident_city_tax_enabled?: boolean
+          self_employment_income_enabled?: boolean
+          state?: string
+          updated_at?: string
+          w2_income_enabled?: boolean
+        }
+        Update: {
+          business_owner_income_enabled?: boolean
+          city?: string
+          created_at?: string
+          custom_effective_tax_rate_optional?: number | null
+          default_federal_reserve_percent?: number
+          default_nyc_reserve_percent?: number
+          default_nys_reserve_percent?: number
+          estimated_tax_payments_ytd?: number
+          estimated_w2_withholding_ytd?: number
+          filing_status?: string
+          id?: string
+          notes?: string | null
+          owner_id?: string
+          resident_city_tax_enabled?: boolean
+          self_employment_income_enabled?: boolean
+          state?: string
+          updated_at?: string
+          w2_income_enabled?: boolean
+        }
+        Relationships: []
+      }
       transactions_uploaded: {
         Row: {
           amount: number | null
