@@ -257,15 +257,18 @@ export default function Reimbursements() {
 
     await (supabase as any).from('reimbursement_groups').update(updates).eq('id', groupId);
 
-    // Also update linked transactions
-    const txStatus = status === 'submitted' ? 'submitted' : status === 'reimbursed' ? 'reimbursed' : status;
+    // Cascade to linked transactions with proper status
+    const txStatus = status === 'submitted' ? 'submitted'
+      : status === 'reimbursed' ? 'reimbursed'
+      : status === 'partially_reimbursed' ? 'partially_reimbursed'
+      : status;
     await supabase.from('transactions_uploaded')
       .update({ reimbursement_status: txStatus })
       .eq('linked_reimbursement_group_id', groupId);
 
     setSelectedGroup(null);
     await loadData();
-    toast.success(`Report marked as ${status}`);
+    toast.success(`Report marked as ${status.replace(/_/g, ' ')}`);
   };
 
   const exportCsv = () => {
