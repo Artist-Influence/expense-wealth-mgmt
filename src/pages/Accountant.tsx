@@ -184,11 +184,17 @@ export default function Accountant() {
           headers: ['Date', 'Description', 'Amount', 'Type', 'Taxable', 'Source', 'Notes'],
           rows: (income || []).map(i => [i.date, i.description_normalized || i.description_raw, String(i.amount ?? 0), i.income_type, i.taxable_status, i.source_account_name, i.notes]),
         };
-      case 'reimbursement_report':
+      case 'reimbursement_report': {
+        // Date-filter reimbursement groups by created_at
+        const filteredReimb = (reimbursements || []).filter(r => {
+          const created = r.created_at?.split('T')[0];
+          return created && created >= dateRange.start && created <= dateRange.end;
+        });
         return {
           headers: ['Title', 'To', 'Status', 'Expected', 'Received', 'Submitted', 'Received Date'],
-          rows: (reimbursements || []).map(r => [r.title, r.reimbursable_to, r.status, String(r.total_expected), String(r.total_received), r.submitted_date, r.received_date]),
+          rows: filteredReimb.map(r => [r.title, r.reimbursable_to, r.status, String(r.total_expected), String(r.total_received), r.submitted_date, r.received_date]),
         };
+      }
       case 'tax_deductions':
         return {
           headers: ['Date', 'Description', 'Amount', 'Category', 'Mode'],
