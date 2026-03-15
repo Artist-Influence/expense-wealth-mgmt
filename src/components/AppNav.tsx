@@ -2,7 +2,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import {
   Receipt, BarChart3, Brain, Settings, LogOut, Database,
-  DollarSign, ReceiptText, TrendingUp, Landmark, FileSpreadsheet, Target
+  DollarSign, ReceiptText, TrendingUp, Landmark, FileSpreadsheet, Target, CalendarCheck
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -16,7 +16,8 @@ const navItems = [
   { to: '/allocations', label: 'Allocate', icon: Target, active: true },
   { to: '/tax', label: 'Tax', icon: Landmark, active: true },
   { to: '/merchants', label: 'Memory', icon: Brain, active: true },
-  { to: '/accountant', label: 'Accountant', icon: FileSpreadsheet, active: false },
+  { to: '/accountant', label: 'Accountant', icon: FileSpreadsheet, active: true },
+  { to: '/close-month', label: 'Close', icon: CalendarCheck, active: true },
   { to: '/settings', label: 'Settings', icon: Settings, active: true },
 ];
 
