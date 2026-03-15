@@ -314,15 +314,15 @@ export default function Insights() {
 
   const methodBreakdown = useMemo(() => {
     const methodMap = new Map<string, number>();
-    expenses.forEach(t => {
-      const method = t.final_method || t.predicted_method || 'Unknown';
+    approvedExpenses.forEach(t => {
+      const method = t.final_method || 'Unknown';
       methodMap.set(method, (methodMap.get(method) || 0) + Math.abs(t.amount || 0));
     });
     return [...methodMap.entries()]
       .sort((a, b) => b[1] - a[1])
       .slice(0, 8)
       .map(([name, value]) => ({ name, value: Math.round(value * 100) / 100 }));
-  }, [expenses]);
+  }, [approvedExpenses]);
 
   const dataQuality = useMemo(() => {
     const total = transactions.length;
