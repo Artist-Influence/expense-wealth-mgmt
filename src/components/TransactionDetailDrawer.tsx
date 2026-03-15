@@ -54,6 +54,11 @@ interface Transaction {
   source_file_name: string | null;
   is_split_parent: boolean;
   parent_transaction_id: string | null;
+  // Optional fields present on some page-specific interfaces
+  linked_reimbursement_group_id?: string | null;
+  exclude_from_cash_spend_reporting?: boolean;
+  upload_batch_id?: string | null;
+  [key: string]: any;
 }
 
 interface TransactionDetailDrawerProps {
