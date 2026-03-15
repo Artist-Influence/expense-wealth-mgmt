@@ -170,9 +170,6 @@ export default function Income() {
       const allRows = parsed.data as string[][];
       if (allRows.length < 2) { toast.error(`${file.name}: No data rows`); continue; }
 
-      const parsed = Papa.parse(text, { header: false, skipEmptyLines: true });
-      const allRows = parsed.data as string[][];
-      if (allRows.length < 2) { toast.error(`${file.name}: No data rows`); continue; }
 
       const headers = allRows[0].map(h => (h || '').trim().toLowerCase());
       const dateIdx = headers.findIndex(h => /date/i.test(h));
