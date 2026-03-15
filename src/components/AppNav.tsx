@@ -28,7 +28,7 @@ export function AppNav() {
   return (
     <nav className="sticky top-0 z-50 glass-panel rounded-none border-x-0 border-t-0">
       <div className="container flex h-12 items-center justify-between">
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 overflow-x-auto scrollbar-thin">
           <Link to="/" className="flex items-center gap-2 mr-4">
             <Database className="h-4 w-4 text-primary" />
             <span className="font-semibold text-foreground text-xs">Expense Memory</span>

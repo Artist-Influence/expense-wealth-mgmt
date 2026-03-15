@@ -235,20 +235,17 @@ export default function Allocations() {
   };
 
   // Load existing line items into local state when plan loads
-  const existingLoaded = useMemo(() => {
+  useEffect(() => {
     if (lineItems.length > 0 && Object.keys(localAmounts).length === 0) {
       const m: Record<string, number> = {};
       lineItems.forEach(li => {
         if (li.target_account_id) m[li.target_account_id] = Number(li.amount);
       });
-      return m;
+      if (Object.keys(m).length > 0) {
+        setLocalAmounts(m);
+      }
     }
-    return null;
   }, [lineItems]);
-
-  if (existingLoaded && Object.keys(localAmounts).length === 0 && Object.keys(existingLoaded).length > 0) {
-    setLocalAmounts(existingLoaded);
-  }
 
   const isLocked = plan?.status === 'finalized' || plan?.status === 'executed';
   const allExecuted = lineItems.length > 0 && lineItems.every(li => li.executed);

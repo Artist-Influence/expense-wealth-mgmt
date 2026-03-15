@@ -416,7 +416,8 @@ export default function Expenses() {
         Transfer: t.is_transfer ? 'Yes' : 'No',
         Notes: t.final_notes || t.predicted_notes || '',
       }));
-    const headers = Object.keys(rows[0] || {});
+    if (rows.length === 0) { toast.error('No approved/edited transactions to export'); return; }
+    const headers = Object.keys(rows[0]);
     const csv = [
       headers.join(','),
       ...rows.map(r => headers.map(h => `"${(r[h as keyof typeof r] || '').toString().replace(/"/g, '""')}"`).join(',')),

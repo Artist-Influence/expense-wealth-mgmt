@@ -173,7 +173,7 @@ export default function Accountant() {
       case 'expense_ledger':
         return {
           headers: ['Date', 'Description', 'Amount', 'Category', 'Method', 'Mode', 'Notes'],
-          rows: filteredExpenses.map(e => [e.date, e.description_normalized || e.description_raw, String(e.amount ?? 0), e.final_category, e.final_method, e.mode, e.final_notes]),
+          rows: filteredExpenses.map(e => [e.date, e.description_normalized || e.description_raw, String(Math.abs(e.amount ?? 0)), e.final_category, e.final_method, e.mode, e.final_notes]),
         };
       case 'income_ledger':
         return {

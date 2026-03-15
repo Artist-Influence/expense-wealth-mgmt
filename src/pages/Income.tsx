@@ -168,7 +168,11 @@ export default function Income() {
       const lines = text.split('\n').filter(l => l.trim());
       if (lines.length < 2) { toast.error(`${file.name}: No data rows`); continue; }
 
-      const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+      const parsed = Papa.parse(text, { header: false, skipEmptyLines: true });
+      const allRows = parsed.data as string[][];
+      if (allRows.length < 2) { toast.error(`${file.name}: No data rows`); continue; }
+
+      const headers = allRows[0].map(h => (h || '').trim().toLowerCase());
       const dateIdx = headers.findIndex(h => /date/i.test(h));
       const descIdx = headers.findIndex(h => /desc|memo|narr|detail/i.test(h));
       const amtIdx = headers.findIndex(h => /amount|credit|deposit/i.test(h));
@@ -176,8 +180,8 @@ export default function Income() {
       if (amtIdx === -1) { toast.error(`${file.name}: No amount column found`); continue; }
 
       const rows: any[] = [];
-      for (let i = 1; i < lines.length; i++) {
-        const cols = lines[i].split(',').map(c => c.trim().replace(/^"|"$/g, ''));
+      for (let i = 1; i < allRows.length; i++) {
+        const cols = allRows[i];
         const rawDesc = descIdx >= 0 ? cols[descIdx] : '';
         const rawAmount = parseFloat((cols[amtIdx] || '0').replace(/[$,]/g, ''));
         if (isNaN(rawAmount) || rawAmount <= 0) continue; // income = positive amounts
