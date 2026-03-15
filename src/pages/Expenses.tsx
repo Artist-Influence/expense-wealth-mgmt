@@ -406,6 +406,63 @@ export default function Expenses() {
     toast.success(newIsTransfer ? 'Marked as transfer' : 'Restored to expense');
   };
 
+  const handleSplit = async (parentId: string, children: Array<{
+    amount: number; mode: string; category: string; notes: string;
+    is_reimbursable: boolean; reimbursable_to: string; tax_treatment: string;
+  }>) => {
+    if (!user) return;
+    // Mark parent as split
+    await supabase.from('transactions_uploaded').update({
+      is_split_parent: true,
+      exclude_from_expense_totals: true,
+      counts_toward_true_personal_spend: false,
+      counts_toward_true_business_spend: false,
+      review_status: 'edited',
+    }).eq('id', parentId);
+
+    const parent = transactions.find(t => t.id === parentId);
+    if (!parent) return;
+
+    // Create child rows
+    const childRows = children.map(c => ({
+      owner_id: user.id,
+      parent_transaction_id: parentId,
+      date: parent.date,
+      description_raw: parent.description_raw,
+      description_normalized: parent.description_normalized,
+      source_file_name: parent.source_file_name,
+      amount: parent.amount && parent.amount < 0 ? -c.amount : c.amount,
+      mode: c.mode === 'reimbursable_work' ? 'personal' : c.mode,
+      transaction_mode: c.mode,
+      economic_owner: c.mode === 'business' ? 'artist_influence' : c.mode === 'reimbursable_work' ? 'employer' : 'personal',
+      treatment_type: c.is_reimbursable ? 'reimbursable_expense' : 'expense',
+      tax_treatment: c.tax_treatment,
+      is_reimbursable: c.is_reimbursable,
+      reimbursable_to: c.reimbursable_to || null,
+      reimbursement_status: c.is_reimbursable ? 'pending' : 'none',
+      counts_toward_true_personal_spend: c.mode === 'personal',
+      counts_toward_true_business_spend: c.mode === 'business',
+      final_category: c.category || null,
+      final_notes: c.notes || null,
+      final_method: parent.final_method || parent.predicted_method,
+      review_status: c.category ? 'edited' : 'needs_review',
+      parse_status: 'ok',
+      duplicate_status: 'unique',
+      is_split_parent: false,
+    }));
+
+    const { error } = await supabase.from('transactions_uploaded').insert(childRows);
+    if (error) {
+      toast.error(`Split failed: ${error.message}`);
+      return;
+    }
+
+    await loadTransactions();
+    setDetailTx(null);
+    setSplitTx(null);
+    toast.success(`Split into ${children.length} rows`);
+  };
+
   const exportCsv = () => {
     const rows = filtered
       .filter(t => ['approved', 'auto_categorized', 'edited'].includes(t.review_status))
