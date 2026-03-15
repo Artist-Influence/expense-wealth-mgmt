@@ -110,15 +110,17 @@ export default function Insights() {
     const lastMonthSpend = lastMonthTxns.reduce((s, t) => s + Math.abs(t.amount || 0), 0);
     const momChange = lastMonthSpend > 0 ? ((thisMonthSpend - lastMonthSpend) / lastMonthSpend) * 100 : 0;
 
+    // Only use final_category from approved/edited rows for charts
+    const approvedExpenses = expenses.filter(t => ['approved', 'auto_categorized', 'edited'].includes(t.review_status));
     const catMap = new Map<string, number>();
-    expenses.forEach(t => {
-      const cat = t.final_category || t.predicted_category || 'Uncategorized';
+    approvedExpenses.forEach(t => {
+      const cat = t.final_category || 'Uncategorized';
       catMap.set(cat, (catMap.get(cat) || 0) + Math.abs(t.amount || 0));
     });
     const topCategory = [...catMap.entries()].sort((a, b) => b[1] - a[1])[0];
 
     const merchMap = new Map<string, number>();
-    expenses.forEach(t => {
+    approvedExpenses.forEach(t => {
       const desc = (t.description_normalized || t.description_raw || 'Unknown').substring(0, 30);
       merchMap.set(desc, (merchMap.get(desc) || 0) + Math.abs(t.amount || 0));
     });
