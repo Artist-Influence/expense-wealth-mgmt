@@ -608,10 +608,17 @@ export default function Expenses() {
           }
 
           const predictedCat = transfer.isTransfer ? transferCategory : result.predicted_category;
-          const finalCat = result.review_status === 'auto_categorized'
+          // Auto-approve: if auto_categorized with high confidence exact match, mark as approved
+          const shouldAutoApprove = result.review_status === 'auto_categorized' 
+            && result.confidence >= 95 
+            && (result.match_source === 'exact_history' || result.match_source === 'normalized_history')
+            && !transfer.isTransfer;
+          const finalCat = (result.review_status === 'auto_categorized' || shouldAutoApprove)
             ? (transfer.isTransfer ? transferCategory : result.predicted_category)
             : null;
-          const reviewStatus = (transfer.isTransfer && !transferCategory) ? 'needs_review' : result.review_status;
+          const reviewStatus = (transfer.isTransfer && !transferCategory) ? 'needs_review' 
+            : shouldAutoApprove ? 'approved' 
+            : result.review_status;
 
           return {
             upload_batch_id: batch.id, mode: categoryMode, date: tx.date,
