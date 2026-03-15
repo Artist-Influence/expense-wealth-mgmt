@@ -45,6 +45,7 @@ interface ReimbursementGroup {
   status: string;
   total_expected: number;
   total_received: number;
+  received_date: string | null;
 }
 
 const INCOME_TYPE_BADGE: Record<string, { class: string }> = {
