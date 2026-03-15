@@ -96,7 +96,7 @@ export default function Insights() {
     return allData;
   };
 
-  const expenses = useMemo(() => transactions.filter(t => !t.exclude_from_expense_totals), [transactions]);
+  const expenses = useMemo(() => transactions.filter(t => !t.exclude_from_expense_totals && !t.is_split_parent), [transactions]);
 
   // ─── SPENDING TAB DATA ───
   const overview = useMemo(() => {
