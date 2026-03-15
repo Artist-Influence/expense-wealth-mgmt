@@ -835,6 +835,20 @@ export default function Expenses() {
             </SelectContent>
           </Select>
 
+          {/* Approve All Suggested */}
+          {selectedIds.size === 0 && (() => {
+            const suggestedCount = filtered.filter(t => ['suggested', 'ai_suggested', 'auto_categorized'].includes(t.review_status) && (t.final_category || t.predicted_category)).length;
+            return suggestedCount > 0 ? (
+              <Button size="sm" variant="outline" className="h-8 gap-1 text-xs border-success/30 text-success hover:bg-success/10" onClick={async () => {
+                const toApprove = filtered.filter(t => ['suggested', 'ai_suggested', 'auto_categorized'].includes(t.review_status) && (t.final_category || t.predicted_category));
+                for (const tx of toApprove) await approveRow(tx);
+                toast.success(`Approved ${toApprove.length} suggested rows`);
+              }}>
+                <CheckCheck className="h-3 w-3" /> Approve All Suggested ({suggestedCount})
+              </Button>
+            ) : null;
+          })()}
+
           {/* Bulk Actions */}
           {selectedIds.size > 0 && (
             <>
