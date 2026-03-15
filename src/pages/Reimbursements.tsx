@@ -631,8 +631,28 @@ export default function Reimbursements() {
                   </div>
                   <div>
                     <span className="text-muted-foreground">Received:</span>
-                    <span className="text-foreground ml-1 font-mono">${selectedGroup.total_received.toFixed(2)}</span>
+                    <span className={`ml-1 font-mono ${selectedGroup.total_received > selectedGroup.total_expected ? 'text-destructive' : 'text-foreground'}`}>
+                      ${selectedGroup.total_received.toFixed(2)}
+                    </span>
+                    {selectedGroup.total_received > selectedGroup.total_expected && (
+                      <span className="text-[10px] text-destructive ml-1">⚠️ overpaid</span>
+                    )}
                   </div>
+                  {selectedGroup.total_expected > 0 && (
+                    <div className="col-span-2">
+                      <div className="flex items-center gap-2">
+                        <div className="flex-1 h-1.5 bg-secondary rounded-full overflow-hidden">
+                          <div
+                            className={`h-full rounded-full ${selectedGroup.total_received >= selectedGroup.total_expected ? 'bg-[hsl(var(--success))]' : 'bg-primary'}`}
+                            style={{ width: `${Math.min(100, (selectedGroup.total_received / selectedGroup.total_expected) * 100)}%` }}
+                          />
+                        </div>
+                        <span className="text-[10px] text-muted-foreground font-mono">
+                          {Math.round((selectedGroup.total_received / selectedGroup.total_expected) * 100)}%
+                        </span>
+                      </div>
+                    </div>
+                  )
                 </div>
 
                 {selectedGroup.notes && (

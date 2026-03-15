@@ -39,7 +39,9 @@ export default function Allocations() {
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   });
 
-  // Fetch income for month
+  // Fetch income for month — exclude reimbursements, transfers, refunds from allocation math
+  const NON_EARNING_TYPES = ['reimbursement', 'transfer', 'refund', 'loan_proceeds', 'owner_contribution'];
+
   const { data: monthIncome = 0 } = useQuery({
     queryKey: ['alloc_income', selectedMonth],
     queryFn: async () => {
@@ -48,10 +50,12 @@ export default function Allocations() {
       const end = new Date(Number(y), Number(m), 0).toISOString().split('T')[0];
       const { data } = await supabase
         .from('income_transactions')
-        .select('amount')
+        .select('amount, income_type')
         .gte('date', start)
         .lte('date', end);
-      return (data || []).reduce((s, r) => s + Number(r.amount || 0), 0);
+      return (data || [])
+        .filter(r => !NON_EARNING_TYPES.includes(r.income_type))
+        .reduce((s, r) => s + Number(r.amount || 0), 0);
     },
     enabled: !!user,
   });

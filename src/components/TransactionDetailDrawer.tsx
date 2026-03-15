@@ -402,8 +402,13 @@ export function TransactionDetailDrawer({
         {/* Flags */}
         <div className="flex flex-wrap gap-1.5 mb-4">
           {tx.is_transfer && (
-            <Badge variant="outline" className="text-xs gap-1 border-primary/30 text-primary">
+            <Badge variant="outline" className="text-xs gap-1 border-muted-foreground/30 text-muted-foreground">
               <ArrowLeftRight className="h-3 w-3" /> Transfer ({tx.transfer_type || 'unknown'})
+            </Badge>
+          )}
+          {!tx.is_transfer && tx.transfer_type === 'possible_transfer' && (
+            <Badge variant="outline" className="text-xs gap-1 border-warning/30 text-warning">
+              <AlertTriangle className="h-3 w-3" /> Possible Transfer — review needed
             </Badge>
           )}
           {tx.duplicate_status === 'possible_duplicate' && (

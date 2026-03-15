@@ -1003,13 +1003,28 @@ export default function Expenses() {
                       <td className="px-2 py-1">
                         <div className="flex items-center gap-0.5 flex-wrap">
                           {tx.is_transfer && (
-                            <Badge variant="outline" className="text-[9px] h-3.5 gap-0.5 border-primary/30 text-primary px-1">
+                            <Badge variant="outline" className="text-[9px] h-3.5 gap-0.5 border-muted-foreground/40 text-muted-foreground px-1">
                               <ArrowLeftRight className="h-2 w-2" /> xfer
                             </Badge>
                           )}
+                          {!tx.is_transfer && tx.transfer_type === 'possible_transfer' && (
+                            <Badge variant="outline" className="text-[9px] h-3.5 gap-0.5 border-warning/40 text-warning px-1" title="Possible transfer — review needed">
+                              <ArrowLeftRight className="h-2 w-2" /> xfer?
+                            </Badge>
+                          )}
                           {tx.is_reimbursable && (
-                            <Badge variant="outline" className="text-[9px] h-3.5 gap-0.5 border-warning/30 text-warning px-1">
-                              <Receipt className="h-2 w-2" /> reimb
+                            <Badge variant="outline" className={`text-[9px] h-3.5 gap-0.5 px-1 ${
+                              tx.reimbursement_status === 'reimbursed' ? 'border-success/30 text-success' :
+                              tx.reimbursement_status === 'partially_reimbursed' ? 'border-warning/40 text-warning' :
+                              tx.reimbursement_status === 'submitted' ? 'border-primary/30 text-primary' :
+                              'border-warning/30 text-warning'
+                            }`}>
+                              <Receipt className="h-2 w-2" /> {
+                                tx.reimbursement_status === 'reimbursed' ? 'reimbursed' :
+                                tx.reimbursement_status === 'partially_reimbursed' ? 'partial' :
+                                tx.reimbursement_status === 'submitted' ? 'submitted' :
+                                'reimb'
+                              }
                             </Badge>
                           )}
                           {tx.duplicate_status === 'possible_duplicate' && (
