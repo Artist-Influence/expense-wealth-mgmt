@@ -164,7 +164,8 @@ export default function Accountant() {
 
   const filteredExpenses = useMemo(() => {
     if (!expenses) return [];
-    let result = expenses.filter(e => approvedStatuses.includes(e.review_status));
+    // Exclude split parents — child rows carry the real amounts
+    let result = expenses.filter(e => approvedStatuses.includes(e.review_status) && !e.is_split_parent);
     if (modeFilter === 'all') return result;
     if (modeFilter === 'reimbursable') return result.filter(e => e.transaction_mode === 'reimbursable_work');
     return result.filter(e => e.transaction_mode === modeFilter);

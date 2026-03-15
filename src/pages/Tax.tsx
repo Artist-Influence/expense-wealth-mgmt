@@ -119,6 +119,7 @@ export default function Tax() {
       .select('final_category, amount, review_status')
       .eq('owner_id', user!.id)
       .eq('counts_as_tax_deduction', true)
+      .eq('is_split_parent', false)
       .in('review_status', ['approved', 'auto_categorized', 'edited'])
       .gte('date', yearStart)
       .lte('date', yearEnd);
