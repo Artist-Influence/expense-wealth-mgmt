@@ -194,7 +194,9 @@ export default function Income() {
         const cols = allRows[i];
         const rawDesc = descIdx >= 0 ? cols[descIdx] : '';
         const rawAmount = parseFloat((cols[amtIdx] || '0').replace(/[$,]/g, ''));
-        if (isNaN(rawAmount) || rawAmount <= 0) continue;
+        if (isNaN(rawAmount) || rawAmount === 0) continue;
+        // Accept negative amounts (some banks represent credits as negative)
+        const normalizedAmount = Math.abs(rawAmount);
 
         const classification = classifyIncome(rawDesc);
         const normalized = normalizeDescription(rawDesc);
