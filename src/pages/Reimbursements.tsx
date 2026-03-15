@@ -133,7 +133,7 @@ export default function Reimbursements() {
         .eq('owner_id', user!.id)
         .eq('is_reimbursable', true)
         .order('date', { ascending: false }),
-      supabase
+      (supabase as any)
         .from('reimbursement_groups')
         .select('*')
         .eq('owner_id', user!.id)
