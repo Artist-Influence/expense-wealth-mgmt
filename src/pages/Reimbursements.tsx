@@ -652,7 +652,7 @@ export default function Reimbursements() {
                         </span>
                       </div>
                     </div>
-                  )
+                  )}
                 </div>
 
                 {selectedGroup.notes && (
