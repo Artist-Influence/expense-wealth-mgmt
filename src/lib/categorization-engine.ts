@@ -122,6 +122,17 @@ function calculateHistoryConfidence(record: MerchantMemoryRecord): number {
   return Math.min(baseWeight + timesBonus, 99);
 }
 
+// Merchants that span multiple categories and should never auto-approve
+const AMBIGUOUS_MERCHANTS = new Set([
+  'AMAZON', 'PAYPAL', 'VENMO', 'ZELLE', 'SQUARE', 'STRIPE',
+  'WALMART', 'COSTCO', 'TARGET', 'APPLE', 'GOOGLE',
+]);
+
+function isAmbiguousMerchant(merchantKey: string): boolean {
+  const upper = merchantKey.toUpperCase();
+  return [...AMBIGUOUS_MERCHANTS].some(m => upper.includes(m));
+}
+
 export async function categorizeTransactions(
   transactions: ParsedTransaction[],
   mode: 'personal' | 'business',
