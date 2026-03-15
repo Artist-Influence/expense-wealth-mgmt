@@ -155,16 +155,16 @@ export default function Insights() {
 
   const topMerchants = useMemo(() => {
     const merchMap = new Map<string, { total: number; count: number; category: string }>();
-    expenses.forEach(t => {
+    approvedExpenses.forEach(t => {
       const desc = (t.description_normalized || t.description_raw || 'Unknown').substring(0, 40);
       const existing = merchMap.get(desc) || { total: 0, count: 0, category: '' };
       existing.total += Math.abs(t.amount || 0);
       existing.count++;
-      existing.category = t.final_category || t.predicted_category || '';
+      existing.category = t.final_category || '';
       merchMap.set(desc, existing);
     });
     return [...merchMap.entries()].sort((a, b) => b[1].total - a[1].total).slice(0, 10).map(([name, data]) => ({ name, ...data }));
-  }, [expenses]);
+  }, [approvedExpenses]);
 
   const recurringCharges = useMemo(() => {
     const merchMap = new Map<string, { amounts: number[]; dates: string[]; category: string }>();
