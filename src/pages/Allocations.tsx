@@ -51,6 +51,7 @@ export default function Allocations() {
       const { data } = await supabase
         .from('income_transactions')
         .select('amount, income_type')
+        .eq('owner_id', user!.id)
         .gte('date', start)
         .lte('date', end);
       return (data || [])

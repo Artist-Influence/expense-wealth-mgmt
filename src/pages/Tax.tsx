@@ -357,7 +357,14 @@ export default function Tax() {
                     <TableBody>
                       {incomeByType.map(([type, vals]) => (
                         <TableRow key={type}>
-                          <TableCell className="capitalize">{type.replace(/_/g, ' ')}</TableCell>
+                          <TableCell className="capitalize">
+                            {type.replace(/_/g, ' ')}
+                            {type === 'reimbursement' && vals.taxable > 0 && (
+                              <span className="ml-2 inline-flex items-center gap-1 text-warning text-[10px]">
+                                <AlertTriangle className="h-3 w-3" />Taxable reimbursement — verify
+                              </span>
+                            )}
+                          </TableCell>
                           <TableCell className="text-right">{fmt(vals.taxable)}</TableCell>
                           <TableCell className="text-right">{fmt(vals.excluded)}</TableCell>
                           <TableCell className="text-right font-medium">{fmt(vals.taxable + vals.excluded)}</TableCell>

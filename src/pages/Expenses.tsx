@@ -901,6 +901,7 @@ export default function Expenses() {
           <div className="glass-panel-sm px-3 py-1.5 text-xs">
             <span className="text-muted-foreground">Total Cash Out</span>{' '}
             <span className="font-mono font-medium text-foreground">{fmtMoney(stats.totalCashOut)}</span>
+            <span className="text-[9px] text-muted-foreground ml-1">(all non-excluded outflows)</span>
           </div>
           <div className="glass-panel-sm px-3 py-1.5 text-xs">
             <span className="text-muted-foreground">True Personal</span>{' '}
