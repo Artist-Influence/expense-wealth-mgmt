@@ -95,6 +95,7 @@ export function TransactionDetailDrawer({
   onSave,
   onApprove,
   onToggleTransfer,
+  onSplit,
 }: TransactionDetailDrawerProps) {
   const [editValues, setEditValues] = useState({
     category: '', method: '', notes: '',
