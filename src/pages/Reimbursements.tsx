@@ -242,7 +242,7 @@ export default function Reimbursements() {
 
   const openGroupDetail = async (group: ReimbursementGroup) => {
     setSelectedGroup(group);
-    const { data } = await supabase
+    const { data } = await (supabase as any)
       .from('transactions_uploaded')
       .select('*')
       .eq('linked_reimbursement_group_id', group.id)
