@@ -134,6 +134,81 @@ export type Database = {
         }
         Relationships: []
       }
+      income_transactions: {
+        Row: {
+          allocation_month: string | null
+          amount: number | null
+          created_at: string
+          date: string | null
+          description_normalized: string | null
+          description_raw: string | null
+          id: string
+          income_type: string
+          linked_expense_id: string | null
+          linked_reimbursement_group_id: string | null
+          notes: string | null
+          owner_id: string
+          source_account_name: string | null
+          source_file_name: string | null
+          status: string
+          taxable_status: string
+          upload_batch_id: string | null
+        }
+        Insert: {
+          allocation_month?: string | null
+          amount?: number | null
+          created_at?: string
+          date?: string | null
+          description_normalized?: string | null
+          description_raw?: string | null
+          id?: string
+          income_type?: string
+          linked_expense_id?: string | null
+          linked_reimbursement_group_id?: string | null
+          notes?: string | null
+          owner_id: string
+          source_account_name?: string | null
+          source_file_name?: string | null
+          status?: string
+          taxable_status?: string
+          upload_batch_id?: string | null
+        }
+        Update: {
+          allocation_month?: string | null
+          amount?: number | null
+          created_at?: string
+          date?: string | null
+          description_normalized?: string | null
+          description_raw?: string | null
+          id?: string
+          income_type?: string
+          linked_expense_id?: string | null
+          linked_reimbursement_group_id?: string | null
+          notes?: string | null
+          owner_id?: string
+          source_account_name?: string | null
+          source_file_name?: string | null
+          status?: string
+          taxable_status?: string
+          upload_batch_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "income_transactions_linked_expense_id_fkey"
+            columns: ["linked_expense_id"]
+            isOneToOne: false
+            referencedRelation: "transactions_uploaded"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "income_transactions_linked_reimbursement_group_id_fkey"
+            columns: ["linked_reimbursement_group_id"]
+            isOneToOne: false
+            referencedRelation: "reimbursement_groups"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       merchant_memory: {
         Row: {
           confidence_weight: number
