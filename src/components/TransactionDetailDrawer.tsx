@@ -443,16 +443,35 @@ export function TransactionDetailDrawer({
           </div>
         )}
 
+        {/* Split parent/child badges */}
+        {tx.is_split_parent && (
+          <div className="rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-xs text-primary flex items-center gap-2 mb-4">
+            <Scissors className="h-3.5 w-3.5" />
+            <span>This transaction has been split. The parent is excluded from reporting — child rows carry the amounts.</span>
+          </div>
+        )}
+        {tx.parent_transaction_id && (
+          <div className="rounded-lg border border-border/50 bg-secondary/20 px-3 py-2 text-xs text-muted-foreground flex items-center gap-2 mb-4">
+            <Scissors className="h-3.5 w-3.5" />
+            <span>Split child row — part of a split transaction.</span>
+          </div>
+        )}
+
         <Separator className="mb-4" />
 
         {/* Actions */}
         <div className="flex items-center gap-2">
-          <Button onClick={handleSave} disabled={saving} className="flex-1 h-9 text-sm gap-1.5">
+          <Button onClick={handleSave} disabled={saving || tx.is_split_parent} className="flex-1 h-9 text-sm gap-1.5">
             <Check className="h-3.5 w-3.5" /> Save
           </Button>
-          {!['approved', 'edited'].includes(tx.review_status) && (
+          {!['approved', 'edited'].includes(tx.review_status) && !tx.is_split_parent && (
             <Button onClick={handleApprove} disabled={saving || !editValues.category} variant="secondary" className="flex-1 h-9 text-sm gap-1.5">
               <Check className="h-3.5 w-3.5" /> Approve
+            </Button>
+          )}
+          {!tx.is_split_parent && !tx.parent_transaction_id && onSplit && (
+            <Button variant="outline" onClick={() => onSplit(tx)} className="h-9 text-sm gap-1.5">
+              <Scissors className="h-3.5 w-3.5" /> Split
             </Button>
           )}
           <Button variant="outline" onClick={() => onToggleTransfer(tx)} className="h-9 text-sm gap-1.5">
