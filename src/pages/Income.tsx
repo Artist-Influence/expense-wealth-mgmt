@@ -258,6 +258,7 @@ export default function Income() {
 
   const bulkDelete = async () => {
     if (selectedIds.size === 0) return;
+    if (!confirm(`Delete ${selectedIds.size} income transaction(s)? This cannot be undone.`)) return;
     const ids = Array.from(selectedIds);
     const { error } = await supabase.from('income_transactions').delete().in('id', ids);
     if (error) toast.error('Delete failed');
