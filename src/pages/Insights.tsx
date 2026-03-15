@@ -25,6 +25,7 @@ interface Transaction {
   is_transfer: boolean;
   exclude_from_expense_totals: boolean;
   parse_status: string;
+  is_split_parent: boolean;
 }
 
 interface IncomeTransaction {
