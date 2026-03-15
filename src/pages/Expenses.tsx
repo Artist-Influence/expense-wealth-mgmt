@@ -837,6 +837,7 @@ export default function Expenses() {
               <SelectItem value="all">All Rows</SelectItem>
               <SelectItem value="uncategorized">Uncategorized</SelectItem>
               <SelectItem value="transfers">Transfers</SelectItem>
+              <SelectItem value="possible_transfers">Possible Transfers</SelectItem>
               <SelectItem value="reimbursable">Reimbursable</SelectItem>
               <SelectItem value="possible_duplicates">Duplicates</SelectItem>
               <SelectItem value="parse_errors">Parse Errors</SelectItem>
