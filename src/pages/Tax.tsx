@@ -115,12 +115,24 @@ export default function Tax() {
   async function loadDeductions() {
     const { data } = await supabase
       .from('transactions_uploaded')
-      .select('final_category, amount')
+      .select('final_category, amount, review_status')
       .eq('owner_id', user!.id)
       .eq('counts_as_tax_deduction', true)
+      .in('review_status', ['approved', 'auto_categorized', 'edited'])
       .gte('date', yearStart)
       .lte('date', yearEnd);
     setDeductionRows((data as DeductionRow[]) || []);
+
+    // Also count unreviewed deductions for warning
+    const { count } = await supabase
+      .from('transactions_uploaded')
+      .select('id', { count: 'exact', head: true })
+      .eq('owner_id', user!.id)
+      .eq('counts_as_tax_deduction', true)
+      .in('review_status', ['needs_review', 'suggested', 'ai_suggested'])
+      .gte('date', yearStart)
+      .lte('date', yearEnd);
+    setUnreviewedDeductionCount(count || 0);
   }
 
   async function loadTaxPayments() {
