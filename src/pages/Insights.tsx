@@ -280,9 +280,9 @@ export default function Insights() {
   // ─── TRENDS TAB DATA ───
   const categoryTrends = useMemo(() => {
     const catMonthMap = new Map<string, Map<string, number>>();
-    expenses.forEach(t => {
+    approvedExpenses.forEach(t => {
       if (!t.date) return;
-      const cat = t.final_category || t.predicted_category || 'Uncategorized';
+      const cat = t.final_category || 'Uncategorized';
       const month = t.date.substring(0, 7);
       if (!catMonthMap.has(cat)) catMonthMap.set(cat, new Map());
       const monthMap = catMonthMap.get(cat)!;
