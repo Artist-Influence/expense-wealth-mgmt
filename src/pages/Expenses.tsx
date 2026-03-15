@@ -278,7 +278,7 @@ export default function Expenses() {
 
     if (!error) {
       const tx = transactions.find(t => t.id === id);
-      if (tx && tx.parse_status === 'ok' && !tx.is_transfer && tx.duplicate_status !== 'possible_duplicate') {
+      if (tx && tx.parse_status === 'ok' && !tx.is_transfer && !tx.is_split_parent && !tx.parent_transaction_id && tx.duplicate_status !== 'possible_duplicate') {
         const desc = tx.description_raw || '';
         if (!isStatementArtifact(desc, tx.amount || 0)) {
           const merchantKey = generateMerchantKey(normalizeDescription(desc));
