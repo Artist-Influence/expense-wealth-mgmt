@@ -176,8 +176,8 @@ export default function Accountant() {
     switch (selectedExport) {
       case 'expense_ledger':
         return {
-          headers: ['Date', 'Description', 'Amount', 'Category', 'Method', 'Mode', 'Notes'],
-          rows: filteredExpenses.map(e => [e.date, e.description_normalized || e.description_raw, String(Math.abs(e.amount ?? 0)), e.final_category, e.final_method, e.mode, e.final_notes]),
+          headers: ['Date', 'Description', 'Amount', 'Category', 'Method', 'Mode', 'Transaction Mode', 'Reimbursable', 'Transfer', 'Review Status', 'Notes'],
+          rows: filteredExpenses.map(e => [e.date, e.description_normalized || e.description_raw, String(Math.abs(e.amount ?? 0)), e.final_category, e.final_method, e.mode, e.transaction_mode, e.is_reimbursable ? 'Yes' : 'No', e.is_transfer ? 'Yes' : 'No', e.review_status, e.final_notes]),
         };
       case 'income_ledger':
         return {
