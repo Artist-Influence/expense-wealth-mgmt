@@ -131,14 +131,17 @@ export default function Insights() {
     return { thisMonthSpend, lastMonthSpend, momChange, topCategory, topMerchant, transfersExcluded };
   }, [expenses, transactions]);
 
+  // Only approved/edited data in charts
+  const approvedExpenses = useMemo(() => expenses.filter(t => ['approved', 'auto_categorized', 'edited'].includes(t.review_status)), [expenses]);
+
   const categoryData = useMemo(() => {
     const catMap = new Map<string, number>();
-    expenses.forEach(t => {
-      const cat = t.final_category || t.predicted_category || 'Uncategorized';
+    approvedExpenses.forEach(t => {
+      const cat = t.final_category || 'Uncategorized';
       catMap.set(cat, (catMap.get(cat) || 0) + Math.abs(t.amount || 0));
     });
     return [...catMap.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12).map(([name, total]) => ({ name, total: Math.round(total * 100) / 100 }));
-  }, [expenses]);
+  }, [approvedExpenses]);
 
   const monthlyTrend = useMemo(() => {
     const monthMap = new Map<string, number>();
