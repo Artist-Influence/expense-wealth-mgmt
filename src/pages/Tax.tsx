@@ -42,6 +42,7 @@ interface IncomeRow {
 interface DeductionRow {
   final_category: string | null;
   amount: number | null;
+  review_status: string;
 }
 
 interface TaxPaymentRow {
