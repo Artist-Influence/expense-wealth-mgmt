@@ -1066,6 +1066,16 @@ export default function Expenses() {
                       </td>
                       <td className="px-2 py-1">
                         <div className="flex items-center gap-0.5 flex-wrap">
+                          {tx.is_split_parent && (
+                            <Badge variant="outline" className="text-[9px] h-3.5 gap-0.5 border-primary/40 text-primary px-1" title="Split parent — excluded from totals">
+                              <Scissors className="h-2 w-2" /> split
+                            </Badge>
+                          )}
+                          {tx.parent_transaction_id && (
+                            <Badge variant="outline" className="text-[9px] h-3.5 gap-0.5 border-muted-foreground/40 text-muted-foreground px-1" title="Child of split transaction">
+                              <Scissors className="h-2 w-2" /> child
+                            </Badge>
+                          )}
                           {tx.is_transfer && (
                             <Badge variant="outline" className="text-[9px] h-3.5 gap-0.5 border-muted-foreground/40 text-muted-foreground px-1">
                               <ArrowLeftRight className="h-2 w-2" /> xfer
