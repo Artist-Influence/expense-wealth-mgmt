@@ -187,9 +187,9 @@ export default function Allocations() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['allocation_plan', selectedMonth] });
       qc.invalidateQueries({ queryKey: ['allocation_line_items'] });
-      toast({ title: 'Allocation plan saved' });
+      toast.success('Allocation plan saved');
     },
-    onError: (e: any) => toast({ title: 'Error', description: e.message, variant: 'destructive' }),
+    onError: (e: any) => toast.error(e.message),
   });
 
   const finalizePlan = useMutation({
