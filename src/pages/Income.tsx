@@ -306,32 +306,51 @@ export default function Income() {
     const group = reimbursementGroups.find(g => g.id === groupId);
     if (!group) return;
 
+    const paymentAmount = tx.amount || 0;
+    const newReceived = group.total_received + paymentAmount;
+    const remaining = group.total_expected - group.total_received;
+
+    // Warn on overpayment
+    if (paymentAmount > remaining && remaining > 0) {
+      const overBy = paymentAmount - remaining;
+      if (!confirm(`This payment ($${paymentAmount.toFixed(2)}) exceeds the remaining balance ($${remaining.toFixed(2)}) by $${overBy.toFixed(2)}. Continue?`)) return;
+    }
+
     // Link income to group
     await supabase.from('income_transactions').update({
       linked_reimbursement_group_id: groupId,
       status: 'approved',
     }).eq('id', matchingTxId);
 
-    // Update group totals
-    const newReceived = group.total_received + (tx.amount || 0);
-    const newStatus = newReceived >= group.total_expected ? 'reimbursed' : group.status;
+    // Determine new group status
+    let newStatus: string;
+    if (newReceived >= group.total_expected) {
+      newStatus = 'reimbursed';
+    } else if (newReceived > 0) {
+      newStatus = 'partially_reimbursed';
+    } else {
+      newStatus = group.status;
+    }
+
     await supabase.from('reimbursement_groups').update({
       total_received: newReceived,
       status: newStatus,
       received_date: newStatus === 'reimbursed' ? new Date().toISOString().split('T')[0] : null,
     }).eq('id', groupId);
 
-    // Cascade reimbursement status to linked expenses when group is reimbursed
-    if (newStatus === 'reimbursed') {
+    // Cascade reimbursement status to linked expenses
+    if (newStatus === 'reimbursed' || newStatus === 'partially_reimbursed') {
       await supabase.from('transactions_uploaded')
-        .update({ reimbursement_status: 'reimbursed' })
+        .update({ reimbursement_status: newStatus })
         .eq('linked_reimbursement_group_id', groupId);
     }
 
     if (newReceived > group.total_expected) {
-      toast.warning(`Matched — but received (${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(newReceived)}) exceeds expected (${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(group.total_expected)})`);
+      toast.warning(`Matched — but received (${fmt(newReceived)}) exceeds expected (${fmt(group.total_expected)})`);
+    } else if (newStatus === 'partially_reimbursed') {
+      toast.success(`Matched — partially reimbursed (${fmt(newReceived)} of ${fmt(group.total_expected)})`);
     } else {
-      toast.success('Matched to reimbursement group');
+      toast.success('Matched to reimbursement group — fully reimbursed!');
     }
     setShowMatchDialog(false);
     setMatchingTxId(null);
