@@ -64,6 +64,7 @@ interface TransactionDetailDrawerProps {
   onSave: (id: string, values: any) => Promise<void>;
   onApprove: (tx: Transaction) => Promise<void>;
   onToggleTransfer: (tx: Transaction) => Promise<void>;
+  onSplit?: (tx: Transaction) => void;
 }
 
 const matchSourceLabels: Record<string, { label: string; icon: React.ReactNode; color: string }> = {
