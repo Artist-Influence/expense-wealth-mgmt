@@ -213,7 +213,7 @@ export default function Reimbursements() {
     const selectedTxs = transactions.filter(t => ids.includes(t.id));
     const totalExpected = selectedTxs.reduce((s, t) => s + Math.abs(t.amount || 0), 0);
 
-    const { data: group, error } = await supabase
+    const { data: group, error } = await (supabase as any)
       .from('reimbursement_groups')
       .insert({
         owner_id: user!.id,
@@ -228,7 +228,7 @@ export default function Reimbursements() {
 
     if (error || !group) { toast.error('Failed to create group'); return; }
 
-    await supabase.from('transactions_uploaded')
+    await (supabase as any).from('transactions_uploaded')
       .update({ linked_reimbursement_group_id: (group as any).id })
       .in('id', ids);
 
