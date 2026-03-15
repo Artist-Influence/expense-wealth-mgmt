@@ -63,7 +63,7 @@ export default function CloseMonth() {
         .from('transactions_uploaded')
         .select('id, description_normalized, amount, date, review_status')
         .eq('owner_id', user.id)
-        .eq('review_status', 'needs_review')
+        .in('review_status', ['needs_review', 'suggested', 'ai_suggested'])
         .gte('date', dateRange.start)
         .lte('date', dateRange.end);
       return data || [];
