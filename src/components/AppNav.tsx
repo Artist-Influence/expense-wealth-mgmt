@@ -2,7 +2,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import {
   Receipt, BarChart3, Brain, Settings, LogOut, Database,
-  DollarSign, ReceiptText, TrendingUp, Landmark, FileSpreadsheet
+  DollarSign, ReceiptText, TrendingUp, Landmark, FileSpreadsheet, Target
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
