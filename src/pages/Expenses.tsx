@@ -148,7 +148,8 @@ export default function Expenses() {
   const filtered = useMemo(() => {
     let result = transactions.filter(tx => {
       if (statusFilter !== 'all' && tx.review_status !== statusFilter) return false;
-      if (extraFilter === 'transfers' && !tx.is_transfer) return false;
+      if (extraFilter === 'transfers' && !tx.is_transfer && tx.transfer_type !== 'possible_transfer') return false;
+      if (extraFilter === 'possible_transfers' && tx.transfer_type !== 'possible_transfer') return false;
       if (extraFilter === 'possible_duplicates' && tx.duplicate_status !== 'possible_duplicate') return false;
       if (extraFilter === 'parse_errors' && tx.parse_status !== 'parse_error') return false;
       if (extraFilter === 'excluded' && !tx.exclude_from_expense_totals) return false;
