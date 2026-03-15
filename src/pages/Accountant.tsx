@@ -166,7 +166,8 @@ export default function Accountant() {
     if (!expenses) return [];
     let result = expenses.filter(e => approvedStatuses.includes(e.review_status));
     if (modeFilter === 'all') return result;
-    return result.filter(e => e.transaction_mode === modeFilter || (modeFilter === 'personal' && e.transaction_mode === 'reimbursable_work'));
+    if (modeFilter === 'reimbursable') return result.filter(e => e.transaction_mode === 'reimbursable_work');
+    return result.filter(e => e.transaction_mode === modeFilter);
   }, [expenses, modeFilter]);
 
   const taxDeductions = useMemo(() => filteredExpenses.filter(e => e.counts_as_tax_deduction), [filteredExpenses]);

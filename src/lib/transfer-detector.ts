@@ -9,7 +9,7 @@ const HIGH_CONFIDENCE_PATTERNS: [RegExp, string][] = [
   [/(?:^|\s)(?:PMT|PYMT)\s*(?:RECEIVED|THANK|REC'?D)/i, 'credit_card_payment'],
   [/PAYMENT\s*RECEIVED\s*-?\s*THANK/i, 'credit_card_payment'],
   [/TO\s*CREDIT\s*CARD/i, 'credit_card_payment'],
-  [/BALANCE\s*PAY(?:MENT)?/i, 'credit_card_payment'],
+  
   [/PAYMENT\s*TO\s*.*CARD\s*ENDING/i, 'credit_card_payment'],
   [/ONLINE\s*PAYMENT\s*-?\s*THANK/i, 'credit_card_payment'],
 
