@@ -127,6 +127,12 @@ export function TransactionDetailDrawer({
   if (!tx) return null;
 
   const handleSave = async () => {
+    // Guard: require reimbursable_to when marking as reimbursable
+    if (editValues.is_reimbursable && !editValues.reimbursable_to) {
+      const confirmed = confirm('This expense is marked reimbursable but no "Reimbursable To" is set. Save anyway?');
+      if (!confirmed) return;
+    }
+
     if (!editValues.category) {
       // Keep as needs_review if no category set
       setSaving(true);
