@@ -51,6 +51,7 @@ export default function Allocations() {
       const { data } = await supabase
         .from('income_transactions')
         .select('amount, income_type')
+        .eq('owner_id', user!.id)
         .gte('date', start)
         .lte('date', end);
       return (data || [])
@@ -76,6 +77,25 @@ export default function Allocations() {
         .lte('date', end)
         .eq('exclude_from_expense_totals', false);
       return (data || []).reduce((s, r) => s + Math.abs(Number(r.amount || 0)), 0);
+    },
+    enabled: !!user,
+  });
+
+  // Fetch unreviewed transaction count for data quality warning
+  const { data: unreviewedCount = 0 } = useQuery({
+    queryKey: ['alloc_unreviewed', selectedMonth],
+    queryFn: async () => {
+      const [y, m] = selectedMonth.split('-');
+      const start = `${y}-${m}-01`;
+      const end = new Date(Number(y), Number(m), 0).toISOString().split('T')[0];
+      const { count } = await supabase
+        .from('transactions_uploaded')
+        .select('id', { count: 'exact', head: true })
+        .eq('owner_id', user!.id)
+        .gte('date', start)
+        .lte('date', end)
+        .in('review_status', ['needs_review', 'suggested', 'ai_suggested']);
+      return count || 0;
     },
     enabled: !!user,
   });
@@ -317,6 +337,11 @@ export default function Allocations() {
             {!taxProfile && (
               <div className="rounded border border-warning/30 bg-warning/5 px-3 py-2 text-[11px] text-warning">
                 ⚠️ No tax profile configured — using default 35.5% combined rate. <a href="/tax" className="underline">Set up tax profile →</a>
+              </div>
+            )}
+            {unreviewedCount > 0 && (
+              <div className="rounded border border-warning/30 bg-warning/5 px-3 py-2 text-[11px] text-warning">
+                ⚠️ {unreviewedCount} transaction{unreviewedCount > 1 ? 's' : ''} need{unreviewedCount === 1 ? 's' : ''} review this month — free cash estimate may change.
               </div>
             )}
             <div className="border-t border-border pt-3 flex items-center justify-between">

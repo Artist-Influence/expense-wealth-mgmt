@@ -145,36 +145,36 @@ export default function Insights() {
 
   const monthlyTrend = useMemo(() => {
     const monthMap = new Map<string, number>();
-    expenses.forEach(t => {
+    approvedExpenses.forEach(t => {
       if (!t.date) return;
       const month = t.date.substring(0, 7);
       monthMap.set(month, (monthMap.get(month) || 0) + Math.abs(t.amount || 0));
     });
     return [...monthMap.entries()].sort((a, b) => a[0].localeCompare(b[0])).slice(-12).map(([month, total]) => ({ month, total: Math.round(total * 100) / 100 }));
-  }, [expenses]);
+  }, [approvedExpenses]);
 
   const topMerchants = useMemo(() => {
     const merchMap = new Map<string, { total: number; count: number; category: string }>();
-    expenses.forEach(t => {
+    approvedExpenses.forEach(t => {
       const desc = (t.description_normalized || t.description_raw || 'Unknown').substring(0, 40);
       const existing = merchMap.get(desc) || { total: 0, count: 0, category: '' };
       existing.total += Math.abs(t.amount || 0);
       existing.count++;
-      existing.category = t.final_category || t.predicted_category || '';
+      existing.category = t.final_category || '';
       merchMap.set(desc, existing);
     });
     return [...merchMap.entries()].sort((a, b) => b[1].total - a[1].total).slice(0, 10).map(([name, data]) => ({ name, ...data }));
-  }, [expenses]);
+  }, [approvedExpenses]);
 
   const recurringCharges = useMemo(() => {
     const merchMap = new Map<string, { amounts: number[]; dates: string[]; category: string }>();
-    expenses.forEach(t => {
+    approvedExpenses.forEach(t => {
       if (!t.date) return;
       const desc = (t.description_normalized || t.description_raw || '').substring(0, 40);
       const existing = merchMap.get(desc) || { amounts: [], dates: [], category: '' };
       existing.amounts.push(Math.abs(t.amount || 0));
       existing.dates.push(t.date);
-      existing.category = t.final_category || t.predicted_category || '';
+      existing.category = t.final_category || '';
       merchMap.set(desc, existing);
     });
     return [...merchMap.entries()]
@@ -195,7 +195,11 @@ export default function Insights() {
         return { name, avg: Math.round(avg * 100) / 100, frequency, category: data.category, lastCharged, monthlyEstimate: Math.round(monthlyEstimate * 100) / 100, count: data.amounts.length };
       })
       .sort((a, b) => b.monthlyEstimate - a.monthlyEstimate);
-  }, [expenses]);
+  }, [approvedExpenses]);
+
+  // Exclude non-earning income types from savings rate math
+  const NON_EARNING_TYPES = ['reimbursement', 'transfer', 'refund', 'loan_proceeds', 'owner_contribution'];
+  const earnedIncome = useMemo(() => incomeData.filter(t => !NON_EARNING_TYPES.includes(t.income_type)), [incomeData]);
 
   // ─── INCOME & SAVINGS TAB DATA ───
   const incomeVsExpenses = useMemo(() => {
@@ -207,7 +211,7 @@ export default function Insights() {
       entry.expenses += Math.abs(t.amount || 0);
       monthMap.set(m, entry);
     });
-    incomeData.forEach(t => {
+    earnedIncome.forEach(t => {
       if (!t.date) return;
       const m = t.date.substring(0, 7);
       const entry = monthMap.get(m) || { income: 0, expenses: 0 };
@@ -223,11 +227,7 @@ export default function Insights() {
         expenses: Math.round(d.expenses * 100) / 100,
         net: Math.round((d.income - d.expenses) * 100) / 100,
       }));
-  }, [expenses, incomeData]);
-
-  // Exclude non-earning income types from savings rate math
-  const NON_EARNING_TYPES = ['reimbursement', 'transfer', 'refund', 'loan_proceeds', 'owner_contribution'];
-  const earnedIncome = useMemo(() => incomeData.filter(t => !NON_EARNING_TYPES.includes(t.income_type)), [incomeData]);
+  }, [expenses, earnedIncome]);
 
   const savingsRate = useMemo(() => {
     const now = new Date();
@@ -280,7 +280,7 @@ export default function Insights() {
       incomeChange: pctChange(thisYearIncome, lastYearIncome),
       expenseChange: pctChange(thisYearExpenses, lastYearExpenses),
     };
-  }, [expenses, incomeData]);
+  }, [expenses, earnedIncome]);
 
   // ─── TRENDS TAB DATA ───
   const categoryTrends = useMemo(() => {
@@ -310,19 +310,19 @@ export default function Insights() {
       category: c.cat,
       data: sortedMonths.map(m => ({ month: m, amount: Math.round((c.months.get(m) || 0) * 100) / 100 })),
     }));
-  }, [expenses]);
+  }, [approvedExpenses]);
 
   const methodBreakdown = useMemo(() => {
     const methodMap = new Map<string, number>();
-    expenses.forEach(t => {
-      const method = t.final_method || t.predicted_method || 'Unknown';
+    approvedExpenses.forEach(t => {
+      const method = t.final_method || 'Unknown';
       methodMap.set(method, (methodMap.get(method) || 0) + Math.abs(t.amount || 0));
     });
     return [...methodMap.entries()]
       .sort((a, b) => b[1] - a[1])
       .slice(0, 8)
       .map(([name, value]) => ({ name, value: Math.round(value * 100) / 100 }));
-  }, [expenses]);
+  }, [approvedExpenses]);
 
   const dataQuality = useMemo(() => {
     const total = transactions.length;
@@ -348,7 +348,7 @@ export default function Insights() {
         <div className="flex items-center justify-between mb-4">
           <div>
             <h1 className="text-lg font-semibold text-foreground">Insights</h1>
-            <p className="text-[10px] text-muted-foreground">Charts use approved/edited data only · Income is cross-mode</p>
+            <p className="text-[10px] text-muted-foreground">Charts use approved/edited data only · Income is cross-mode · Expenses are {mode}-filtered</p>
           </div>
           <div className="flex rounded-lg border border-border/40 overflow-hidden">
             <button onClick={() => setMode('personal')} className={`px-3 py-1.5 text-xs font-medium transition-colors ${mode === 'personal' ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground'}`}>
@@ -530,6 +530,9 @@ export default function Insights() {
                   <div className="flex items-center gap-2 mb-2">
                     <PiggyBank className="h-4 w-4 text-success" />
                     <h3 className="text-sm font-medium text-foreground">Net Savings Rate</h3>
+                  </div>
+                  <p className="text-[9px] text-muted-foreground mb-2">(Earned Income − {mode} Expenses) / Earned Income · Excludes reimbursements, transfers, refunds</p>
+                  <div className="space-y-3" style={{ marginTop: 0 }}>
                   </div>
                   <div className="space-y-3">
                     <div>
