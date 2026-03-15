@@ -339,6 +339,11 @@ export default function Allocations() {
                 ⚠️ No tax profile configured — using default 35.5% combined rate. <a href="/tax" className="underline">Set up tax profile →</a>
               </div>
             )}
+            {unreviewedCount > 0 && (
+              <div className="rounded border border-warning/30 bg-warning/5 px-3 py-2 text-[11px] text-warning">
+                ⚠️ {unreviewedCount} transaction{unreviewedCount > 1 ? 's' : ''} need{unreviewedCount === 1 ? 's' : ''} review this month — free cash estimate may change.
+              </div>
+            )}
             <div className="border-t border-border pt-3 flex items-center justify-between">
               <div>
                 <span className="text-sm font-semibold text-foreground">Estimated Available</span>
