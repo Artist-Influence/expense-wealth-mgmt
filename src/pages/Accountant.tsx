@@ -206,20 +206,26 @@ export default function Accountant() {
           rows: taxPayments.map(e => [e.date, e.description_normalized || e.description_raw, String(e.amount ?? 0), e.final_category, e.final_notes]),
         };
       case 'year_end_summary': {
+        // Use only approved expenses, exclude transfers and reimbursables from net
+        const approved = (expenses || []).filter(e => approvedStatuses.includes(e.review_status));
         const totalIncome = (income || []).reduce((s, i) => s + (i.amount || 0), 0);
-        const totalExpPersonal = (expenses || []).filter(e => e.mode === 'personal').reduce((s, e) => s + Math.abs(e.amount || 0), 0);
-        const totalExpBusiness = (expenses || []).filter(e => e.mode === 'business').reduce((s, e) => s + Math.abs(e.amount || 0), 0);
+        const totalExpPersonal = approved.filter(e => e.transaction_mode === 'personal' && !e.is_transfer).reduce((s, e) => s + Math.abs(e.amount || 0), 0);
+        const totalExpBusiness = approved.filter(e => e.transaction_mode === 'business' && !e.is_transfer).reduce((s, e) => s + Math.abs(e.amount || 0), 0);
+        const totalReimbursable = approved.filter(e => e.transaction_mode === 'reimbursable_work').reduce((s, e) => s + Math.abs(e.amount || 0), 0);
+        const totalTransfers = approved.filter(e => e.is_transfer).reduce((s, e) => s + Math.abs(e.amount || 0), 0);
         const totalDeductions = taxDeductions.reduce((s, e) => s + Math.abs(e.amount || 0), 0);
         const totalTaxPaid = taxPayments.reduce((s, e) => s + Math.abs(e.amount || 0), 0);
         return {
           headers: ['Metric', 'Amount'],
           rows: [
             ['Total Income', totalIncome.toFixed(2)],
-            ['Personal Expenses', totalExpPersonal.toFixed(2)],
-            ['Business Expenses', totalExpBusiness.toFixed(2)],
+            ['Personal Expenses (excl. transfers)', totalExpPersonal.toFixed(2)],
+            ['Business Expenses (excl. transfers)', totalExpBusiness.toFixed(2)],
+            ['Reimbursable Expenses (fronted)', totalReimbursable.toFixed(2)],
+            ['Transfers Excluded', totalTransfers.toFixed(2)],
             ['Tax Deductions', totalDeductions.toFixed(2)],
             ['Tax Payments Made', totalTaxPaid.toFixed(2)],
-            ['Net Position', (totalIncome - totalExpPersonal - totalExpBusiness).toFixed(2)],
+            ['Net Position (Income - Personal - Business)', (totalIncome - totalExpPersonal - totalExpBusiness).toFixed(2)],
           ],
         };
       }
