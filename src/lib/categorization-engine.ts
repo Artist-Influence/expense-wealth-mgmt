@@ -141,7 +141,8 @@ export async function categorizeTransactions(
   mode: 'personal' | 'business',
   ownerId: string,
   thresholds: Thresholds = { auto: 90, suggest: 70 },
-  allowedCategories: string[] = []
+  allowedCategories: string[] = [],
+  recurringHistory?: RecurringHistoryMap,
 ): Promise<CategorizationResult[]> {
   const allowedSet = new Set(allowedCategories);
 
