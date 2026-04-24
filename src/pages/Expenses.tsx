@@ -1483,7 +1483,14 @@ export default function Expenses() {
                           ) : (
                             <Select
                               value={tx.final_category || tx.predicted_category || ''}
-                              onValueChange={v => inlineUpdate(tx, 'final_category', v)}
+                              onValueChange={v => {
+                                if (v === '__add_new__') {
+                                  setAddCategoryTarget({ kind: 'inline', txId: tx.id });
+                                  setAddCategoryOpen(true);
+                                  return;
+                                }
+                                inlineUpdate(tx, 'final_category', v);
+                              }}
                             >
                               <SelectTrigger className="h-6 px-1.5 text-xs border-transparent bg-transparent hover:bg-secondary/40 focus:bg-secondary/60 focus:border-border [&>svg]:opacity-0 hover:[&>svg]:opacity-60 focus:[&>svg]:opacity-60">
                                 <SelectValue placeholder="—" />
@@ -1492,6 +1499,9 @@ export default function Expenses() {
                                 {categories.map(c => (
                                   <SelectItem key={c} value={c} className="text-xs">{c}</SelectItem>
                                 ))}
+                                <SelectItem value="__add_new__" className="text-xs text-primary font-medium border-t border-border mt-1 pt-1.5">
+                                  + Add new category…
+                                </SelectItem>
                               </SelectContent>
                             </Select>
                           )}
