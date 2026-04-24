@@ -105,6 +105,15 @@ export default function Expenses() {
   const [sortAsc, setSortAsc] = useState(false);
   const [detailTx, setDetailTx] = useState<Transaction | null>(null);
   const [splitTx, setSplitTx] = useState<Transaction | null>(null);
+  // "+ Add new category" inline dialog — tracks which surface triggered it
+  // so we can auto-apply the new category back to that surface.
+  const [addCategoryOpen, setAddCategoryOpen] = useState(false);
+  const [addCategoryTarget, setAddCategoryTarget] = useState<
+    | { kind: 'inline'; txId: string }
+    | { kind: 'drawer' }
+    | { kind: 'split'; rowId: string }
+    | null
+  >(null);
 
   // Upload state
   const [fileQueue, setFileQueue] = useState<FileQueueItem[]>([]);
