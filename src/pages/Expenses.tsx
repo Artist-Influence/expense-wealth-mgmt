@@ -393,7 +393,7 @@ export default function Expenses() {
         const desc = tx.description_raw || '';
         if (!isStatementArtifact(desc, tx.amount || 0)) {
           const merchantKey = generateMerchantKey(normalizeDescription(desc));
-          await updateMerchantMemory(merchantKey, categoryMode as 'personal' | 'business', category, tx.final_method || tx.predicted_method || null, tx.final_notes || tx.predicted_notes || null, desc, user!.id);
+          await updateMerchantMemory(merchantKey, categoryMode as 'personal' | 'business', category, tx.final_method || tx.predicted_method || null, tx.final_notes || tx.predicted_notes || null, desc, user!.id, tx.match_source);
         }
       }
       await loadTransactions();
