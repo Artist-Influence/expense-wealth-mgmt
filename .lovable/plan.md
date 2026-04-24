@@ -1,50 +1,59 @@
-# Bring Expenses-style Filtering to Income
+# Fix: Income Summary Cards Ignore the Date Filter
 
-The Income page currently has only Search, Type, and Status dropdowns — no date filter and a thinner status list. The Expenses table has a much richer filter bar: a date popover with presets/quick months/custom range, an active-filter chip, and stats reflecting the filtered view. This plan ports that experience to Income.
+## What's actually happening
 
-## What to add to `src/pages/Income.tsx`
+The user selected **Year to Date** in the date popover and expected the summary cards (Total Inflows, Business Revenue, Taxable, etc.) to reflect YTD totals. They saw $68,662 and thought that was YTD sales.
 
-### 1. Date range filter (mirroring Expenses lines 98-293, 1241-1306)
-- New state: `dateFrom`, `dateTo`, `dateLabel`.
-- Helpers: `fmtYMD`, `fmtMonthLabel`, `clearDates`, `applyMonth`, `applyThisMonth`, `applyLastMonth`, `applyLastNDays(30|90)`, `applyYTD`, `applyLastYear`, `onCustomFrom`, `onCustomTo`, plus `dateActive` flag.
-- `availableMonths` derived from `transactions[].date` for the "Pick a month" select.
-- Wire into the existing `filtered` memo: skip rows whose `date` is outside the selected range.
-- New `Popover` button in the filter bar showing `<Calendar />` + current `dateLabel` + `<ChevronDown />`, opening a panel with:
-  - Quick presets grid (All Dates / This Month / Last Month / Last 30 / Last 90 / YTD / Last Year)
-  - Pick-a-month `Select` populated from `availableMonths`
-  - Custom range two `Input type="date"` fields
-  - Footer Clear button
-- Active-state pill chip next to the popover trigger that clears the filter on click (same pattern as Expenses).
+It isn't. That's **April 2026 only**. Verified against the database:
 
-### 2. Status filter — full set
-Income has its own status vocabulary, but the dropdown should mirror the Expenses pattern (every real status + "All"). Replace the current 4 options with the full set actually used by income rows:
-- All Statuses
-- Needs Review (`needs_review`)
-- Auto-Classified (`auto_classified`)
-- Approved (`approved`)
-- Edited (`edited`)  ← added for parity if/when income rows get edited
+| Scope | Total Inflows | Business Revenue |
+|---|---|---|
+| April 2026 (what the cards show) | **$68,662** | $50,315 |
+| YTD 2026 (what the user expected) | **$298,677** | **$225,872** |
+| All time | $298,677 | $225,872 |
 
-(If `edited` isn't yet emitted, keep the option visible — selecting it just shows zero rows, same as Expenses behavior. No DB changes.)
+The cards in `src/pages/Income.tsx` (lines 127-140) are hardcoded to `thisMonth`:
+```ts
+const monthTxs = transactions.filter(t => t.date?.startsWith(thisMonth));
+```
+They never read `dateFrom` / `dateTo`, so the date popover only filters the **table**, not the headline numbers. The footer line just says "This month: 2026-04," which is easy to miss when the picker says "Year to Date."
 
-### 3. Imports
-Add `Popover`, `PopoverContent`, `PopoverTrigger` from `@/components/ui/popover`; add `Calendar`, `ChevronDown`, `X` to the lucide import group.
+## Fix
 
-### 4. Layout
-Wrap the filter bar in `flex flex-wrap items-center gap-2` (same as Expenses) so the date control sits inline and wraps cleanly on narrow viewports. Existing Search / Type / Status / bulk action controls stay where they are; Date pops in right after Status.
+Make the summary cards respect the active date filter, and label them so the active range is visible.
 
-### 5. Footer counts
-Change the footer line from `Showing X of Y income transactions · This month: …` to `Showing {filtered.length} of {transactions.length} · {dateActive ? dateLabel : 'All Dates'}` — same vocabulary as Expenses.
+### `src/pages/Income.tsx`
 
-## Out of scope
+1. **Compute cards from the date-filtered set** (matches Expenses' model where the visible numbers reflect the active filter):
+   ```ts
+   const summaryCards = useMemo(() => {
+     const inRange = transactions.filter(t => {
+       if (dateFrom && (!t.date || t.date < dateFrom)) return false;
+       if (dateTo && (!t.date || t.date > dateTo)) return false;
+       // When no date filter is set, default to this month so the
+       // dashboard isn't misleading on first load.
+       if (!dateFrom && !dateTo) return t.date?.startsWith(thisMonth);
+       return true;
+     });
+     const totalInflows = inRange.reduce(...);
+     // ... (same breakdowns as today, but over inRange)
+   }, [transactions, dateFrom, dateTo, thisMonth]);
+   ```
 
-- Category filter — Income has no per-row category, so no analog to add.
-- "Extra filter" (Transfers / Duplicates / Splits / Parse Errors / Excluded) — these flags don't exist on `income_transactions`. Skipped.
-- Summary cards stay anchored to "this month" as today; only the **table** respects the date filter, matching Expenses' model where stats are global and the table is filtered.
-- Tax / Reimbursements / Wealth pages — not in scope of this request.
+2. **Label the card section with the active range** so the scope is unambiguous:
+   - Add a small caption above the cards: `Summary · {dateActive ? dateLabel : 'This Month'}`.
+   - Update the page subtitle (currently says "Summary: This Month") to say `Summary: {dateActive ? dateLabel : 'This Month'}`.
+
+3. **Footer line**: already updated previously to show `dateActive ? dateLabel : 'All Dates'` — leave as-is; it now agrees with the cards.
+
+### Out of scope
+
+- No DB or schema changes. The data is correct; only the UI grouping was wrong.
+- Tax, Insights, Wealth pages — not in scope; if any of them have similar "this month vs YTD" confusion, address separately.
 
 ## QA
 
-- Open Income, click date pill → choose This Month → table narrows; pill turns primary; "X of Y" reflects filter.
-- Choose Last 90 Days → CSV export (already wired to `filtered`) downloads only those rows.
-- Status filter set to "Approved" + date "Last Month" + a search term → all three combine correctly.
-- Click the active-state chip → filter clears, full list returns.
+- Open Income with no filter → cards show This Month (~$68k Total Inflows), label says "This Month".
+- Click date pill → Year to Date → cards re-compute to ~$298,677 Total Inflows, ~$225,872 Business Revenue, label says "Year to Date".
+- Choose Last Month → cards reflect March; label updates.
+- Clear filter → cards drop back to This Month.
