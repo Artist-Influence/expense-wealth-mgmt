@@ -819,7 +819,10 @@ export default function Expenses() {
           const transfer = detectTransfer(tx.description_raw);
           const isHighConfTransfer = transfer.isTransfer && transfer.transferConfidence === 'high';
           const isMediumTransfer = transfer.transferConfidence === 'medium';
-          if (isHighConfTransfer) transferCount++;
+          const routerKey = `${tx.date}|${tx.amount}|${tx.description_normalized}`;
+          const isCcPayment = ccPaymentRowKeys.has(routerKey);
+          const isRefund = refundRowKeys.has(routerKey);
+          if (isHighConfTransfer || isCcPayment) transferCount++;
 
           let transferCategory: string | null = null;
           if (isHighConfTransfer) {
