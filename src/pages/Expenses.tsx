@@ -861,16 +861,16 @@ export default function Expenses() {
             parse_status: tx.parse_status, parse_error: tx.parse_error,
             duplicate_fingerprint: fp, duplicate_status: dupInfo.status,
             duplicate_of_transaction_id: dupInfo.matchId,
-            is_transfer: isHighConfTransfer,
-            exclude_from_expense_totals: isHighConfTransfer && appSettings.excludeTransfers,
-            transfer_type: transfer.transferType,
+            is_transfer: isHighConfTransfer || isCcPayment,
+            exclude_from_expense_totals: (isHighConfTransfer && appSettings.excludeTransfers) || isCcPayment,
+            transfer_type: isCcPayment ? 'credit_card_payment' : transfer.transferType,
             // V2 fields
             transaction_mode: mode,
             ...modeDefaults,
-            is_non_expense_cash_movement: isHighConfTransfer,
-            treatment_type: isHighConfTransfer ? 'transfer' : 'expense',
-            counts_toward_true_personal_spend: isHighConfTransfer ? false : modeDefaults.counts_toward_true_personal_spend,
-            counts_toward_true_business_spend: isHighConfTransfer ? false : modeDefaults.counts_toward_true_business_spend,
+            is_non_expense_cash_movement: isHighConfTransfer || isCcPayment,
+            treatment_type: isCcPayment ? 'credit_card_payment' : isRefund ? 'refund' : isHighConfTransfer ? 'transfer' : 'expense',
+            counts_toward_true_personal_spend: (isHighConfTransfer || isCcPayment || isRefund) ? false : modeDefaults.counts_toward_true_personal_spend,
+            counts_toward_true_business_spend: (isHighConfTransfer || isCcPayment || isRefund) ? false : modeDefaults.counts_toward_true_business_spend,
           };
         });
         const { error: txError } = await supabase.from('transactions_uploaded').insert(chunk);
