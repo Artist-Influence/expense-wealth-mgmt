@@ -1,61 +1,99 @@
-# Add Date Range Filter to Expenses
+# Recurring Charge Detection → Auto-categorize as Subscriptions
 
-Add a date filter next to the existing Status / Filter / Category dropdowns so you can scope the table to a single month, the current/last month, year-to-date, or any custom date range.
+Add a new layer to the categorization pipeline that detects recurring charges (same merchant, same amount, regular cadence) and proposes **Subscriptions** as the category — boosting confidence and writing the recurrence signal back to merchant memory so future single charges from that merchant inherit the category instantly.
 
-## What you'll see
+## How it will behave
 
-A new **Date** button in the toolbar showing the active range (e.g. "All Dates", "Apr 2026", "Apr 1 – Apr 24"). Clicking it opens a popover with:
+When a CSV is imported, after merchant memory + rules + CSV-category match (and before AI fallback), each new transaction is checked against the user's existing transaction history:
 
-- **Quick presets** (one click): All Dates, This Month, Last Month, Last 30 Days, Last 90 Days, Year to Date, Last Year
-- **Month picker**: a dropdown of every month that has transactions (e.g. "Apr 2026", "Mar 2026", …) — pick one to scope to that month
-- **Custom range**: two date inputs (From / To) with a Calendar popover, plus a Clear button
+1. Find prior transactions with the same `merchant_key`, in the last **180 days**.
+2. If we find **≥3 prior charges** AND **amount stability** holds AND **cadence matches a known interval**, mark this charge as recurring.
+3. Apply category **Subscriptions** (only if Subscriptions is in the user's allowed category list — it already is for both `personal` and `business`).
+4. Apply ambiguous-merchant guardrail: PayPal, Venmo, Zelle, Amazon, Square, Stripe, Walmart, Costco, Target, Apple, Google → **never** auto-flag as recurring (those rails carry many one-offs at lookalike amounts).
+5. Boost merchant memory: when a recurring match is confirmed, write/update `merchant_memory` so the merchant inherits Subscriptions for ALL future single charges, not just recurring ones.
 
-The selected range combines with the existing Status, Filter, Category, and Search controls. The active range is also shown as a small chip with an × to clear quickly.
+## Detection rules
 
-## Technical changes (single file: `src/pages/Expenses.tsx`)
+A merchant is "recurring" if:
 
-1. **State**
-   ```ts
-   const [dateFrom, setDateFrom] = useState<string | null>(null); // 'YYYY-MM-DD'
-   const [dateTo, setDateTo]     = useState<string | null>(null);
-   const [dateLabel, setDateLabel] = useState<string>('All Dates');
-   ```
+- **Count**: ≥ 3 prior transactions with the same `merchant_key` in last 180 days.
+- **Amount stability** (one of):
+  - All amounts within ±$1.00 of the median, OR
+  - Coefficient of variation (stdev / mean) < 0.10 (10%)
+- **Cadence**: average days between consecutive charges falls into one of:
+  - weekly: 6–8 days
+  - biweekly: 13–16 days
+  - monthly: 25–35 days
+  - quarterly: 85–100 days
+  - annual: 350–380 days
+- **Not ambiguous merchant**: skip pass-through merchants entirely.
+- **New transaction's amount** is also within ±10% of the recurring median (so a one-off $500 Spotify charge wouldn't get tagged just because $9.99 Spotify is recurring).
 
-2. **Filter logic** — extend the existing `filtered` useMemo (around line 155):
-   ```ts
-   if (dateFrom && tx.date < dateFrom) return false;
-   if (dateTo   && tx.date > dateTo)   return false;
-   ```
-   Add `dateFrom`, `dateTo` to the dependency array (line 201).
+Confidence score:
+- Base 88, +2 per detected charge above 3 (capped at 96).
+- Auto-categorize if ≥ user's `auto_threshold` (default 90), else suggest.
 
-3. **Available months** — derive once from `transactions`:
-   ```ts
-   const availableMonths = useMemo(() => {
-     const set = new Set<string>();
-     transactions.forEach(t => t.date && set.add(t.date.slice(0, 7))); // 'YYYY-MM'
-     return Array.from(set).sort().reverse();
-   }, [transactions]);
-   ```
+## What the user sees
 
-4. **Preset helpers** (pure functions, no new deps — use existing `date-fns` already imported elsewhere in the file, or plain `Date` math):
-   - `applyMonth(ym)` → first/last day of `YYYY-MM`
-   - `applyThisMonth()`, `applyLastMonth()`, `applyLastNDays(n)`, `applyYTD()`, `applyLastYear()`
-   - `clearDates()` → resets all three state values
+- New transactions from recurring merchants are tagged **Subscriptions** automatically with a `match_explanation` like:
+  > "Recurring monthly @ $14.99 (6 prior charges, ±$0.00, ~30d cadence)"
+- `match_source` set to a new value: `recurring_pattern`.
+- A new badge **🔁 Recurring** appears in the Expenses table next to the category for these rows (subtle, opt-out friendly).
+- The detection runs only at import time (not retroactively on existing rows for now).
 
-5. **UI** — insert after the Category Select (line 1097) using existing shadcn primitives:
-   - `Popover` + `PopoverTrigger` button (`h-8 glass-input text-xs`, `CalendarIcon` from lucide-react)
-   - `PopoverContent` (`w-[320px] p-3`) with three sections:
-     - Preset buttons in a 2-col grid (`Button variant="ghost" size="sm"`)
-     - Month `Select` populated from `availableMonths` (formatted "MMM YYYY")
-     - Two `Input type="date"` controls bound to `dateFrom`/`dateTo` with a Clear button
-   - Chip rendered conditionally next to the trigger when a range is active, with an × button calling `clearDates()`
+## Technical changes
 
-6. **Reset hook** — when "Clear filters" / reset behavior already exists, also call `clearDates()` there for consistency (only if such a handler exists; otherwise skip).
+### 1. New file: `src/lib/recurrence-detector.ts`
+Pure function `detectRecurrence(merchantKey, amount, history)` returning:
+```ts
+{ isRecurring: boolean; cadence?: 'weekly'|'biweekly'|'monthly'|'quarterly'|'annual'; median: number; count: number; confidence: number; explanation: string }
+```
+No DB access — caller passes pre-loaded history.
 
-No database changes, no new components, no new dependencies. Calendar/Popover/Select/Input/Button shadcn components are already in the project.
+### 2. `src/lib/categorization-engine.ts`
+- Add a new optional argument: `recurringHistory: Map<string, { date: string; amount: number }[]>` (merchant_key → prior charges).
+- Add Layer 1.7 (between partial memory match and rules):
+  ```ts
+  if (recurringHistory) {
+    const history = recurringHistory.get(merchantKey) || [];
+    const r = detectRecurrence(merchantKey, tx.amount, history);
+    if (r.isRecurring && allowedSet.has('Subscriptions') && !isAmbiguousMerchant(merchantKey)) {
+      const validated = validateCategory('Subscriptions', allowedSet);
+      return buildResult(validated.category, null, null, r.confidence,
+        'recurring_pattern', thresholds, false, r.explanation, merchantKey);
+    }
+  }
+  ```
+- Extend `match_source` union to include `'recurring_pattern'`.
 
-## Out of scope
+### 3. `src/pages/Expenses.tsx` (import flow, ~line 838)
+Before calling `categorizeTransactions`, fetch the user's last 180 days of transactions for the relevant `merchant_key`s and build the history map:
+```ts
+const merchantKeys = [...new Set(rowsToInsert.map(r => r.merchant_key).filter(Boolean))];
+const since = new Date(Date.now() - 180 * 86400_000).toISOString().slice(0, 10);
+const { data: priorTx } = await supabase
+  .from('transactions_uploaded')
+  .select('description_normalized, amount, date')
+  .eq('owner_id', user.id)
+  .gte('date', since)
+  .not('amount', 'is', null);
+// Build map from merchant_key → [{date, amount}, …] using generateMerchantKey on description_normalized
+```
+Pass that map into `categorizeTransactions`.
 
-- Persisting the selected range across reloads
-- Cross-page sync (Income / Insights keep their own filters)
-- Timezone handling beyond the existing `tx.date` string comparison (dates are already stored as `YYYY-MM-DD`)
+### 4. After approval — boost merchant memory
+In `updateMerchantMemory`, when called for a `recurring_pattern` match, give it an extra confidence bump (start at 90 instead of 82) so future single charges from that merchant land in Subscriptions confidently. This requires passing the match_source through to the approval handler in Expenses.tsx (already available on the row).
+
+### 5. UI badge in `src/pages/Expenses.tsx`
+Add a small "🔁" pill next to the category column when `match_source === 'recurring_pattern'`. One-line conditional render.
+
+## Out of scope (for now — easy follow-ups)
+
+- **Retroactive sweep** of already-imported rows. Could add a "Re-scan for recurring" button on the Expenses page if desired.
+- **User-configurable thresholds** (e.g., minimum count, amount tolerance). Hardcoded to sensible defaults for v1.
+- **Cross-account dedup**: if same Netflix charge appears on two cards, treated as separate streams (correct for cadence detection anyway).
+- **"Subscription canceled" detection** (no charge for 2 expected cycles). Pure analytics for later.
+
+## Database
+
+No schema changes required. The existing `match_source` text column accepts the new value. No new tables, no migration.
