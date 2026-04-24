@@ -266,62 +266,64 @@ export default function Wealth() {
 
       {/* Add/Edit Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>{editingId ? 'Edit Account' : 'Add Account'}</DialogTitle>
+        <DialogContent className="sm:max-w-md p-4 gap-3">
+          <DialogHeader className="space-y-0">
+            <DialogTitle className="text-base">{editingId ? 'Edit Account' : 'Add Account'}</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-1.5">
-              <Label>Account Name</Label>
-              <Input value={form.account_name} onChange={e => setForm(f => ({ ...f, account_name: e.target.value }))} placeholder="e.g. Roth IRA — Fidelity" />
+          <div className="space-y-2.5">
+            <div className="space-y-1">
+              <Label className="text-xs">Account Name</Label>
+              <Input className="h-8 text-sm" value={form.account_name} onChange={e => setForm(f => ({ ...f, account_name: e.target.value }))} placeholder="e.g. Roth IRA — Fidelity" />
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label>Type</Label>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1">
+                <Label className="text-xs">Type</Label>
                 <Select value={form.account_type} onValueChange={v => setForm(f => ({ ...f, account_type: v }))}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
                   <SelectContent>{ACCOUNT_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
-              <div className="space-y-1.5">
-                <Label>Platform</Label>
-                <Input value={form.platform} onChange={e => setForm(f => ({ ...f, platform: e.target.value }))} placeholder="Fidelity, Wealthfront…" />
+              <div className="space-y-1">
+                <Label className="text-xs">Platform</Label>
+                <Input className="h-8 text-sm" value={form.platform} onChange={e => setForm(f => ({ ...f, platform: e.target.value }))} placeholder="Fidelity, Wealthfront…" />
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label>Current Balance</Label>
-                <Input type="number" value={form.current_balance} onChange={e => setForm(f => ({ ...f, current_balance: Number(e.target.value) }))} />
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1">
+                <Label className="text-xs">Current Balance</Label>
+                <Input className="h-8 text-sm" type="number" value={form.current_balance} onChange={e => setForm(f => ({ ...f, current_balance: Number(e.target.value) }))} />
               </div>
-              <div className="space-y-1.5">
-                <Label>Contributions YTD</Label>
-                <Input type="number" value={form.contributions_ytd} onChange={e => setForm(f => ({ ...f, contributions_ytd: Number(e.target.value) }))} />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label>Monthly Target</Label>
-                <Input type="number" value={form.contribution_target_monthly} onChange={e => setForm(f => ({ ...f, contribution_target_monthly: Number(e.target.value) }))} />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Yearly Target</Label>
-                <Input type="number" value={form.contribution_target_yearly} onChange={e => setForm(f => ({ ...f, contribution_target_yearly: Number(e.target.value) }))} />
+              <div className="space-y-1">
+                <Label className="text-xs">Contributions YTD</Label>
+                <Input className="h-8 text-sm" type="number" value={form.contributions_ytd} onChange={e => setForm(f => ({ ...f, contributions_ytd: Number(e.target.value) }))} />
               </div>
             </div>
-            <div className="space-y-1.5">
-              <Label>Priority (higher = more important)</Label>
-              <Input type="number" value={form.priority} onChange={e => setForm(f => ({ ...f, priority: Number(e.target.value) }))} />
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1">
+                <Label className="text-xs">Monthly Target</Label>
+                <Input className="h-8 text-sm" type="number" value={form.contribution_target_monthly} onChange={e => setForm(f => ({ ...f, contribution_target_monthly: Number(e.target.value) }))} />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Yearly Target</Label>
+                <Input className="h-8 text-sm" type="number" value={form.contribution_target_yearly} onChange={e => setForm(f => ({ ...f, contribution_target_yearly: Number(e.target.value) }))} />
+              </div>
             </div>
-            <div className="space-y-1.5">
-              <Label>Notes</Label>
-              <Input value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} placeholder="Optional notes…" />
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1">
+                <Label className="text-xs">Priority</Label>
+                <Input className="h-8 text-sm" type="number" value={form.priority} onChange={e => setForm(f => ({ ...f, priority: Number(e.target.value) }))} />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Notes</Label>
+                <Input className="h-8 text-sm" value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} placeholder="Optional…" />
+              </div>
             </div>
           </div>
-          <DialogFooter className="flex justify-between">
+          <DialogFooter className="flex justify-between gap-2 pt-1">
             {editingId && (
               <AlertDialog>
                 <AlertDialogTrigger asChild>
-                  <Button variant="destructive" size="sm" className="mr-auto">
+                  <Button variant="destructive" size="sm" className="mr-auto h-8">
                     <Trash2 className="h-3.5 w-3.5 mr-1" /> Delete
                   </Button>
                 </AlertDialogTrigger>
@@ -338,8 +340,8 @@ export default function Wealth() {
               </AlertDialog>
             )}
             <div className="flex gap-2">
-              <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
-              <Button onClick={() => upsert.mutate(form)} disabled={!form.account_name || upsert.isPending}>
+              <Button variant="outline" size="sm" className="h-8" onClick={() => setDialogOpen(false)}>Cancel</Button>
+              <Button size="sm" className="h-8" onClick={() => upsert.mutate(form)} disabled={!form.account_name || upsert.isPending}>
                 {upsert.isPending ? 'Saving…' : 'Save'}
               </Button>
             </div>
