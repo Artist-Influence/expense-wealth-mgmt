@@ -444,13 +444,14 @@ export default function Insights() {
   }, [approvedExpenses]);
 
   const dataQuality = useMemo(() => {
-    const total = transactions.length;
-    const needsReview = transactions.filter(t => t.review_status === 'needs_review').length;
-    const uncategorized = transactions.filter(t => !t.final_category && !t.predicted_category).length;
-    const approved = transactions.filter(t => t.review_status === 'approved').length;
+    const scoped = transactions.filter(t => inDateRange(t.date));
+    const total = scoped.length;
+    const needsReview = scoped.filter(t => t.review_status === 'needs_review').length;
+    const uncategorized = scoped.filter(t => !t.final_category && !t.predicted_category).length;
+    const approved = scoped.filter(t => t.review_status === 'approved').length;
     const approvalRate = total > 0 ? (approved / total) * 100 : 0;
     return { total, needsReview, uncategorized, approved, approvalRate };
-  }, [transactions]);
+  }, [transactions, dateFrom, dateTo]);
 
   const tooltipStyle = {
     background: 'hsl(var(--card))',
