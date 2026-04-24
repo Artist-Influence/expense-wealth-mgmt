@@ -776,52 +776,6 @@ export default function Income() {
         </DialogContent>
       </Dialog>
 
-      {/* Reimbursement Match Dialog */}
-      <Dialog open={showMatchDialog} onOpenChange={setShowMatchDialog}>
-        <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle>Match to Reimbursement Group</DialogTitle></DialogHeader>
-          {(() => {
-            const matchTx = matchingTxId ? transactions.find(t => t.id === matchingTxId) : null;
-            return matchTx ? (
-              <div className="rounded border border-border bg-secondary/20 p-3 mb-2">
-                <p className="text-xs text-muted-foreground">This payment</p>
-                <p className="text-sm font-semibold text-foreground font-mono">{fmt(matchTx.amount || 0)}</p>
-                <p className="text-xs text-muted-foreground truncate">{matchTx.description_raw}</p>
-              </div>
-            ) : null;
-          })()}
-          {reimbursementGroups.length === 0 ? (
-            <p className="text-sm text-muted-foreground py-4">No pending reimbursement groups found.</p>
-          ) : (
-            <div className="space-y-2 max-h-[300px] overflow-y-auto">
-              {reimbursementGroups.map(g => {
-                const remaining = g.total_expected - g.total_received;
-                const matchTx = matchingTxId ? transactions.find(t => t.id === matchingTxId) : null;
-                const paymentAmt = matchTx?.amount || 0;
-                const wouldOverpay = paymentAmt > remaining && remaining > 0;
-                const wouldPartial = paymentAmt < remaining;
-                return (
-                  <div key={g.id} className={`flex items-center justify-between p-3 rounded-lg border bg-card hover:bg-muted/50 cursor-pointer transition-colors ${wouldOverpay ? 'border-destructive/40' : 'border-border'}`} onClick={() => matchToGroup(g.id)}>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-foreground">{g.title}</p>
-                      <p className="text-xs text-muted-foreground">
-                        Expected: {fmt(g.total_expected)} · Received: {fmt(g.total_received)} · Remaining: {fmt(remaining)}
-                      </p>
-                      {wouldOverpay && (
-                        <p className="text-[10px] text-destructive mt-0.5">⚠️ Payment exceeds remaining by {fmt(paymentAmt - remaining)}</p>
-                      )}
-                      {wouldPartial && (
-                        <p className="text-[10px] text-warning mt-0.5">→ Will be partially reimbursed ({fmt(g.total_received + paymentAmt)} of {fmt(g.total_expected)})</p>
-                      )}
-                    </div>
-                    <Badge variant="outline" className="text-xs ml-2 shrink-0">{g.status.replace(/_/g, ' ')}</Badge>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
