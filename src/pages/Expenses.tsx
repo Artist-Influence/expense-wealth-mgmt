@@ -612,11 +612,81 @@ export default function Expenses() {
 
       updateItem(id, { status: 'parsing' });
       const parsed = await parseCsvFileWithMapping(file, mapping);
-      const validRows = parsed.filter(r => r.parse_status === 'ok');
+      const validRowsAll = parsed.filter(r => r.parse_status === 'ok');
       const parseErrorRows = parsed.filter(r => r.parse_status === 'parse_error');
 
-      if (validRows.length === 0) {
+      if (validRowsAll.length === 0) {
         updateItem(id, { status: 'error', error: `No valid rows. ${parseErrorRows.length} parse errors.` });
+        return;
+      }
+
+      // SIGN-AWARE ROUTING — split rows by where they actually belong before
+      // they pollute the expenses pipeline. Uses the original signed amount and
+      // any Details / Type signal columns the bank kept in source_row_json.
+      const incomeRows: typeof validRowsAll = [];
+      const ccPaymentRowKeys = new Set<string>();   // identify by description+amount
+      const refundRowKeys = new Set<string>();
+      const validRows: typeof validRowsAll = [];
+
+      for (const tx of validRowsAll) {
+        const decision = routeTransaction({
+          signedAmount: tx.amount,
+          description: tx.description_raw || '',
+          sourceRow: (tx.source_row_json as Record<string, unknown> | null) || null,
+        });
+        if (decision.route === 'income') {
+          incomeRows.push(tx);
+          continue;
+        }
+        // Build a stable key for the row to mark CC payment / refund treatment downstream
+        const key = `${tx.date}|${tx.amount}|${tx.description_normalized}`;
+        if (decision.route === 'cc_payment_transfer') ccPaymentRowKeys.add(key);
+        if (decision.route === 'refund') refundRowKeys.add(key);
+        // Store ABS amount for the existing pipeline (display + dedupe expect positives).
+        validRows.push({ ...tx, amount: Math.abs(tx.amount) });
+      }
+
+      // Insert income rows directly into income_transactions and skip the
+      // expenses pipeline for them entirely.
+      let incomeInsertedCount = 0;
+      if (incomeRows.length > 0) {
+        const incomePayload = incomeRows.map(tx => {
+          const cls = classifyIncome(tx.description_raw || '');
+          return {
+            owner_id: user.id,
+            date: tx.date,
+            amount: Math.abs(tx.amount),
+            description_raw: tx.description_raw,
+            description_normalized: tx.description_normalized,
+            income_type: cls.income_type,
+            taxable_status: cls.taxable_status,
+            source_account_name: method || null,
+            source_file_name: file.name,
+            status: 'needs_review',
+          };
+        });
+        const { error: incomeErr } = await supabase.from('income_transactions').insert(incomePayload);
+        if (!incomeErr) incomeInsertedCount = incomePayload.length;
+        else console.error('Income insert failed:', incomeErr);
+      }
+
+      if (validRows.length === 0) {
+        updateItem(id, {
+          status: 'done',
+          result: {
+            batchId: '',
+            total: 0,
+            auto: 0,
+            suggested: 0,
+            review: 0,
+            skipped: 0,
+            possibleDuplicates: 0,
+            transfers: 0,
+            parseErrors: parseErrorRows.length,
+            incomeRouted: incomeInsertedCount,
+          } as any,
+        });
+        toast.success(`${file.name}: routed ${incomeInsertedCount} rows to Income (no expenses)`);
         return;
       }
 
