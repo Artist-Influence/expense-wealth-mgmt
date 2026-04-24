@@ -177,84 +177,82 @@ export default function Wealth() {
   return (
     <div className="min-h-screen bg-background">
       <AppNav />
-      <div className="container py-6 space-y-6">
+      <div className="container py-4 space-y-3">
         <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-semibold text-foreground">Wealth</h1>
-          <Button size="sm" onClick={openAdd}><Plus className="h-4 w-4 mr-1" />Add Account</Button>
+          <h1 className="text-xl font-semibold text-foreground">Wealth</h1>
+          <Button size="sm" className="h-8" onClick={openAdd}><Plus className="h-3.5 w-3.5 mr-1" />Add Account</Button>
         </div>
 
         {/* Summary cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
           <Card>
-            <CardHeader className="pb-2 flex flex-row items-center gap-2">
-              <Wallet className="h-4 w-4 text-primary" />
-              <CardTitle className="text-sm font-medium text-muted-foreground">Total Balance</CardTitle>
+            <CardHeader className="p-3 pb-1 flex flex-row items-center gap-2 space-y-0">
+              <Wallet className="h-3.5 w-3.5 text-primary" />
+              <CardTitle className="text-[11px] font-medium text-muted-foreground">Total Balance</CardTitle>
             </CardHeader>
-            <CardContent><span className="text-2xl font-bold text-foreground">{fmt(totalBalance)}</span></CardContent>
+            <CardContent className="p-3 pt-0"><span className="text-lg font-bold text-foreground">{fmt(totalBalance)}</span></CardContent>
           </Card>
           <Card>
-            <CardHeader className="pb-2 flex flex-row items-center gap-2">
-              <TrendingUp className="h-4 w-4 text-primary" />
-              <CardTitle className="text-sm font-medium text-muted-foreground">Contributions YTD</CardTitle>
+            <CardHeader className="p-3 pb-1 flex flex-row items-center gap-2 space-y-0">
+              <TrendingUp className="h-3.5 w-3.5 text-primary" />
+              <CardTitle className="text-[11px] font-medium text-muted-foreground">Contributions YTD</CardTitle>
             </CardHeader>
-            <CardContent><span className="text-2xl font-bold text-foreground">{fmt(totalYtd)}</span></CardContent>
+            <CardContent className="p-3 pt-0"><span className="text-lg font-bold text-foreground">{fmt(totalYtd)}</span></CardContent>
           </Card>
           <Card>
-            <CardHeader className="pb-2 flex flex-row items-center gap-2">
-              <Target className="h-4 w-4 text-primary" />
-              <CardTitle className="text-sm font-medium text-muted-foreground">Yearly Target</CardTitle>
+            <CardHeader className="p-3 pb-1 flex flex-row items-center gap-2 space-y-0">
+              <Target className="h-3.5 w-3.5 text-primary" />
+              <CardTitle className="text-[11px] font-medium text-muted-foreground">Yearly Target</CardTitle>
             </CardHeader>
-            <CardContent><span className="text-2xl font-bold text-foreground">{fmt(totalYearlyTarget)}</span></CardContent>
+            <CardContent className="p-3 pt-0"><span className="text-lg font-bold text-foreground">{fmt(totalYearlyTarget)}</span></CardContent>
           </Card>
         </div>
 
-        {isLoading && <p className="text-muted-foreground text-sm">Loading…</p>}
+        {isLoading && <p className="text-muted-foreground text-xs">Loading…</p>}
         {!isLoading && accounts.length === 0 && (
-          <Card className="p-8 text-center">
-            <DollarSign className="h-10 w-10 mx-auto text-muted-foreground mb-2" />
+          <Card className="p-6 text-center">
+            <DollarSign className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
             <p className="text-muted-foreground text-sm">No investment accounts yet. Add one to start tracking.</p>
           </Card>
         )}
 
         {/* Grouped accounts */}
         {grouped.map(g => (
-          <div key={g.key} className="space-y-3">
-            <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">{g.label}</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div key={g.key} className="space-y-1.5">
+            <h2 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">{g.label}</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
               {g.accounts.map(a => {
                 const pct = a.contribution_target_yearly > 0
                   ? Math.min(100, (Number(a.contributions_ytd) / Number(a.contribution_target_yearly)) * 100)
                   : 0;
                 return (
                   <Card key={a.id} className="relative group">
-                    <CardHeader className="pb-2 flex flex-row items-start justify-between">
-                      <div>
-                        <CardTitle className="text-base font-semibold text-foreground">{a.account_name}</CardTitle>
-                        <div className="flex items-center gap-2 mt-1">
-                          <Badge variant="secondary" className="text-xs">{typeLabel(a.account_type)}</Badge>
-                          {a.platform && <span className="text-xs text-muted-foreground">{a.platform}</span>}
-                          {!a.is_active && <Badge variant="outline" className="text-xs text-destructive border-destructive/30">Inactive</Badge>}
+                    <CardHeader className="p-3 pb-1 flex flex-row items-start justify-between space-y-0">
+                      <div className="min-w-0">
+                        <CardTitle className="text-sm font-semibold text-foreground truncate">{a.account_name}</CardTitle>
+                        <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                          <Badge variant="secondary" className="text-[10px] px-1.5 py-0">{typeLabel(a.account_type)}</Badge>
+                          {a.platform && <span className="text-[10px] text-muted-foreground">{a.platform}</span>}
+                          {!a.is_active && <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-destructive border-destructive/30">Inactive</Badge>}
                         </div>
                       </div>
-                      <Button variant="ghost" size="icon" className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity" onClick={() => openEdit(a)}>
-                        <Pencil className="h-3.5 w-3.5" />
+                      <Button variant="ghost" size="icon" className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" onClick={() => openEdit(a)}>
+                        <Pencil className="h-3 w-3" />
                       </Button>
                     </CardHeader>
-                    <CardContent className="space-y-3">
-                      <div className="text-xl font-bold text-foreground">{fmt(Number(a.current_balance))}</div>
-                      {a.contribution_target_yearly > 0 && (
+                    <CardContent className="p-3 pt-1 space-y-1.5">
+                      <div className="text-base font-bold text-foreground">{fmt(Number(a.current_balance))}</div>
+                      {a.contribution_target_yearly > 0 ? (
                         <div className="space-y-1">
-                          <div className="flex justify-between text-xs text-muted-foreground">
+                          <div className="flex justify-between text-[10px] text-muted-foreground">
                             <span>{fmt(Number(a.contributions_ytd))} contributed</span>
                             <span>{fmt(Number(a.contribution_target_yearly))} target</span>
                           </div>
-                          <Progress value={pct} className="h-2" />
+                          <Progress value={pct} className="h-1.5" />
                         </div>
+                      ) : a.contribution_target_monthly > 0 && (
+                        <p className="text-[10px] text-muted-foreground">Monthly target: {fmt(Number(a.contribution_target_monthly))}</p>
                       )}
-                      {a.contribution_target_monthly > 0 && (
-                        <p className="text-xs text-muted-foreground">Monthly target: {fmt(Number(a.contribution_target_monthly))}</p>
-                      )}
-                      <p className="text-[10px] text-muted-foreground/60">Updated {timeAgo(a.updated_at)}</p>
                     </CardContent>
                   </Card>
                 );

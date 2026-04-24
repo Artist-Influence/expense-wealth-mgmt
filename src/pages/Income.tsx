@@ -19,7 +19,7 @@ import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import {
   DollarSign, TrendingUp, Shield, ShieldOff, Briefcase, Banknote,
-  Search, Download, Plus, Check, Trash2, Upload, Link2, Receipt,
+  Search, Download, Plus, Check, Trash2, Upload, Receipt,
   Calendar, ChevronDown, X
 } from 'lucide-react';
 
@@ -41,14 +41,6 @@ interface IncomeTransaction {
   created_at: string;
 }
 
-interface ReimbursementGroup {
-  id: string;
-  title: string;
-  status: string;
-  total_expected: number;
-  total_received: number;
-  received_date: string | null;
-}
 
 const INCOME_TYPE_BADGE: Record<string, { class: string }> = {
   payroll: { class: 'bg-primary/15 text-primary border-primary/25' },
@@ -72,9 +64,6 @@ export default function Income() {
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showManualEntry, setShowManualEntry] = useState(false);
-  const [showMatchDialog, setShowMatchDialog] = useState(false);
-  const [matchingTxId, setMatchingTxId] = useState<string | null>(null);
-  const [reimbursementGroups, setReimbursementGroups] = useState<ReimbursementGroup[]>([]);
   const [showUploader, setShowUploader] = useState(false);
   const [dateFrom, setDateFrom] = useState<string | null>(null);
   const [dateTo, setDateTo] = useState<string | null>(null);
@@ -112,17 +101,7 @@ export default function Income() {
     setLoading(false);
   }, [user]);
 
-  const fetchReimbursementGroups = useCallback(async () => {
-    if (!user) return;
-    const { data } = await supabase
-      .from('reimbursement_groups')
-      .select('id, title, status, total_expected, total_received')
-      .eq('owner_id', user.id)
-      .in('status', ['pending', 'submitted', 'partially_reimbursed']);
-    setReimbursementGroups((data as ReimbursementGroup[]) || []);
-  }, [user]);
-
-  useEffect(() => { fetchTransactions(); fetchReimbursementGroups(); }, [fetchTransactions, fetchReimbursementGroups]);
+  useEffect(() => { fetchTransactions(); }, [fetchTransactions]);
 
   // Summary calculations
   const now = new Date();
@@ -131,22 +110,19 @@ export default function Income() {
   const summaryCards = useMemo(() => {
     const dateActive = !!(dateFrom || dateTo);
     const inRange = transactions.filter(t => {
-      if (dateActive) {
-        if (dateFrom && (!t.date || t.date < dateFrom)) return false;
-        if (dateTo && (!t.date || t.date > dateTo)) return false;
-        return true;
-      }
-      // Default scope when no date filter is set: this month
-      return t.date?.startsWith(thisMonth);
+      if (!dateActive) return true; // default: ALL dates
+      if (dateFrom && (!t.date || t.date < dateFrom)) return false;
+      if (dateTo && (!t.date || t.date > dateTo)) return false;
+      return true;
     });
     const totalInflows = inRange.reduce((s, t) => s + (t.amount || 0), 0);
     const taxable = inRange.filter(t => t.taxable_status === 'taxable').reduce((s, t) => s + (t.amount || 0), 0);
     const nonTaxable = inRange.filter(t => t.taxable_status === 'non_taxable').reduce((s, t) => s + (t.amount || 0), 0);
-    const reimbursements = inRange.filter(t => t.income_type === 'reimbursement').reduce((s, t) => s + (t.amount || 0), 0);
     const revenue = inRange.filter(t => t.income_type === 'business_revenue').reduce((s, t) => s + (t.amount || 0), 0);
     const payroll = inRange.filter(t => t.income_type === 'payroll').reduce((s, t) => s + (t.amount || 0), 0);
-    return { totalInflows, taxable, nonTaxable, reimbursements, revenue, payroll };
-  }, [transactions, thisMonth, dateFrom, dateTo]);
+    const other = inRange.filter(t => !['business_revenue', 'payroll'].includes(t.income_type)).reduce((s, t) => s + (t.amount || 0), 0);
+    return { totalInflows, taxable, nonTaxable, revenue, payroll, other };
+  }, [transactions, dateFrom, dateTo]);
 
   // Filtering
   const filtered = useMemo(() => {
@@ -348,51 +324,10 @@ export default function Income() {
     }
   };
 
-  // Inline update with reimbursement guard
   const updateField = async (id: string, field: string, value: string) => {
-    const tx = transactions.find(t => t.id === id);
-
-    // Guard: if changing income_type away from 'reimbursement' while linked to a group, warn and unlink
-    if (field === 'income_type' && value !== 'reimbursement' && tx?.linked_reimbursement_group_id) {
-      if (!confirm('This transaction is matched to a reimbursement group. Changing the type will unlink it and reverse the received amount. Continue?')) return;
-      await unlinkFromGroup(tx);
-    }
-
     const { error } = await supabase.from('income_transactions').update({ [field]: value }).eq('id', id);
     if (error) toast.error('Update failed');
     else setTransactions(prev => prev.map(t => t.id === id ? { ...t, [field]: value } : t));
-  };
-
-  // Unlink income transaction from reimbursement group
-  const unlinkFromGroup = async (tx: IncomeTransaction) => {
-    if (!tx.linked_reimbursement_group_id) return;
-    const group = reimbursementGroups.find(g => g.id === tx.linked_reimbursement_group_id);
-    if (!group) return;
-
-    const newReceived = Math.max(0, group.total_received - (tx.amount || 0));
-    let newStatus: string;
-    if (newReceived >= group.total_expected) newStatus = 'reimbursed';
-    else if (newReceived > 0) newStatus = 'partially_reimbursed';
-    else newStatus = 'pending';
-
-    await supabase.from('income_transactions').update({
-      linked_reimbursement_group_id: null,
-    }).eq('id', tx.id);
-
-    await supabase.from('reimbursement_groups').update({
-      total_received: newReceived,
-      status: newStatus,
-      received_date: newStatus === 'reimbursed' ? group.received_date : null,
-    }).eq('id', group.id);
-
-    // Cascade status to linked expenses
-    await supabase.from('transactions_uploaded')
-      .update({ reimbursement_status: newStatus === 'reimbursed' ? 'reimbursed' : newStatus === 'partially_reimbursed' ? 'partially_reimbursed' : 'pending' })
-      .eq('linked_reimbursement_group_id', group.id);
-
-    setTransactions(prev => prev.map(t => t.id === tx.id ? { ...t, linked_reimbursement_group_id: null } : t));
-    fetchReimbursementGroups();
-    toast.success('Unlinked from reimbursement group');
   };
 
   // Bulk actions
@@ -421,71 +356,6 @@ export default function Income() {
     }
   };
 
-  // Reimbursement match
-  const openMatchDialog = (txId: string) => {
-    setMatchingTxId(txId);
-    setShowMatchDialog(true);
-  };
-
-  const matchToGroup = async (groupId: string) => {
-    if (!matchingTxId) return;
-    const tx = transactions.find(t => t.id === matchingTxId);
-    if (!tx) return;
-
-    const group = reimbursementGroups.find(g => g.id === groupId);
-    if (!group) return;
-
-    const paymentAmount = tx.amount || 0;
-    const newReceived = group.total_received + paymentAmount;
-    const remaining = group.total_expected - group.total_received;
-
-    // Warn on overpayment
-    if (paymentAmount > remaining && remaining > 0) {
-      const overBy = paymentAmount - remaining;
-      if (!confirm(`This payment ($${paymentAmount.toFixed(2)}) exceeds the remaining balance ($${remaining.toFixed(2)}) by $${overBy.toFixed(2)}. Continue?`)) return;
-    }
-
-    // Link income to group
-    await supabase.from('income_transactions').update({
-      linked_reimbursement_group_id: groupId,
-      status: 'approved',
-    }).eq('id', matchingTxId);
-
-    // Determine new group status
-    let newStatus: string;
-    if (newReceived >= group.total_expected) {
-      newStatus = 'reimbursed';
-    } else if (newReceived > 0) {
-      newStatus = 'partially_reimbursed';
-    } else {
-      newStatus = group.status;
-    }
-
-    await supabase.from('reimbursement_groups').update({
-      total_received: newReceived,
-      status: newStatus,
-      received_date: newStatus === 'reimbursed' ? new Date().toISOString().split('T')[0] : null,
-    }).eq('id', groupId);
-
-    // Cascade reimbursement status to linked expenses
-    if (newStatus === 'reimbursed' || newStatus === 'partially_reimbursed') {
-      await supabase.from('transactions_uploaded')
-        .update({ reimbursement_status: newStatus })
-        .eq('linked_reimbursement_group_id', groupId);
-    }
-
-    if (newReceived > group.total_expected) {
-      toast.warning(`Matched — but received (${fmt(newReceived)}) exceeds expected (${fmt(group.total_expected)})`);
-    } else if (newStatus === 'partially_reimbursed') {
-      toast.success(`Matched — partially reimbursed (${fmt(newReceived)} of ${fmt(group.total_expected)})`);
-    } else {
-      toast.success('Matched to reimbursement group — fully reimbursed!');
-    }
-    setShowMatchDialog(false);
-    setMatchingTxId(null);
-    fetchTransactions();
-    fetchReimbursementGroups();
-  };
 
   // Export CSV
   const exportCsv = () => {
@@ -510,9 +380,9 @@ export default function Income() {
     { label: 'Total Inflows', value: summaryCards.totalInflows, icon: DollarSign, color: 'text-primary' },
     { label: 'Taxable', value: summaryCards.taxable, icon: Shield, color: 'text-destructive' },
     { label: 'Non-Taxable', value: summaryCards.nonTaxable, icon: ShieldOff, color: 'text-success' },
-    { label: 'Reimbursements', value: summaryCards.reimbursements, icon: Receipt, color: 'text-warning' },
     { label: 'Business Revenue', value: summaryCards.revenue, icon: Briefcase, color: 'text-primary' },
     { label: 'Payroll', value: summaryCards.payroll, icon: Banknote, color: 'text-foreground' },
+    { label: 'Other', value: summaryCards.other, icon: Receipt, color: 'text-muted-foreground' },
   ];
 
   return (
@@ -522,7 +392,7 @@ export default function Income() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-semibold text-foreground">Income</h1>
-            <p className="text-sm text-muted-foreground">Track inflows, classify by type, and match reimbursements. <span className="text-[10px] text-muted-foreground/70">Summary: {dateActive ? dateLabel : 'This Month'}</span></p>
+            <p className="text-sm text-muted-foreground">Track inflows and classify by type. <span className="text-[10px] text-muted-foreground/70">Summary: {dateActive ? dateLabel : 'All Dates'}</span></p>
           </div>
           <div className="flex gap-2">
             <Button variant="outline" size="sm" onClick={() => setShowUploader(!showUploader)}>
@@ -725,18 +595,6 @@ export default function Income() {
                   </TableCell>
                   <TableCell>
                     <div className="flex gap-1">
-                      {tx.income_type === 'reimbursement' && !tx.linked_reimbursement_group_id && (
-                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openMatchDialog(tx.id)} title="Match to reimbursement">
-                          <Link2 className="h-3.5 w-3.5 text-warning" />
-                        </Button>
-                      )}
-                      {tx.linked_reimbursement_group_id && (
-                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => {
-                          if (confirm('Unlink this income from its reimbursement group? This will reverse the received amount.')) unlinkFromGroup(tx);
-                        }} title="Unlink from reimbursement group">
-                          <Link2 className="h-3.5 w-3.5 text-destructive" />
-                        </Button>
-                      )}
                       {tx.status !== 'approved' && (
                         <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => updateField(tx.id, 'status', 'approved')} title="Approve">
                           <Check className="h-3.5 w-3.5 text-success" />
@@ -791,52 +649,6 @@ export default function Income() {
         </DialogContent>
       </Dialog>
 
-      {/* Reimbursement Match Dialog */}
-      <Dialog open={showMatchDialog} onOpenChange={setShowMatchDialog}>
-        <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle>Match to Reimbursement Group</DialogTitle></DialogHeader>
-          {(() => {
-            const matchTx = matchingTxId ? transactions.find(t => t.id === matchingTxId) : null;
-            return matchTx ? (
-              <div className="rounded border border-border bg-secondary/20 p-3 mb-2">
-                <p className="text-xs text-muted-foreground">This payment</p>
-                <p className="text-sm font-semibold text-foreground font-mono">{fmt(matchTx.amount || 0)}</p>
-                <p className="text-xs text-muted-foreground truncate">{matchTx.description_raw}</p>
-              </div>
-            ) : null;
-          })()}
-          {reimbursementGroups.length === 0 ? (
-            <p className="text-sm text-muted-foreground py-4">No pending reimbursement groups found.</p>
-          ) : (
-            <div className="space-y-2 max-h-[300px] overflow-y-auto">
-              {reimbursementGroups.map(g => {
-                const remaining = g.total_expected - g.total_received;
-                const matchTx = matchingTxId ? transactions.find(t => t.id === matchingTxId) : null;
-                const paymentAmt = matchTx?.amount || 0;
-                const wouldOverpay = paymentAmt > remaining && remaining > 0;
-                const wouldPartial = paymentAmt < remaining;
-                return (
-                  <div key={g.id} className={`flex items-center justify-between p-3 rounded-lg border bg-card hover:bg-muted/50 cursor-pointer transition-colors ${wouldOverpay ? 'border-destructive/40' : 'border-border'}`} onClick={() => matchToGroup(g.id)}>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-foreground">{g.title}</p>
-                      <p className="text-xs text-muted-foreground">
-                        Expected: {fmt(g.total_expected)} · Received: {fmt(g.total_received)} · Remaining: {fmt(remaining)}
-                      </p>
-                      {wouldOverpay && (
-                        <p className="text-[10px] text-destructive mt-0.5">⚠️ Payment exceeds remaining by {fmt(paymentAmt - remaining)}</p>
-                      )}
-                      {wouldPartial && (
-                        <p className="text-[10px] text-warning mt-0.5">→ Will be partially reimbursed ({fmt(g.total_received + paymentAmt)} of {fmt(g.total_expected)})</p>
-                      )}
-                    </div>
-                    <Badge variant="outline" className="text-xs ml-2 shrink-0">{g.status.replace(/_/g, ' ')}</Badge>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

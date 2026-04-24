@@ -29,7 +29,6 @@ export function classifyIncome(description: string): IncomeClassification {
 export const INCOME_TYPE_OPTIONS = [
   { value: 'payroll', label: 'Payroll' },
   { value: 'business_revenue', label: 'Business Revenue' },
-  { value: 'reimbursement', label: 'Reimbursement' },
   { value: 'refund', label: 'Refund' },
   { value: 'interest', label: 'Interest / Dividend' },
   { value: 'tax_refund', label: 'Tax Refund' },
