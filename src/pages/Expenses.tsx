@@ -7,6 +7,7 @@ import { FileProgressList, type FileQueueItem } from '@/components/FileProgressL
 import { ImportPreviewDialog, type FilePreviewInfo } from '@/components/ImportPreviewDialog';
 import { TransactionDetailDrawer } from '@/components/TransactionDetailDrawer';
 import { SplitTransactionDialog } from '@/components/SplitTransactionDialog';
+import { AddCategoryDialog } from '@/components/AddCategoryDialog';
 import { previewCsvFile, parseCsvFileWithMapping, type ParsePreview, type ColumnMapping } from '@/lib/csv-parser';
 import { categorizeTransactions, categorizeWithAI, updateMerchantMemory } from '@/lib/categorization-engine';
 import { detectMethodFromFilename } from '@/lib/method-detector';
