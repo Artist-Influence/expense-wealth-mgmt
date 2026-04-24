@@ -1,72 +1,77 @@
-# Fix Date Filter Not Filtering Expenses Table
+# Add New Category from Dropdown
 
-## Problem
+Currently categories can only be added via the Settings page. This plan adds an **"+ Add new category…"** option at the bottom of every category `<Select>` so you can create one inline while categorizing a transaction.
 
-On the **Expenses** page, selecting a month (e.g. "Apr 2026") or any date range from the date filter pill updates the label but the table keeps showing all rows. The same is true for "This Month", "Last Month", "Last N Days", "YTD", and custom From/To inputs.
+## Where the option will appear
 
-## Root Cause
+Three category dropdowns get the new affordance:
 
-In `src/pages/Expenses.tsx` (the `filtered` useMemo, around lines 161–191), the closing brace of the `if (categoryFilter !== 'all') { ... }` block is misplaced. As a result, the two date checks:
+1. **Expenses table — inline category cell** (`src/pages/Expenses.tsx`, line ~1474) — the per-row dropdown used to set/change a transaction's category
+2. **Transaction Detail Drawer** (`src/components/TransactionDetailDrawer.tsx`, line ~294) — the right-side editor
+3. **Split Transaction Dialog** (`src/components/SplitTransactionDialog.tsx`, line ~199) — when splitting a transaction across multiple categories
 
-```ts
-if (dateFrom && (!tx.date || tx.date < dateFrom)) return false;
-if (dateTo   && (!tx.date || tx.date > dateTo))   return false;
+The **filter dropdown** at line 1208 (used to *filter* the table by category) will NOT get this — it's a query control, not a value editor.
+
+## How it will work
+
+Bottom of each category `<SelectContent>`:
+
+```text
+─────────────────
+Groceries
+Subscriptions
+Utilities
+...
+─────────────────
++ Add new category…
 ```
 
-…are **nested inside** the `categoryFilter !== 'all'` branch. When category filter is `"all"` (the default — and what the user has set), the entire block is skipped and the date checks never run. The state (`dateFrom`, `dateTo`) is set correctly, but the predicate ignores it.
+Selecting **"+ Add new category…"** opens a small inline dialog (reusing the existing shadcn `Dialog`) with:
+- A text input (autofocused)
+- The detected mode shown as context ("Adding to *Personal* categories")
+- **Cancel** / **Create** buttons
 
-## Fix
+On **Create**:
+1. Trim + validate the name (non-empty, not a duplicate of an existing category in that mode — case-insensitive check)
+2. Insert into `category_options` (mode = current `categoryMode`, sort_order = current count, owner_id = user.id, is_active = true)
+3. Refresh the local `categories` list in the parent page
+4. Auto-select the newly created category as the value of the dropdown that opened the dialog
+5. Toast: "Category added"
 
-Re-indent / re-brace the predicate so date checks run unconditionally, alongside the other top-level checks (status, extra, category, search). One block, correct nesting:
+Errors (duplicate, empty, DB failure) show a toast and keep the dialog open.
 
-```ts
-let result = transactions.filter(tx => {
-  if (statusFilter !== 'all' && tx.review_status !== statusFilter) return false;
-  if (extraFilter === 'transfers' && !tx.is_transfer && tx.transfer_type !== 'possible_transfer') return false;
-  // ...other extraFilter cases unchanged...
+## Implementation details
 
-  if (categoryFilter !== 'all') {
-    const effective = tx.final_category || tx.predicted_category || '';
-    if (categoryFilter === '__uncategorized__') {
-      if (effective) return false;
-    } else if (effective !== categoryFilter) {
-      return false;
-    }
-  }
+### New shared component: `src/components/AddCategoryDialog.tsx`
+Small controlled dialog with:
+- Props: `open`, `onClose`, `mode` ('personal' | 'business'), `existingCategories: string[]`, `onCreated: (newCategoryName: string) => void`
+- Handles the Supabase insert and validation internally
+- Emits the created name back so the caller can set it as the selected value
 
-  // Date filter — top level, always applied
-  if (dateFrom && (!tx.date || tx.date < dateFrom)) return false;
-  if (dateTo   && (!tx.date || tx.date > dateTo))   return false;
+### `src/pages/Expenses.tsx`
+- Add state: `addCategoryDialogOpen`, `pendingCategoryTarget` (which transaction row triggered it)
+- In the inline cell `<Select>` (line ~1474), append a `<SelectItem value="__add_new__">` styled with primary color and a `+` icon
+- In `onValueChange`, intercept `__add_new__` → open dialog instead of saving
+- On dialog `onCreated(name)` → call existing `handleFieldChange(tx.id, 'category', name)` for the pending row, refresh `categories`
+- Same pattern for the filter? **No** — only for the editable cells
+- Pass `categories` and an `onCategoryAdded` refresh callback into the drawer and split dialog (which they already render)
 
-  if (search) {
-    const s = search.toLowerCase();
-    return (
-      (tx.description_raw || '').toLowerCase().includes(s) ||
-      (tx.predicted_category || '').toLowerCase().includes(s) ||
-      (tx.final_category || '').toLowerCase().includes(s)
-    );
-  }
-  return true;
-});
-```
+### `src/components/TransactionDetailDrawer.tsx`
+- Add prop: `onAddCategory?: () => void` (or include the dialog inline, but keeping it in the parent page is cleaner so the parent owns the categories list)
+- Add `<SelectItem value="__add_new__">+ Add new category…</SelectItem>` at the bottom
+- Intercept in `onValueChange`: if `__add_new__`, call `onAddCategory()` and don't update `editValues.category`
+- After parent creates the category and refreshes, the new name is available in the `categories` prop and the user can pick it (or the parent can auto-pick by passing back through a separate `pendingCategorySelection` prop)
 
-## Scope Check — Other Pages
+### `src/components/SplitTransactionDialog.tsx`
+- Same pattern as the drawer: append the "+ Add new category…" item, intercept the value, and use a parent-owned dialog
+- Track which split row triggered it so the new category is auto-applied to that row
 
-I audited every page for similar issues:
+### Database
+- No schema changes — `category_options` already supports this exact use case (it's what the Settings page writes to)
+- Insert pattern matches the existing one in `src/pages/Settings.tsx` line 185
 
-- **Income, Reimbursements, Tax, MerchantMemory, Wealth** — no date/month filter UI on their tables, so nothing to fix there. (Their summary cards already correctly scope to "this month" via `t.date?.startsWith(thisMonth)`.)
-- **Allocations, CloseMonth, Accountant** — month/period selectors are wired into their queries (`.gte('date', dateRange.start).lte('date', dateRange.end)` or `.eq('month', selectedMonth)`) and work correctly.
-
-So the fix is isolated to the Expenses predicate.
-
-## Files Changed
-
-- `src/pages/Expenses.tsx` — re-brace the `filtered` useMemo predicate (~10 lines).
-
-## Verification
-
-After the fix:
-1. Open Expenses with no filters — full list shows.
-2. Click date pill → "Apr 2026" → table immediately narrows to rows where `date` is between `2026-04-01` and `2026-04-30`.
-3. Switch category filter to a specific category and confirm date filter still applies (combined behavior).
-4. Click the "✕ Apr 2026" clear chip → all rows return.
+## Out of scope
+- Editing or deleting categories from the dropdown (still done in Settings)
+- Reordering (still done in Settings)
+- Adding to the *filter* dropdown (intentionally — filters shouldn't create data)
+- Income categories (Income page doesn't have an editable category dropdown today)
