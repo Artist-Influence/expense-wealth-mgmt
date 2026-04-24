@@ -34,6 +34,10 @@ interface SplitTransactionDialogProps {
   } | null;
   categories: string[];
   onSplit: (parentId: string, children: SplitRow[]) => Promise<void>;
+  onAddCategory?: (rowId: string) => void;
+  /** When set, this row gets the new category applied, then parent clears via onPendingCategoryConsumed. */
+  pendingCategoryToSelect?: { rowId: string; name: string } | null;
+  onPendingCategoryConsumed?: () => void;
 }
 
 const MODE_LABELS: Record<string, string> = {
