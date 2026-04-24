@@ -1,6 +1,9 @@
 import { supabase } from '@/integrations/supabase/client';
 import type { ParsedTransaction } from './csv-parser';
 import { generateMerchantKey, remapCategory } from './normalizer';
+import { detectRecurrence } from './recurrence-detector';
+
+export type RecurringHistoryMap = Map<string, { date: string; amount: number }[]>;
 
 interface MerchantMemoryRecord {
   merchant_key: string;
