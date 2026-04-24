@@ -568,8 +568,76 @@ export default function Income() {
               <SelectItem value="needs_review">Needs Review</SelectItem>
               <SelectItem value="auto_classified">Auto-Classified</SelectItem>
               <SelectItem value="approved">Approved</SelectItem>
+              <SelectItem value="edited">Edited</SelectItem>
             </SelectContent>
           </Select>
+
+          {/* Date range filter */}
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="sm" className={`h-9 gap-1.5 text-xs bg-card border-border ${dateActive ? 'border-primary/40 text-primary' : ''}`}>
+                <Calendar className="h-3.5 w-3.5" />
+                {dateLabel}
+                <ChevronDown className="h-3 w-3 opacity-50" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-[340px] p-3 space-y-3" align="start">
+              <div>
+                <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1.5">Quick presets</div>
+                <div className="grid grid-cols-2 gap-1">
+                  <Button variant="ghost" size="sm" className="h-7 justify-start text-xs" onClick={clearDates}>All Dates</Button>
+                  <Button variant="ghost" size="sm" className="h-7 justify-start text-xs" onClick={applyThisMonth}>This Month</Button>
+                  <Button variant="ghost" size="sm" className="h-7 justify-start text-xs" onClick={applyLastMonth}>Last Month</Button>
+                  <Button variant="ghost" size="sm" className="h-7 justify-start text-xs" onClick={() => applyLastNDays(30)}>Last 30 Days</Button>
+                  <Button variant="ghost" size="sm" className="h-7 justify-start text-xs" onClick={() => applyLastNDays(90)}>Last 90 Days</Button>
+                  <Button variant="ghost" size="sm" className="h-7 justify-start text-xs" onClick={applyYTD}>Year to Date</Button>
+                  <Button variant="ghost" size="sm" className="h-7 justify-start text-xs col-span-2" onClick={applyLastYear}>Last Year</Button>
+                </div>
+              </div>
+
+              {availableMonths.length > 0 && (
+                <div>
+                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1.5">Pick a month</div>
+                  <Select value="" onValueChange={(v) => v && applyMonth(v)}>
+                    <SelectTrigger className="h-8 bg-card border-border text-xs">
+                      <SelectValue placeholder="Select month..." />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-[260px]">
+                      {availableMonths.map(ym => (
+                        <SelectItem key={ym} value={ym}>{fmtMonthLabel(ym)}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
+              <div>
+                <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1.5">Custom range</div>
+                <div className="flex items-center gap-1.5">
+                  <Input type="date" value={dateFrom || ''} onChange={(e) => onCustomFrom(e.target.value)} className="bg-card border-border h-8 text-xs flex-1" />
+                  <span className="text-xs text-muted-foreground">→</span>
+                  <Input type="date" value={dateTo || ''} onChange={(e) => onCustomTo(e.target.value)} className="bg-card border-border h-8 text-xs flex-1" />
+                </div>
+              </div>
+
+              <div className="flex justify-end pt-1 border-t border-border/40">
+                <Button variant="ghost" size="sm" className="h-7 text-xs gap-1" onClick={clearDates}>
+                  <X className="h-3 w-3" /> Clear
+                </Button>
+              </div>
+            </PopoverContent>
+          </Popover>
+
+          {dateActive && (
+            <button
+              onClick={clearDates}
+              className="inline-flex items-center gap-1 h-9 px-2 rounded-md bg-primary/10 text-primary text-xs hover:bg-primary/20 transition-colors"
+              title="Clear date filter"
+            >
+              {dateLabel}
+              <X className="h-3 w-3" />
+            </button>
+          )}
 
           {selectedIds.size > 0 && (
             <div className="flex gap-2 ml-auto">
