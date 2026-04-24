@@ -93,6 +93,7 @@ export default function Expenses() {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [extraFilter, setExtraFilter] = useState<string>('all');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
+  const [scanningRecurring, setScanningRecurring] = useState(false);
   const [dateFrom, setDateFrom] = useState<string | null>(null);
   const [dateTo, setDateTo] = useState<string | null>(null);
   const [dateLabel, setDateLabel] = useState<string>('All Dates');
