@@ -163,6 +163,14 @@ export default function Expenses() {
       if (extraFilter === 'uncategorized' && (tx.final_category || tx.predicted_category)) return false;
       if (extraFilter === 'reimbursable' && !tx.is_reimbursable) return false;
       if (extraFilter === 'splits' && !tx.is_split_parent && !tx.parent_transaction_id) return false;
+      if (categoryFilter !== 'all') {
+        const effective = tx.final_category || tx.predicted_category || '';
+        if (categoryFilter === '__uncategorized__') {
+          if (effective) return false;
+        } else if (effective !== categoryFilter) {
+          return false;
+        }
+      }
       if (search) {
         const s = search.toLowerCase();
         return (
