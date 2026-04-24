@@ -1,6 +1,9 @@
 import { supabase } from '@/integrations/supabase/client';
 import type { ParsedTransaction } from './csv-parser';
 import { generateMerchantKey, remapCategory } from './normalizer';
+import { detectRecurrence } from './recurrence-detector';
+
+export type RecurringHistoryMap = Map<string, { date: string; amount: number }[]>;
 
 interface MerchantMemoryRecord {
   merchant_key: string;
@@ -25,7 +28,7 @@ export interface CategorizationResult {
   predicted_method: string | null;
   predicted_notes: string | null;
   confidence: number;
-  match_source: 'exact_history' | 'normalized_history' | 'partial_history' | 'rule' | 'ai' | null;
+  match_source: 'exact_history' | 'normalized_history' | 'partial_history' | 'recurring_pattern' | 'rule' | 'ai' | null;
   match_explanation: string;
   review_status: 'auto_categorized' | 'suggested' | 'ai_suggested' | 'needs_review';
   category_rejected: boolean;
@@ -138,7 +141,8 @@ export async function categorizeTransactions(
   mode: 'personal' | 'business',
   ownerId: string,
   thresholds: Thresholds = { auto: 90, suggest: 70 },
-  allowedCategories: string[] = []
+  allowedCategories: string[] = [],
+  recurringHistory?: RecurringHistoryMap,
 ): Promise<CategorizationResult[]> {
   const allowedSet = new Set(allowedCategories);
 
@@ -205,6 +209,26 @@ export async function categorizeTransactions(
       return buildResult(validated.category, partialMatch.most_common_method, partialMatch.default_note_template,
         confidence, 'partial_history', thresholds, false,
         `Partial match to merchant key "${partialMatch.merchant_key}" (seen ${partialMatch.times_seen}x)`, merchantKey);
+    }
+
+    // Layer 1.7: Recurring-charge detection → Subscriptions
+    // Skip ambiguous merchants (PayPal, Venmo, Amazon, etc.) — those carry too many lookalikes.
+    if (recurringHistory && allowedSet.has('Subscriptions') && merchantKey && !isAmbiguousMerchant(merchantKey)) {
+      const history = recurringHistory.get(merchantKey) || [];
+      const recurrence = detectRecurrence(tx.amount, history);
+      if (recurrence.isRecurring) {
+        return buildResult(
+          'Subscriptions',
+          null,
+          null,
+          recurrence.confidence,
+          'recurring_pattern',
+          thresholds,
+          false,
+          recurrence.explanation,
+          merchantKey,
+        );
+      }
     }
 
     // Layer 2: Rules Engine
@@ -369,8 +393,11 @@ export async function updateMerchantMemory(
   method: string | null,
   notes: string | null,
   rawExample: string,
-  ownerId: string
+  ownerId: string,
+  matchSource?: string | null,
 ): Promise<void> {
+  const isRecurring = matchSource === 'recurring_pattern';
+
   const { data: existing } = await supabase
     .from('merchant_memory')
     .select('id, times_seen, confidence_weight')
@@ -380,8 +407,9 @@ export async function updateMerchantMemory(
     .maybeSingle();
 
   if (existing) {
-    // Boost confidence more aggressively on manual approval
-    const newWeight = Math.min((existing.confidence_weight || 80) + 3, 99);
+    // Boost confidence more aggressively on manual approval; recurring gets +5 instead of +3
+    const bump = isRecurring ? 5 : 3;
+    const newWeight = Math.min((existing.confidence_weight || 80) + bump, 99);
     await supabase
       .from('merchant_memory')
       .update({
@@ -404,7 +432,8 @@ export async function updateMerchantMemory(
         most_common_method: method,
         default_note_template: notes,
         times_seen: 1,
-        confidence_weight: 82, // Start slightly higher for manual approvals
+        // Recurring confirmations start at 90 so subsequent single charges land in Subscriptions
+        confidence_weight: isRecurring ? 90 : 82,
         owner_id: ownerId,
       });
   }

@@ -372,7 +372,7 @@ export default function Expenses() {
         const desc = tx.description_raw || '';
         if (!isStatementArtifact(desc, tx.amount || 0)) {
           const merchantKey = generateMerchantKey(normalizeDescription(desc));
-          await updateMerchantMemory(merchantKey, categoryMode as 'personal' | 'business', values.category, values.method || null, values.notes || null, desc, user!.id);
+          await updateMerchantMemory(merchantKey, categoryMode as 'personal' | 'business', values.category, values.method || null, values.notes || null, desc, user!.id, tx.match_source);
         }
       }
       await loadTransactions();
@@ -393,7 +393,7 @@ export default function Expenses() {
         const desc = tx.description_raw || '';
         if (!isStatementArtifact(desc, tx.amount || 0)) {
           const merchantKey = generateMerchantKey(normalizeDescription(desc));
-          await updateMerchantMemory(merchantKey, categoryMode as 'personal' | 'business', category, tx.final_method || tx.predicted_method || null, tx.final_notes || tx.predicted_notes || null, desc, user!.id);
+          await updateMerchantMemory(merchantKey, categoryMode as 'personal' | 'business', category, tx.final_method || tx.predicted_method || null, tx.final_notes || tx.predicted_notes || null, desc, user!.id, tx.match_source);
         }
       }
       await loadTransactions();
@@ -471,7 +471,8 @@ export default function Expenses() {
             finalMethod,
             tx.final_notes || tx.predicted_notes || null,
             desc,
-            user!.id
+            user!.id,
+            tx.match_source,
           );
         }
       }
@@ -836,7 +837,48 @@ export default function Expenses() {
       }
 
       updateItem(id, { status: 'categorizing' });
-      const results = await categorizeTransactions(rowsToInsert, categoryMode as 'personal' | 'business', user.id, undefined, allowedCategories);
+
+      // Build recurring-charge history map: merchant_key → [{ date, amount }, …] over last 180 days
+      const recurringHistory = new Map<string, { date: string; amount: number }[]>();
+      try {
+        const incomingKeys = new Set<string>();
+        for (const r of rowsToInsert) {
+          const k = generateMerchantKey(r.description_normalized || '');
+          if (k) incomingKeys.add(k);
+        }
+        if (incomingKeys.size > 0) {
+          const since = new Date(Date.now() - 180 * 86_400_000).toISOString().slice(0, 10);
+          let from = 0;
+          const pageSize = 1000;
+          let hasMore = true;
+          while (hasMore) {
+            const { data: priorRows } = await supabase
+              .from('transactions_uploaded')
+              .select('description_normalized, amount, date')
+              .eq('mode', categoryMode)
+              .eq('owner_id', user.id)
+              .gte('date', since)
+              .not('amount', 'is', null)
+              .range(from, from + pageSize - 1);
+            if (priorRows) {
+              for (const row of priorRows) {
+                if (!row.date || row.amount == null) continue;
+                const k = generateMerchantKey(row.description_normalized || '');
+                if (!k || !incomingKeys.has(k)) continue;
+                const list = recurringHistory.get(k) || [];
+                list.push({ date: row.date, amount: Number(row.amount) });
+                recurringHistory.set(k, list);
+              }
+            }
+            hasMore = (priorRows?.length ?? 0) === pageSize;
+            from += pageSize;
+          }
+        }
+      } catch (err) {
+        console.warn('Recurrence history load failed; continuing without:', err);
+      }
+
+      const results = await categorizeTransactions(rowsToInsert, categoryMode as 'personal' | 'business', user.id, undefined, allowedCategories, recurringHistory);
 
       // Layer 5: AI categorization for unmatched rows
       const aiExplanations = new Map<number, string>();
@@ -1379,25 +1421,35 @@ export default function Expenses() {
                         ${tx.amount != null ? Math.abs(tx.amount).toFixed(2) : '0.00'}
                       </td>
                       <td className="px-1 py-0.5" onClick={e => e.stopPropagation()}>
-                        {tx.is_split_parent ? (
-                          <span className="text-foreground px-1" title="Split parent — edit child rows instead">
-                            {tx.final_category || tx.predicted_category || '—'}
-                          </span>
-                        ) : (
-                          <Select
-                            value={tx.final_category || tx.predicted_category || ''}
-                            onValueChange={v => inlineUpdate(tx, 'final_category', v)}
-                          >
-                            <SelectTrigger className="h-6 px-1.5 text-xs border-transparent bg-transparent hover:bg-secondary/40 focus:bg-secondary/60 focus:border-border [&>svg]:opacity-0 hover:[&>svg]:opacity-60 focus:[&>svg]:opacity-60">
-                              <SelectValue placeholder="—" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {categories.map(c => (
-                                <SelectItem key={c} value={c} className="text-xs">{c}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        )}
+                        <div className="flex items-center gap-1">
+                          {tx.match_source === 'recurring_pattern' && (
+                            <span
+                              className="inline-flex items-center justify-center text-[10px] leading-none w-4 h-4 rounded bg-primary/15 text-primary shrink-0"
+                              title={tx.match_explanation || 'Detected recurring charge'}
+                            >
+                              🔁
+                            </span>
+                          )}
+                          {tx.is_split_parent ? (
+                            <span className="text-foreground px-1" title="Split parent — edit child rows instead">
+                              {tx.final_category || tx.predicted_category || '—'}
+                            </span>
+                          ) : (
+                            <Select
+                              value={tx.final_category || tx.predicted_category || ''}
+                              onValueChange={v => inlineUpdate(tx, 'final_category', v)}
+                            >
+                              <SelectTrigger className="h-6 px-1.5 text-xs border-transparent bg-transparent hover:bg-secondary/40 focus:bg-secondary/60 focus:border-border [&>svg]:opacity-0 hover:[&>svg]:opacity-60 focus:[&>svg]:opacity-60">
+                                <SelectValue placeholder="—" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {categories.map(c => (
+                                  <SelectItem key={c} value={c} className="text-xs">{c}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          )}
+                        </div>
                       </td>
                       <td className="px-1 py-0.5" onClick={e => e.stopPropagation()}>
                         {tx.is_split_parent ? (
