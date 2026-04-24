@@ -15,6 +15,7 @@ import { routeTransaction } from '@/lib/transaction-router';
 import { classifyIncome } from '@/lib/income-classifier';
 import { generateFingerprint, isNearDuplicate } from '@/lib/duplicate-detector';
 import { generateMerchantKey, normalizeDescription } from '@/lib/normalizer';
+import { backfillRecurringForOwner } from '@/lib/recurrence-detector';
 import { isStatementArtifact } from '@/lib/csv-parser';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
