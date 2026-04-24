@@ -76,6 +76,9 @@ export default function Income() {
   const [matchingTxId, setMatchingTxId] = useState<string | null>(null);
   const [reimbursementGroups, setReimbursementGroups] = useState<ReimbursementGroup[]>([]);
   const [showUploader, setShowUploader] = useState(false);
+  const [dateFrom, setDateFrom] = useState<string | null>(null);
+  const [dateTo, setDateTo] = useState<string | null>(null);
+  const [dateLabel, setDateLabel] = useState<string>('All Dates');
 
   // Manual entry form
   const [manualDate, setManualDate] = useState('');
