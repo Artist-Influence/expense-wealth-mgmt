@@ -10,7 +10,7 @@ import Insights from "./pages/Insights";
 import MerchantMemory from "./pages/MerchantMemory";
 import SettingsPage from "./pages/Settings";
 import Income from "./pages/Income";
-import Reimbursements from "./pages/Reimbursements";
+
 import Wealth from "./pages/Wealth";
 import Tax from "./pages/Tax";
 import Accountant from "./pages/Accountant";
@@ -33,7 +33,7 @@ const App = () => (
           <Route path="/merchants" element={<AuthGuard><MerchantMemory /></AuthGuard>} />
           <Route path="/settings" element={<AuthGuard><SettingsPage /></AuthGuard>} />
           <Route path="/income" element={<AuthGuard><Income /></AuthGuard>} />
-          <Route path="/reimbursements" element={<AuthGuard><Reimbursements /></AuthGuard>} />
+          
           <Route path="/wealth" element={<AuthGuard><Wealth /></AuthGuard>} />
           <Route path="/tax" element={<AuthGuard><Tax /></AuthGuard>} />
           <Route path="/accountant" element={<AuthGuard><Accountant /></AuthGuard>} />
