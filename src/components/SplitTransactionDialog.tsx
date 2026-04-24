@@ -65,10 +65,18 @@ function makeRow(mode: string, remaining: number): SplitRow {
   };
 }
 
-export function SplitTransactionDialog({ open, onClose, transaction, categories, onSplit }: SplitTransactionDialogProps) {
+export function SplitTransactionDialog({ open, onClose, transaction, categories, onSplit, onAddCategory, pendingCategoryToSelect, onPendingCategoryConsumed }: SplitTransactionDialogProps) {
   const totalAmount = Math.abs(transaction?.amount || 0);
   const [rows, setRows] = useState<SplitRow[]>([]);
   const [saving, setSaving] = useState(false);
+
+  // Auto-apply newly created category to the row that requested it.
+  useEffect(() => {
+    if (pendingCategoryToSelect && categories.includes(pendingCategoryToSelect.name)) {
+      setRows(prev => prev.map(r => r.id === pendingCategoryToSelect.rowId ? { ...r, category: pendingCategoryToSelect.name } : r));
+      onPendingCategoryConsumed?.();
+    }
+  }, [pendingCategoryToSelect, categories, onPendingCategoryConsumed]);
 
   // Reset rows when dialog opens
   const [lastTxId, setLastTxId] = useState<string | null>(null);
