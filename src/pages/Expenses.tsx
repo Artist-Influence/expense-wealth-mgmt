@@ -198,7 +198,7 @@ export default function Expenses() {
     });
 
     return result;
-  }, [transactions, statusFilter, extraFilter, search, sortCol, sortAsc]);
+  }, [transactions, statusFilter, extraFilter, categoryFilter, search, sortCol, sortAsc]);
 
   // Summary stats — V2
   const stats = useMemo(() => {
