@@ -131,22 +131,19 @@ export default function Income() {
   const summaryCards = useMemo(() => {
     const dateActive = !!(dateFrom || dateTo);
     const inRange = transactions.filter(t => {
-      if (dateActive) {
-        if (dateFrom && (!t.date || t.date < dateFrom)) return false;
-        if (dateTo && (!t.date || t.date > dateTo)) return false;
-        return true;
-      }
-      // Default scope when no date filter is set: this month
-      return t.date?.startsWith(thisMonth);
+      if (!dateActive) return true; // default: ALL dates
+      if (dateFrom && (!t.date || t.date < dateFrom)) return false;
+      if (dateTo && (!t.date || t.date > dateTo)) return false;
+      return true;
     });
     const totalInflows = inRange.reduce((s, t) => s + (t.amount || 0), 0);
     const taxable = inRange.filter(t => t.taxable_status === 'taxable').reduce((s, t) => s + (t.amount || 0), 0);
     const nonTaxable = inRange.filter(t => t.taxable_status === 'non_taxable').reduce((s, t) => s + (t.amount || 0), 0);
-    const reimbursements = inRange.filter(t => t.income_type === 'reimbursement').reduce((s, t) => s + (t.amount || 0), 0);
     const revenue = inRange.filter(t => t.income_type === 'business_revenue').reduce((s, t) => s + (t.amount || 0), 0);
     const payroll = inRange.filter(t => t.income_type === 'payroll').reduce((s, t) => s + (t.amount || 0), 0);
-    return { totalInflows, taxable, nonTaxable, reimbursements, revenue, payroll };
-  }, [transactions, thisMonth, dateFrom, dateTo]);
+    const other = inRange.filter(t => !['business_revenue', 'payroll'].includes(t.income_type)).reduce((s, t) => s + (t.amount || 0), 0);
+    return { totalInflows, taxable, nonTaxable, revenue, payroll, other };
+  }, [transactions, dateFrom, dateTo]);
 
   // Filtering
   const filtered = useMemo(() => {
@@ -510,9 +507,9 @@ export default function Income() {
     { label: 'Total Inflows', value: summaryCards.totalInflows, icon: DollarSign, color: 'text-primary' },
     { label: 'Taxable', value: summaryCards.taxable, icon: Shield, color: 'text-destructive' },
     { label: 'Non-Taxable', value: summaryCards.nonTaxable, icon: ShieldOff, color: 'text-success' },
-    { label: 'Reimbursements', value: summaryCards.reimbursements, icon: Receipt, color: 'text-warning' },
     { label: 'Business Revenue', value: summaryCards.revenue, icon: Briefcase, color: 'text-primary' },
     { label: 'Payroll', value: summaryCards.payroll, icon: Banknote, color: 'text-foreground' },
+    { label: 'Other', value: summaryCards.other, icon: Receipt, color: 'text-muted-foreground' },
   ];
 
   return (
@@ -522,7 +519,7 @@ export default function Income() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-semibold text-foreground">Income</h1>
-            <p className="text-sm text-muted-foreground">Track inflows, classify by type, and match reimbursements. <span className="text-[10px] text-muted-foreground/70">Summary: {dateActive ? dateLabel : 'This Month'}</span></p>
+            <p className="text-sm text-muted-foreground">Track inflows and classify by type. <span className="text-[10px] text-muted-foreground/70">Summary: {dateActive ? dateLabel : 'All Dates'}</span></p>
           </div>
           <div className="flex gap-2">
             <Button variant="outline" size="sm" onClick={() => setShowUploader(!showUploader)}>
