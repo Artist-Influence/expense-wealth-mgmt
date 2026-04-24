@@ -211,6 +211,26 @@ export async function categorizeTransactions(
         `Partial match to merchant key "${partialMatch.merchant_key}" (seen ${partialMatch.times_seen}x)`, merchantKey);
     }
 
+    // Layer 1.7: Recurring-charge detection → Subscriptions
+    // Skip ambiguous merchants (PayPal, Venmo, Amazon, etc.) — those carry too many lookalikes.
+    if (recurringHistory && allowedSet.has('Subscriptions') && merchantKey && !isAmbiguousMerchant(merchantKey)) {
+      const history = recurringHistory.get(merchantKey) || [];
+      const recurrence = detectRecurrence(tx.amount, history);
+      if (recurrence.isRecurring) {
+        return buildResult(
+          'Subscriptions',
+          null,
+          null,
+          recurrence.confidence,
+          'recurring_pattern',
+          thresholds,
+          false,
+          recurrence.explanation,
+          merchantKey,
+        );
+      }
+    }
+
     // Layer 2: Rules Engine
     for (const rule of rules) {
       if (matchesRule(tx.description_normalized, tx.description_raw, rule)) {
