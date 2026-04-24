@@ -129,15 +129,24 @@ export default function Income() {
   const thisMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
   const summaryCards = useMemo(() => {
-    const monthTxs = transactions.filter(t => t.date?.startsWith(thisMonth));
-    const totalInflows = monthTxs.reduce((s, t) => s + (t.amount || 0), 0);
-    const taxable = monthTxs.filter(t => t.taxable_status === 'taxable').reduce((s, t) => s + (t.amount || 0), 0);
-    const nonTaxable = monthTxs.filter(t => t.taxable_status === 'non_taxable').reduce((s, t) => s + (t.amount || 0), 0);
-    const reimbursements = monthTxs.filter(t => t.income_type === 'reimbursement').reduce((s, t) => s + (t.amount || 0), 0);
-    const revenue = monthTxs.filter(t => t.income_type === 'business_revenue').reduce((s, t) => s + (t.amount || 0), 0);
-    const payroll = monthTxs.filter(t => t.income_type === 'payroll').reduce((s, t) => s + (t.amount || 0), 0);
+    const dateActive = !!(dateFrom || dateTo);
+    const inRange = transactions.filter(t => {
+      if (dateActive) {
+        if (dateFrom && (!t.date || t.date < dateFrom)) return false;
+        if (dateTo && (!t.date || t.date > dateTo)) return false;
+        return true;
+      }
+      // Default scope when no date filter is set: this month
+      return t.date?.startsWith(thisMonth);
+    });
+    const totalInflows = inRange.reduce((s, t) => s + (t.amount || 0), 0);
+    const taxable = inRange.filter(t => t.taxable_status === 'taxable').reduce((s, t) => s + (t.amount || 0), 0);
+    const nonTaxable = inRange.filter(t => t.taxable_status === 'non_taxable').reduce((s, t) => s + (t.amount || 0), 0);
+    const reimbursements = inRange.filter(t => t.income_type === 'reimbursement').reduce((s, t) => s + (t.amount || 0), 0);
+    const revenue = inRange.filter(t => t.income_type === 'business_revenue').reduce((s, t) => s + (t.amount || 0), 0);
+    const payroll = inRange.filter(t => t.income_type === 'payroll').reduce((s, t) => s + (t.amount || 0), 0);
     return { totalInflows, taxable, nonTaxable, reimbursements, revenue, payroll };
-  }, [transactions, thisMonth]);
+  }, [transactions, thisMonth, dateFrom, dateTo]);
 
   // Filtering
   const filtered = useMemo(() => {
@@ -513,7 +522,7 @@ export default function Income() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-semibold text-foreground">Income</h1>
-            <p className="text-sm text-muted-foreground">Track inflows, classify by type, and match reimbursements. <span className="text-[10px] text-muted-foreground/70">Summary: This Month</span></p>
+            <p className="text-sm text-muted-foreground">Track inflows, classify by type, and match reimbursements. <span className="text-[10px] text-muted-foreground/70">Summary: {dateActive ? dateLabel : 'This Month'}</span></p>
           </div>
           <div className="flex gap-2">
             <Button variant="outline" size="sm" onClick={() => setShowUploader(!showUploader)}>
