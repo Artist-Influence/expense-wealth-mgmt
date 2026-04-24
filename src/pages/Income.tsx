@@ -16,9 +16,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import {
   DollarSign, TrendingUp, Shield, ShieldOff, Briefcase, Banknote,
-  Search, Download, Plus, Check, Trash2, Upload, Link2, Receipt
+  Search, Download, Plus, Check, Trash2, Upload, Link2, Receipt,
+  Calendar, ChevronDown, X
 } from 'lucide-react';
 
 interface IncomeTransaction {
@@ -74,6 +76,9 @@ export default function Income() {
   const [matchingTxId, setMatchingTxId] = useState<string | null>(null);
   const [reimbursementGroups, setReimbursementGroups] = useState<ReimbursementGroup[]>([]);
   const [showUploader, setShowUploader] = useState(false);
+  const [dateFrom, setDateFrom] = useState<string | null>(null);
+  const [dateTo, setDateTo] = useState<string | null>(null);
+  const [dateLabel, setDateLabel] = useState<string>('All Dates');
 
   // Manual entry form
   const [manualDate, setManualDate] = useState('');
@@ -139,6 +144,8 @@ export default function Income() {
     return transactions.filter(t => {
       if (filterType !== 'all' && t.income_type !== filterType) return false;
       if (filterStatus !== 'all' && t.status !== filterStatus) return false;
+      if (dateFrom && (!t.date || t.date < dateFrom)) return false;
+      if (dateTo && (!t.date || t.date > dateTo)) return false;
       if (searchQuery) {
         const q = searchQuery.toLowerCase();
         const match = (t.description_raw || '').toLowerCase().includes(q)
@@ -148,7 +155,79 @@ export default function Income() {
       }
       return true;
     });
-  }, [transactions, filterType, filterStatus, searchQuery]);
+  }, [transactions, filterType, filterStatus, dateFrom, dateTo, searchQuery]);
+
+  // Months derived from transactions for the date filter
+  const availableMonths = useMemo(() => {
+    const set = new Set<string>();
+    transactions.forEach(t => { if (t.date) set.add(t.date.slice(0, 7)); });
+    return Array.from(set).sort().reverse();
+  }, [transactions]);
+
+  // ---- Date filter helpers ----
+  const fmtYMD = (d: Date) => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+  const fmtMonthLabel = (ym: string) => {
+    const [y, m] = ym.split('-').map(Number);
+    return new Date(y, m - 1, 1).toLocaleString('en-US', { month: 'short', year: 'numeric' });
+  };
+  const clearDates = () => {
+    setDateFrom(null);
+    setDateTo(null);
+    setDateLabel('All Dates');
+  };
+  const applyMonth = (ym: string) => {
+    const [y, m] = ym.split('-').map(Number);
+    const first = new Date(y, m - 1, 1);
+    const last = new Date(y, m, 0);
+    setDateFrom(fmtYMD(first));
+    setDateTo(fmtYMD(last));
+    setDateLabel(fmtMonthLabel(ym));
+  };
+  const applyThisMonth = () => {
+    const nowD = new Date();
+    applyMonth(`${nowD.getFullYear()}-${String(nowD.getMonth() + 1).padStart(2, '0')}`);
+    setDateLabel('This Month');
+  };
+  const applyLastMonth = () => {
+    const nowD = new Date();
+    const d = new Date(nowD.getFullYear(), nowD.getMonth() - 1, 1);
+    applyMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+    setDateLabel('Last Month');
+  };
+  const applyLastNDays = (n: number) => {
+    const to = new Date();
+    const from = new Date();
+    from.setDate(from.getDate() - n);
+    setDateFrom(fmtYMD(from));
+    setDateTo(fmtYMD(to));
+    setDateLabel(`Last ${n} Days`);
+  };
+  const applyYTD = () => {
+    const nowD = new Date();
+    setDateFrom(`${nowD.getFullYear()}-01-01`);
+    setDateTo(fmtYMD(nowD));
+    setDateLabel('Year to Date');
+  };
+  const applyLastYear = () => {
+    const y = new Date().getFullYear() - 1;
+    setDateFrom(`${y}-01-01`);
+    setDateTo(`${y}-12-31`);
+    setDateLabel(`${y}`);
+  };
+  const onCustomFrom = (v: string) => {
+    setDateFrom(v || null);
+    setDateLabel(v || dateTo ? `${v || '…'} – ${dateTo || '…'}` : 'All Dates');
+  };
+  const onCustomTo = (v: string) => {
+    setDateTo(v || null);
+    setDateLabel(dateFrom || v ? `${dateFrom || '…'} – ${v || '…'}` : 'All Dates');
+  };
+  const dateActive = !!(dateFrom || dateTo);
 
   // Selection
   const allSelected = filtered.length > 0 && filtered.every(t => selectedIds.has(t.id));
@@ -489,8 +568,76 @@ export default function Income() {
               <SelectItem value="needs_review">Needs Review</SelectItem>
               <SelectItem value="auto_classified">Auto-Classified</SelectItem>
               <SelectItem value="approved">Approved</SelectItem>
+              <SelectItem value="edited">Edited</SelectItem>
             </SelectContent>
           </Select>
+
+          {/* Date range filter */}
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="sm" className={`h-9 gap-1.5 text-xs bg-card border-border ${dateActive ? 'border-primary/40 text-primary' : ''}`}>
+                <Calendar className="h-3.5 w-3.5" />
+                {dateLabel}
+                <ChevronDown className="h-3 w-3 opacity-50" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-[340px] p-3 space-y-3" align="start">
+              <div>
+                <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1.5">Quick presets</div>
+                <div className="grid grid-cols-2 gap-1">
+                  <Button variant="ghost" size="sm" className="h-7 justify-start text-xs" onClick={clearDates}>All Dates</Button>
+                  <Button variant="ghost" size="sm" className="h-7 justify-start text-xs" onClick={applyThisMonth}>This Month</Button>
+                  <Button variant="ghost" size="sm" className="h-7 justify-start text-xs" onClick={applyLastMonth}>Last Month</Button>
+                  <Button variant="ghost" size="sm" className="h-7 justify-start text-xs" onClick={() => applyLastNDays(30)}>Last 30 Days</Button>
+                  <Button variant="ghost" size="sm" className="h-7 justify-start text-xs" onClick={() => applyLastNDays(90)}>Last 90 Days</Button>
+                  <Button variant="ghost" size="sm" className="h-7 justify-start text-xs" onClick={applyYTD}>Year to Date</Button>
+                  <Button variant="ghost" size="sm" className="h-7 justify-start text-xs col-span-2" onClick={applyLastYear}>Last Year</Button>
+                </div>
+              </div>
+
+              {availableMonths.length > 0 && (
+                <div>
+                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1.5">Pick a month</div>
+                  <Select value="" onValueChange={(v) => v && applyMonth(v)}>
+                    <SelectTrigger className="h-8 bg-card border-border text-xs">
+                      <SelectValue placeholder="Select month..." />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-[260px]">
+                      {availableMonths.map(ym => (
+                        <SelectItem key={ym} value={ym}>{fmtMonthLabel(ym)}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
+              <div>
+                <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1.5">Custom range</div>
+                <div className="flex items-center gap-1.5">
+                  <Input type="date" value={dateFrom || ''} onChange={(e) => onCustomFrom(e.target.value)} className="bg-card border-border h-8 text-xs flex-1" />
+                  <span className="text-xs text-muted-foreground">→</span>
+                  <Input type="date" value={dateTo || ''} onChange={(e) => onCustomTo(e.target.value)} className="bg-card border-border h-8 text-xs flex-1" />
+                </div>
+              </div>
+
+              <div className="flex justify-end pt-1 border-t border-border/40">
+                <Button variant="ghost" size="sm" className="h-7 text-xs gap-1" onClick={clearDates}>
+                  <X className="h-3 w-3" /> Clear
+                </Button>
+              </div>
+            </PopoverContent>
+          </Popover>
+
+          {dateActive && (
+            <button
+              onClick={clearDates}
+              className="inline-flex items-center gap-1 h-9 px-2 rounded-md bg-primary/10 text-primary text-xs hover:bg-primary/20 transition-colors"
+              title="Clear date filter"
+            >
+              {dateLabel}
+              <X className="h-3 w-3" />
+            </button>
+          )}
 
           {selectedIds.size > 0 && (
             <div className="flex gap-2 ml-auto">
@@ -595,7 +742,7 @@ export default function Income() {
         </div>
 
         <p className="text-xs text-muted-foreground text-center">
-          Showing {filtered.length} of {transactions.length} income transactions · This month: {thisMonth}
+          Showing {filtered.length} of {transactions.length} income transactions · {dateActive ? dateLabel : 'All Dates'}
         </p>
       </div>
 
