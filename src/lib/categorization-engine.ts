@@ -28,7 +28,7 @@ export interface CategorizationResult {
   predicted_method: string | null;
   predicted_notes: string | null;
   confidence: number;
-  match_source: 'exact_history' | 'normalized_history' | 'partial_history' | 'rule' | 'ai' | null;
+  match_source: 'exact_history' | 'normalized_history' | 'partial_history' | 'recurring_pattern' | 'rule' | 'ai' | null;
   match_explanation: string;
   review_status: 'auto_categorized' | 'suggested' | 'ai_suggested' | 'needs_review';
   category_rejected: boolean;
