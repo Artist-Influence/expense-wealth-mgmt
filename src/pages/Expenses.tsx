@@ -650,7 +650,9 @@ export default function Expenses() {
   };
 
   const exportCsv = () => {
-    const rows = filtered
+    const usingSelection = selectedIds.size > 0;
+    const source = usingSelection ? filtered.filter(t => selectedIds.has(t.id)) : filtered;
+    const rows = source
       .filter(t => ['approved', 'auto_categorized', 'edited'].includes(t.review_status) && !t.is_split_parent)
       .map(t => ({
         Date: t.date || '',
