@@ -1634,6 +1634,12 @@ export default function Expenses() {
         onApprove={approveRow}
         onToggleTransfer={toggleTransfer}
         onSplit={(tx) => { setDetailTx(null); setSplitTx(tx as any); }}
+        onAddCategory={() => {
+          setAddCategoryTarget({ kind: 'drawer' });
+          setAddCategoryOpen(true);
+        }}
+        pendingCategoryToSelect={pendingDrawerCategory}
+        onPendingCategoryConsumed={() => setPendingDrawerCategory(null)}
       />
 
       {/* Split Transaction Dialog */}
@@ -1643,6 +1649,32 @@ export default function Expenses() {
         transaction={splitTx}
         categories={categories}
         onSplit={handleSplit}
+        onAddCategory={(rowId) => {
+          setAddCategoryTarget({ kind: 'split', rowId });
+          setAddCategoryOpen(true);
+        }}
+        pendingCategoryToSelect={pendingSplitCategory}
+        onPendingCategoryConsumed={() => setPendingSplitCategory(null)}
+      />
+
+      {/* Add new category inline dialog */}
+      <AddCategoryDialog
+        open={addCategoryOpen}
+        onClose={() => { setAddCategoryOpen(false); setAddCategoryTarget(null); }}
+        mode={categoryMode}
+        existingCategories={categories}
+        onCreated={async (newName) => {
+          await loadCategories();
+          const target = addCategoryTarget;
+          if (target?.kind === 'inline') {
+            const tx = transactions.find(t => t.id === target.txId);
+            if (tx) await inlineUpdate(tx, 'final_category', newName);
+          } else if (target?.kind === 'drawer') {
+            setPendingDrawerCategory(newName);
+          } else if (target?.kind === 'split') {
+            setPendingSplitCategory({ rowId: target.rowId, name: newName });
+          }
+        }}
       />
 
       <ImportPreviewDialog
