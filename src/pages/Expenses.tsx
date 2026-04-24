@@ -173,7 +173,9 @@ export default function Expenses() {
           if (effective) return false;
         } else if (effective !== categoryFilter) {
           return false;
-        }
+      }
+      if (dateFrom && (!tx.date || tx.date < dateFrom)) return false;
+      if (dateTo && (!tx.date || tx.date > dateTo)) return false;
       }
       if (search) {
         const s = search.toLowerCase();
