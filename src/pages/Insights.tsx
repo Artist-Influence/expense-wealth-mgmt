@@ -122,7 +122,87 @@ export default function Insights() {
     return allData;
   };
 
-  const expenses = useMemo(() => transactions.filter(t => !t.exclude_from_expense_totals && !t.is_split_parent), [transactions]);
+  // ─── Date filter helpers ───
+  const fmtYMD = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const fmtMonthLabel = (ym: string) => {
+    const [y, m] = ym.split('-').map(Number);
+    return new Date(y, m - 1, 1).toLocaleString('en-US', { month: 'short', year: 'numeric' });
+  };
+  const clearDates = () => { setDateFrom(null); setDateTo(null); setDateLabel('All Dates'); };
+  const applyMonth = (ym: string) => {
+    const [y, m] = ym.split('-').map(Number);
+    setDateFrom(fmtYMD(new Date(y, m - 1, 1)));
+    setDateTo(fmtYMD(new Date(y, m, 0)));
+    setDateLabel(fmtMonthLabel(ym));
+  };
+  const applyThisMonth = () => {
+    const n = new Date();
+    applyMonth(`${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}`);
+    setDateLabel('This Month');
+  };
+  const applyLastMonth = () => {
+    const n = new Date();
+    const d = new Date(n.getFullYear(), n.getMonth() - 1, 1);
+    applyMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+    setDateLabel('Last Month');
+  };
+  const applyLastNDays = (n: number) => {
+    const to = new Date();
+    const from = new Date();
+    from.setDate(from.getDate() - n);
+    setDateFrom(fmtYMD(from));
+    setDateTo(fmtYMD(to));
+    setDateLabel(`Last ${n} Days`);
+  };
+  const applyThisQuarter = () => {
+    const n = new Date();
+    const q = Math.floor(n.getMonth() / 3);
+    setDateFrom(fmtYMD(new Date(n.getFullYear(), q * 3, 1)));
+    setDateTo(fmtYMD(new Date(n.getFullYear(), q * 3 + 3, 0)));
+    setDateLabel('This Quarter');
+  };
+  const applyYTD = () => {
+    const n = new Date();
+    setDateFrom(`${n.getFullYear()}-01-01`);
+    setDateTo(fmtYMD(n));
+    setDateLabel('Year to Date');
+  };
+  const applyLastYear = () => {
+    const y = new Date().getFullYear() - 1;
+    setDateFrom(`${y}-01-01`);
+    setDateTo(`${y}-12-31`);
+    setDateLabel(`${y}`);
+  };
+  const onCustomFrom = (v: string) => {
+    setDateFrom(v || null);
+    setDateLabel(v || dateTo ? `${v || '…'} – ${dateTo || '…'}` : 'All Dates');
+  };
+  const onCustomTo = (v: string) => {
+    setDateTo(v || null);
+    setDateLabel(dateFrom || v ? `${dateFrom || '…'} – ${v || '…'}` : 'All Dates');
+  };
+  const dateActive = !!(dateFrom || dateTo);
+  const inDateRange = (date: string | null | undefined) => {
+    if (!dateActive) return true;
+    if (!date) return false;
+    if (dateFrom && date < dateFrom) return false;
+    if (dateTo && date > dateTo) return false;
+    return true;
+  };
+
+  // Months derived from transactions
+  const availableMonths = useMemo(() => {
+    const set = new Set<string>();
+    transactions.forEach(t => { if (t.date) set.add(t.date.slice(0, 7)); });
+    incomeData.forEach(t => { if (t.date) set.add(t.date.slice(0, 7)); });
+    return Array.from(set).sort().reverse();
+  }, [transactions, incomeData]);
+
+  // All expenses (mode-scoped, valid) — NOT date-filtered, used for overview "This Month / Last Month"
+  const allExpenses = useMemo(() => transactions.filter(t => !t.exclude_from_expense_totals && !t.is_split_parent), [transactions]);
+
+  // Date-filtered expenses (drives all charts)
+  const expenses = useMemo(() => allExpenses.filter(t => inDateRange(t.date)), [allExpenses, dateFrom, dateTo]);
 
   // ─── SPENDING TAB DATA ───
   const overview = useMemo(() => {
