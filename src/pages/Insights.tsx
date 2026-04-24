@@ -47,9 +47,25 @@ const fmt = (n: number) => '$' + n.toLocaleString(undefined, { minimumFractionDi
 export default function Insights() {
   const { user } = useAuth();
   const [mode, setMode] = useState<'personal' | 'business'>('personal');
+  const [modeAutoSet, setModeAutoSet] = useState(false);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [incomeData, setIncomeData] = useState<IncomeTransaction[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Auto-pick the mode that actually has data on first load
+  useEffect(() => {
+    if (!user || modeAutoSet) return;
+    (async () => {
+      const [{ count: pCount }, { count: bCount }] = await Promise.all([
+        supabase.from('transactions_uploaded').select('id', { count: 'exact', head: true }).eq('owner_id', user.id).eq('mode', 'personal'),
+        supabase.from('transactions_uploaded').select('id', { count: 'exact', head: true }).eq('owner_id', user.id).eq('mode', 'business'),
+      ]);
+      const personalN = pCount || 0;
+      const businessN = bCount || 0;
+      if (businessN > personalN) setMode('business');
+      setModeAutoSet(true);
+    })();
+  }, [user, modeAutoSet]);
 
   useEffect(() => {
     if (user) loadData();
