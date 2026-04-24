@@ -105,6 +105,9 @@ export function TransactionDetailDrawer({
   onApprove,
   onToggleTransfer,
   onSplit,
+  onAddCategory,
+  pendingCategoryToSelect,
+  onPendingCategoryConsumed,
 }: TransactionDetailDrawerProps) {
   const [editValues, setEditValues] = useState({
     category: '', method: '', notes: '',
