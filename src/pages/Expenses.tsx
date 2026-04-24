@@ -471,7 +471,8 @@ export default function Expenses() {
             finalMethod,
             tx.final_notes || tx.predicted_notes || null,
             desc,
-            user!.id
+            user!.id,
+            tx.match_source,
           );
         }
       }
