@@ -884,10 +884,20 @@ export default function Expenses() {
         await supabase.from('upload_batches').update({ transfers_detected: transferCount }).eq('id', batch.id);
       }
 
+      const refundCount = refundRowKeys.size;
+      const ccPaymentCount = ccPaymentRowKeys.size;
       updateItem(id, {
         status: 'done',
-        result: { batchId: batch.id, total: rowsToInsert.length, auto: autoCount, suggested: suggestedCount, review: reviewCount, skipped: exactDupCount, possibleDuplicates: possibleDupCount, transfers: transferCount, parseErrors: parseErrorRows.length },
+        result: { batchId: batch.id, total: rowsToInsert.length, auto: autoCount, suggested: suggestedCount, review: reviewCount, skipped: exactDupCount, possibleDuplicates: possibleDupCount, transfers: transferCount, parseErrors: parseErrorRows.length, incomeRouted: incomeInsertedCount, refunds: refundCount, ccPayments: ccPaymentCount } as any,
       });
+      if (incomeInsertedCount || refundCount || ccPaymentCount) {
+        toast.success(
+          `${file.name}: ${rowsToInsert.length} expenses` +
+          (refundCount ? `, ${refundCount} refunds` : '') +
+          (ccPaymentCount ? `, ${ccPaymentCount} card payments (transfers)` : '') +
+          (incomeInsertedCount ? `, ${incomeInsertedCount} routed to Income` : '')
+        );
+      }
     } catch (err: any) {
       updateItem(id, { status: 'error', error: err.message || 'Processing failed' });
     }
