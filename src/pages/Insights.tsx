@@ -8,9 +8,13 @@ import {
 } from 'recharts';
 import {
   TrendingUp, TrendingDown, DollarSign, Tag, Store, ArrowLeftRight,
-  RefreshCw, PiggyBank, AlertTriangle, CheckCircle2, CreditCard
+  RefreshCw, PiggyBank, AlertTriangle, CheckCircle2, CreditCard, Calendar, ChevronDown, X
 } from 'lucide-react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 interface Transaction {
   date: string | null;
@@ -51,6 +55,12 @@ export default function Insights() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [incomeData, setIncomeData] = useState<IncomeTransaction[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // ─── Date filter (default: This Year) ───
+  const _now = new Date();
+  const [dateFrom, setDateFrom] = useState<string | null>(`${_now.getFullYear()}-01-01`);
+  const [dateTo, setDateTo] = useState<string | null>(null);
+  const [dateLabel, setDateLabel] = useState<string>('Year to Date');
 
   // Auto-pick the mode that actually has data on first load
   useEffect(() => {
@@ -112,7 +122,87 @@ export default function Insights() {
     return allData;
   };
 
-  const expenses = useMemo(() => transactions.filter(t => !t.exclude_from_expense_totals && !t.is_split_parent), [transactions]);
+  // ─── Date filter helpers ───
+  const fmtYMD = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const fmtMonthLabel = (ym: string) => {
+    const [y, m] = ym.split('-').map(Number);
+    return new Date(y, m - 1, 1).toLocaleString('en-US', { month: 'short', year: 'numeric' });
+  };
+  const clearDates = () => { setDateFrom(null); setDateTo(null); setDateLabel('All Dates'); };
+  const applyMonth = (ym: string) => {
+    const [y, m] = ym.split('-').map(Number);
+    setDateFrom(fmtYMD(new Date(y, m - 1, 1)));
+    setDateTo(fmtYMD(new Date(y, m, 0)));
+    setDateLabel(fmtMonthLabel(ym));
+  };
+  const applyThisMonth = () => {
+    const n = new Date();
+    applyMonth(`${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}`);
+    setDateLabel('This Month');
+  };
+  const applyLastMonth = () => {
+    const n = new Date();
+    const d = new Date(n.getFullYear(), n.getMonth() - 1, 1);
+    applyMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+    setDateLabel('Last Month');
+  };
+  const applyLastNDays = (n: number) => {
+    const to = new Date();
+    const from = new Date();
+    from.setDate(from.getDate() - n);
+    setDateFrom(fmtYMD(from));
+    setDateTo(fmtYMD(to));
+    setDateLabel(`Last ${n} Days`);
+  };
+  const applyThisQuarter = () => {
+    const n = new Date();
+    const q = Math.floor(n.getMonth() / 3);
+    setDateFrom(fmtYMD(new Date(n.getFullYear(), q * 3, 1)));
+    setDateTo(fmtYMD(new Date(n.getFullYear(), q * 3 + 3, 0)));
+    setDateLabel('This Quarter');
+  };
+  const applyYTD = () => {
+    const n = new Date();
+    setDateFrom(`${n.getFullYear()}-01-01`);
+    setDateTo(fmtYMD(n));
+    setDateLabel('Year to Date');
+  };
+  const applyLastYear = () => {
+    const y = new Date().getFullYear() - 1;
+    setDateFrom(`${y}-01-01`);
+    setDateTo(`${y}-12-31`);
+    setDateLabel(`${y}`);
+  };
+  const onCustomFrom = (v: string) => {
+    setDateFrom(v || null);
+    setDateLabel(v || dateTo ? `${v || '…'} – ${dateTo || '…'}` : 'All Dates');
+  };
+  const onCustomTo = (v: string) => {
+    setDateTo(v || null);
+    setDateLabel(dateFrom || v ? `${dateFrom || '…'} – ${v || '…'}` : 'All Dates');
+  };
+  const dateActive = !!(dateFrom || dateTo);
+  const inDateRange = (date: string | null | undefined) => {
+    if (!dateActive) return true;
+    if (!date) return false;
+    if (dateFrom && date < dateFrom) return false;
+    if (dateTo && date > dateTo) return false;
+    return true;
+  };
+
+  // Months derived from transactions
+  const availableMonths = useMemo(() => {
+    const set = new Set<string>();
+    transactions.forEach(t => { if (t.date) set.add(t.date.slice(0, 7)); });
+    incomeData.forEach(t => { if (t.date) set.add(t.date.slice(0, 7)); });
+    return Array.from(set).sort().reverse();
+  }, [transactions, incomeData]);
+
+  // All expenses (mode-scoped, valid) — NOT date-filtered, used for overview "This Month / Last Month"
+  const allExpenses = useMemo(() => transactions.filter(t => !t.exclude_from_expense_totals && !t.is_split_parent), [transactions]);
+
+  // Date-filtered expenses (drives all charts)
+  const expenses = useMemo(() => allExpenses.filter(t => inDateRange(t.date)), [allExpenses, dateFrom, dateTo]);
 
   // ─── SPENDING TAB DATA ───
   const overview = useMemo(() => {
@@ -121,32 +211,39 @@ export default function Insights() {
     const lastMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
     const lastMonth = `${lastMonthDate.getFullYear()}-${String(lastMonthDate.getMonth() + 1).padStart(2, '0')}`;
 
-    const thisMonthTxns = expenses.filter(t => t.date?.startsWith(thisMonth));
-    const lastMonthTxns = expenses.filter(t => t.date?.startsWith(lastMonth));
+    // Calendar-month cards always reflect actual current/prior calendar month (momentum context)
+    const thisMonthTxns = allExpenses.filter(t => t.date?.startsWith(thisMonth));
+    const lastMonthTxns = allExpenses.filter(t => t.date?.startsWith(lastMonth));
     const thisMonthSpend = thisMonthTxns.reduce((s, t) => s + Math.abs(t.amount || 0), 0);
     const lastMonthSpend = lastMonthTxns.reduce((s, t) => s + Math.abs(t.amount || 0), 0);
     const momChange = lastMonthSpend > 0 ? ((thisMonthSpend - lastMonthSpend) / lastMonthSpend) * 100 : 0;
 
-    // Only use final_category from approved/edited rows for charts
-    const approvedExpenses = expenses.filter(t => ['approved', 'auto_categorized', 'edited'].includes(t.review_status));
+    // Top Cat / Top Merchant respect the active date range
+    const approvedScoped = expenses.filter(t => ['approved', 'auto_categorized', 'edited'].includes(t.review_status));
     const catMap = new Map<string, number>();
-    approvedExpenses.forEach(t => {
+    approvedScoped.forEach(t => {
       const cat = t.final_category || 'Uncategorized';
       catMap.set(cat, (catMap.get(cat) || 0) + Math.abs(t.amount || 0));
     });
     const topCategory = [...catMap.entries()].sort((a, b) => b[1] - a[1])[0];
 
     const merchMap = new Map<string, number>();
-    approvedExpenses.forEach(t => {
+    approvedScoped.forEach(t => {
       const desc = (t.description_normalized || t.description_raw || 'Unknown').substring(0, 30);
       merchMap.set(desc, (merchMap.get(desc) || 0) + Math.abs(t.amount || 0));
     });
     const topMerchant = [...merchMap.entries()].sort((a, b) => b[1] - a[1])[0];
 
-    const transfersExcluded = transactions.filter(t => t.exclude_from_expense_totals).reduce((s, t) => s + Math.abs(t.amount || 0), 0);
+    // Transfers excluded — respect date range
+    const transfersExcluded = transactions
+      .filter(t => t.exclude_from_expense_totals && inDateRange(t.date))
+      .reduce((s, t) => s + Math.abs(t.amount || 0), 0);
 
-    return { thisMonthSpend, lastMonthSpend, momChange, topCategory, topMerchant, transfersExcluded };
-  }, [expenses, transactions]);
+    // Period total (drives clarity when filter != "this month")
+    const periodSpend = expenses.reduce((s, t) => s + Math.abs(t.amount || 0), 0);
+
+    return { thisMonthSpend, lastMonthSpend, momChange, topCategory, topMerchant, transfersExcluded, periodSpend };
+  }, [expenses, allExpenses, transactions, dateFrom, dateTo]);
 
   // Only approved/edited data in charts
   const approvedExpenses = useMemo(() => expenses.filter(t => ['approved', 'auto_categorized', 'edited'].includes(t.review_status)), [expenses]);
@@ -216,19 +313,22 @@ export default function Insights() {
 
   // Exclude non-earning income types from savings rate math
   const NON_EARNING_TYPES = ['reimbursement', 'transfer', 'refund', 'loan_proceeds', 'owner_contribution'];
-  const earnedIncome = useMemo(() => incomeData.filter(t => !NON_EARNING_TYPES.includes(t.income_type)), [incomeData]);
+  const earnedIncomeAll = useMemo(() => incomeData.filter(t => !NON_EARNING_TYPES.includes(t.income_type)), [incomeData]);
+  // Date-filtered earned income (drives savings rate totals shown to user)
+  const earnedIncome = useMemo(() => earnedIncomeAll.filter(t => inDateRange(t.date)), [earnedIncomeAll, dateFrom, dateTo]);
 
   // ─── INCOME & SAVINGS TAB DATA ───
+  // Income vs Expenses chart uses ALL data with its own last-12-months window (independent of filter)
   const incomeVsExpenses = useMemo(() => {
     const monthMap = new Map<string, { income: number; expenses: number }>();
-    expenses.forEach(t => {
+    allExpenses.forEach(t => {
       if (!t.date) return;
       const m = t.date.substring(0, 7);
       const entry = monthMap.get(m) || { income: 0, expenses: 0 };
       entry.expenses += Math.abs(t.amount || 0);
       monthMap.set(m, entry);
     });
-    earnedIncome.forEach(t => {
+    earnedIncomeAll.forEach(t => {
       if (!t.date) return;
       const m = t.date.substring(0, 7);
       const entry = monthMap.get(m) || { income: 0, expenses: 0 };
@@ -244,7 +344,7 @@ export default function Insights() {
         expenses: Math.round(d.expenses * 100) / 100,
         net: Math.round((d.income - d.expenses) * 100) / 100,
       }));
-  }, [expenses, earnedIncome]);
+  }, [allExpenses, earnedIncomeAll]);
 
   const savingsRate = useMemo(() => {
     const now = new Date();
@@ -255,35 +355,37 @@ export default function Insights() {
       return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
     };
 
+    // Current/trailing rates always use calendar-current data (not the active filter)
     const calcRate = (months: string[]) => {
       let inc = 0, exp = 0;
-      earnedIncome.forEach(t => { if (t.date && months.includes(t.date.substring(0, 7))) inc += Math.abs(t.amount || 0); });
-      expenses.forEach(t => { if (t.date && months.includes(t.date.substring(0, 7))) exp += Math.abs(t.amount || 0); });
+      earnedIncomeAll.forEach(t => { if (t.date && months.includes(t.date.substring(0, 7))) inc += Math.abs(t.amount || 0); });
+      allExpenses.forEach(t => { if (t.date && months.includes(t.date.substring(0, 7))) exp += Math.abs(t.amount || 0); });
       return inc > 0 ? ((inc - exp) / inc) * 100 : 0;
     };
 
     const currentRate = calcRate([thisMonth]);
     const trailing3 = calcRate([getMonthKey(0), getMonthKey(1), getMonthKey(2)]);
 
+    // Totals reflect the active date filter
     const totalIncome = earnedIncome.reduce((s, t) => s + Math.abs(t.amount || 0), 0);
     const totalExpenses = expenses.reduce((s, t) => s + Math.abs(t.amount || 0), 0);
 
     return { currentRate, trailing3, totalIncome, totalExpenses };
-  }, [expenses, earnedIncome]);
+  }, [expenses, earnedIncome, allExpenses, earnedIncomeAll]);
 
+  // YoY uses calendar-year math, independent of active filter
   const yoyComparison = useMemo(() => {
     const now = new Date();
     const thisYear = now.getFullYear().toString();
     const lastYear = (now.getFullYear() - 1).toString();
 
     let thisYearIncome = 0, lastYearIncome = 0, thisYearExpenses = 0, lastYearExpenses = 0;
-    // Use earnedIncome (excludes reimbursements, transfers, refunds) for YoY
-    earnedIncome.forEach(t => {
+    earnedIncomeAll.forEach(t => {
       if (!t.date) return;
       if (t.date.startsWith(thisYear)) thisYearIncome += Math.abs(t.amount || 0);
       if (t.date.startsWith(lastYear)) lastYearIncome += Math.abs(t.amount || 0);
     });
-    expenses.forEach(t => {
+    allExpenses.forEach(t => {
       if (!t.date) return;
       if (t.date.startsWith(thisYear)) thisYearExpenses += Math.abs(t.amount || 0);
       if (t.date.startsWith(lastYear)) lastYearExpenses += Math.abs(t.amount || 0);
@@ -297,7 +399,7 @@ export default function Insights() {
       incomeChange: pctChange(thisYearIncome, lastYearIncome),
       expenseChange: pctChange(thisYearExpenses, lastYearExpenses),
     };
-  }, [expenses, earnedIncome]);
+  }, [allExpenses, earnedIncomeAll]);
 
   // ─── TRENDS TAB DATA ───
   const categoryTrends = useMemo(() => {
@@ -342,13 +444,14 @@ export default function Insights() {
   }, [approvedExpenses]);
 
   const dataQuality = useMemo(() => {
-    const total = transactions.length;
-    const needsReview = transactions.filter(t => t.review_status === 'needs_review').length;
-    const uncategorized = transactions.filter(t => !t.final_category && !t.predicted_category).length;
-    const approved = transactions.filter(t => t.review_status === 'approved').length;
+    const scoped = transactions.filter(t => inDateRange(t.date));
+    const total = scoped.length;
+    const needsReview = scoped.filter(t => t.review_status === 'needs_review').length;
+    const uncategorized = scoped.filter(t => !t.final_category && !t.predicted_category).length;
+    const approved = scoped.filter(t => t.review_status === 'approved').length;
     const approvalRate = total > 0 ? (approved / total) * 100 : 0;
     return { total, needsReview, uncategorized, approved, approvalRate };
-  }, [transactions]);
+  }, [transactions, dateFrom, dateTo]);
 
   const tooltipStyle = {
     background: 'hsl(var(--card))',
@@ -362,18 +465,90 @@ export default function Insights() {
     <div className="min-h-screen bg-background">
       <AppNav />
       <div className="container py-4 animate-fade-in">
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
           <div>
             <h1 className="text-lg font-semibold text-foreground">Insights</h1>
-            <p className="text-[10px] text-muted-foreground">Charts use approved/edited data only · Income is cross-mode · Expenses are {mode}-filtered</p>
+            <p className="text-[10px] text-muted-foreground">
+              Showing: <span className="text-foreground/80 font-medium">{dateActive ? dateLabel : 'All Dates'}</span> · {mode === 'business' ? 'Business' : 'Personal'} · Approved/edited only
+            </p>
           </div>
-          <div className="flex rounded-lg border border-border/40 overflow-hidden">
-            <button onClick={() => setMode('personal')} className={`px-3 py-1.5 text-xs font-medium transition-colors ${mode === 'personal' ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground'}`}>
-              Personal
-            </button>
-            <button onClick={() => setMode('business')} className={`px-3 py-1.5 text-xs font-medium transition-colors ${mode === 'business' ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground'}`}>
-              Business
-            </button>
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Date filter */}
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" size="sm" className={`h-9 gap-1.5 text-xs bg-card border-border ${dateActive ? 'border-primary/40 text-primary' : ''}`}>
+                  <Calendar className="h-3.5 w-3.5" />
+                  {dateActive ? dateLabel : 'All Dates'}
+                  <ChevronDown className="h-3 w-3 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-[340px] p-3 space-y-3" align="end">
+                <div>
+                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1.5">Quick presets</div>
+                  <div className="grid grid-cols-2 gap-1">
+                    <Button variant="ghost" size="sm" className="h-7 justify-start text-xs" onClick={clearDates}>All Dates</Button>
+                    <Button variant="ghost" size="sm" className="h-7 justify-start text-xs" onClick={applyThisMonth}>This Month</Button>
+                    <Button variant="ghost" size="sm" className="h-7 justify-start text-xs" onClick={applyLastMonth}>Last Month</Button>
+                    <Button variant="ghost" size="sm" className="h-7 justify-start text-xs" onClick={() => applyLastNDays(30)}>Last 30 Days</Button>
+                    <Button variant="ghost" size="sm" className="h-7 justify-start text-xs" onClick={() => applyLastNDays(90)}>Last 90 Days</Button>
+                    <Button variant="ghost" size="sm" className="h-7 justify-start text-xs" onClick={applyThisQuarter}>This Quarter</Button>
+                    <Button variant="ghost" size="sm" className="h-7 justify-start text-xs" onClick={applyYTD}>Year to Date</Button>
+                    <Button variant="ghost" size="sm" className="h-7 justify-start text-xs" onClick={applyLastYear}>Last Year</Button>
+                  </div>
+                </div>
+
+                {availableMonths.length > 0 && (
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1.5">Pick a month</div>
+                    <Select value="" onValueChange={(v) => v && applyMonth(v)}>
+                      <SelectTrigger className="h-8 bg-card border-border text-xs">
+                        <SelectValue placeholder="Select month..." />
+                      </SelectTrigger>
+                      <SelectContent className="max-h-[260px]">
+                        {availableMonths.map(ym => (
+                          <SelectItem key={ym} value={ym}>{fmtMonthLabel(ym)}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
+                <div>
+                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1.5">Custom range</div>
+                  <div className="flex items-center gap-1.5">
+                    <Input type="date" value={dateFrom || ''} onChange={(e) => onCustomFrom(e.target.value)} className="bg-card border-border h-8 text-xs flex-1" />
+                    <span className="text-xs text-muted-foreground">→</span>
+                    <Input type="date" value={dateTo || ''} onChange={(e) => onCustomTo(e.target.value)} className="bg-card border-border h-8 text-xs flex-1" />
+                  </div>
+                </div>
+
+                <div className="flex justify-end pt-1 border-t border-border/40">
+                  <Button variant="ghost" size="sm" className="h-7 text-xs gap-1" onClick={clearDates}>
+                    <X className="h-3 w-3" /> Clear
+                  </Button>
+                </div>
+              </PopoverContent>
+            </Popover>
+
+            {dateActive && (
+              <button
+                onClick={clearDates}
+                className="inline-flex items-center gap-1 h-9 px-2 rounded-md bg-primary/10 text-primary text-xs hover:bg-primary/20 transition-colors"
+                title="Clear date filter"
+              >
+                {dateLabel}
+                <X className="h-3 w-3" />
+              </button>
+            )}
+
+            <div className="flex rounded-lg border border-border/40 overflow-hidden">
+              <button onClick={() => setMode('personal')} className={`px-3 py-1.5 text-xs font-medium transition-colors ${mode === 'personal' ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground'}`}>
+                Personal
+              </button>
+              <button onClick={() => setMode('business')} className={`px-3 py-1.5 text-xs font-medium transition-colors ${mode === 'business' ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground'}`}>
+                Business
+              </button>
+            </div>
           </div>
         </div>
 
