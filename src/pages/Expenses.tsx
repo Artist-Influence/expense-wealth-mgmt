@@ -15,6 +15,7 @@ import { routeTransaction } from '@/lib/transaction-router';
 import { classifyIncome } from '@/lib/income-classifier';
 import { generateFingerprint, isNearDuplicate } from '@/lib/duplicate-detector';
 import { generateMerchantKey, normalizeDescription } from '@/lib/normalizer';
+import { backfillRecurringForOwner } from '@/lib/recurrence-detector';
 import { isStatementArtifact } from '@/lib/csv-parser';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -27,7 +28,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import {
   Upload, Search, Download, Check, CheckCheck, Edit3, X,
   ArrowLeftRight, AlertTriangle, Ban, FileText, Filter,
-  Calendar, ChevronDown, Trash2, Briefcase, User, Receipt, Scissors
+  Calendar, ChevronDown, Trash2, Briefcase, User, Receipt, Scissors, RefreshCw
 } from 'lucide-react';
 
 type TransactionMode = 'personal' | 'business' | 'reimbursable_work';
@@ -92,6 +93,7 @@ export default function Expenses() {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [extraFilter, setExtraFilter] = useState<string>('all');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
+  const [scanningRecurring, setScanningRecurring] = useState(false);
   const [dateFrom, setDateFrom] = useState<string | null>(null);
   const [dateTo, setDateTo] = useState<string | null>(null);
   const [dateLabel, setDateLabel] = useState<string>('All Dates');
@@ -1283,6 +1285,40 @@ export default function Expenses() {
             </button>
           )}
 
+
+          {selectedIds.size === 0 && user && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 gap-1 text-xs glass-input"
+              disabled={scanningRecurring}
+              onClick={async () => {
+                setScanningRecurring(true);
+                const tId = toast.loading(`Scanning ${categoryMode} transactions for recurring charges…`);
+                try {
+                  const summary = await backfillRecurringForOwner(user.id, categoryMode as 'personal' | 'business');
+                  toast.dismiss(tId);
+                  if (summary.skippedNoSubsCategory === -1) {
+                    toast.error('Add a "Subscriptions" category first.');
+                  } else if (summary.updated === 0) {
+                    toast.success(`No new recurring charges found (scanned ${summary.scanned} merchants).`);
+                  } else {
+                    toast.success(`Tagged ${summary.updated} recurring charges as Subscriptions (${summary.eligible} matches across ${summary.scanned} merchants).`);
+                  }
+                  await loadTransactions();
+                } catch (err: any) {
+                  toast.dismiss(tId);
+                  toast.error(`Scan failed: ${err?.message || 'unknown error'}`);
+                  console.error(err);
+                } finally {
+                  setScanningRecurring(false);
+                }
+              }}
+            >
+              <RefreshCw className={`h-3 w-3 ${scanningRecurring ? 'animate-spin' : ''}`} />
+              {scanningRecurring ? 'Scanning…' : 'Re-scan recurring'}
+            </Button>
+          )}
 
           {selectedIds.size === 0 && (() => {
             const suggestedCount = filtered.filter(t => ['suggested', 'ai_suggested', 'auto_categorized'].includes(t.review_status) && (t.final_category || t.predicted_category)).length;
