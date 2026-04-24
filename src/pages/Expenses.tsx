@@ -114,6 +114,8 @@ export default function Expenses() {
     | { kind: 'split'; rowId: string }
     | null
   >(null);
+  const [pendingDrawerCategory, setPendingDrawerCategory] = useState<string | null>(null);
+  const [pendingSplitCategory, setPendingSplitCategory] = useState<{ rowId: string; name: string } | null>(null);
 
   // Upload state
   const [fileQueue, setFileQueue] = useState<FileQueueItem[]>([]);
