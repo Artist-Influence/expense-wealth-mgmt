@@ -393,8 +393,11 @@ export async function updateMerchantMemory(
   method: string | null,
   notes: string | null,
   rawExample: string,
-  ownerId: string
+  ownerId: string,
+  matchSource?: string | null,
 ): Promise<void> {
+  const isRecurring = matchSource === 'recurring_pattern';
+
   const { data: existing } = await supabase
     .from('merchant_memory')
     .select('id, times_seen, confidence_weight')
@@ -404,8 +407,9 @@ export async function updateMerchantMemory(
     .maybeSingle();
 
   if (existing) {
-    // Boost confidence more aggressively on manual approval
-    const newWeight = Math.min((existing.confidence_weight || 80) + 3, 99);
+    // Boost confidence more aggressively on manual approval; recurring gets +5 instead of +3
+    const bump = isRecurring ? 5 : 3;
+    const newWeight = Math.min((existing.confidence_weight || 80) + bump, 99);
     await supabase
       .from('merchant_memory')
       .update({
@@ -428,7 +432,8 @@ export async function updateMerchantMemory(
         most_common_method: method,
         default_note_template: notes,
         times_seen: 1,
-        confidence_weight: 82, // Start slightly higher for manual approvals
+        // Recurring confirmations start at 90 so subsequent single charges land in Subscriptions
+        confidence_weight: isRecurring ? 90 : 82,
         owner_id: ownerId,
       });
   }
