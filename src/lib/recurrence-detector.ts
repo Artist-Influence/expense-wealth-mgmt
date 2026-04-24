@@ -125,3 +125,185 @@ export function detectRecurrence(
     avgDaysBetween: avgGap,
   };
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Backfill: scan existing rows and tag eligible ones as Subscriptions
+// ─────────────────────────────────────────────────────────────────────────────
+
+import { supabase as defaultClient } from '@/integrations/supabase/client';
+import { generateMerchantKey, normalizeDescription } from './normalizer';
+
+const AMBIGUOUS_MERCHANTS = new Set([
+  'AMAZON', 'PAYPAL', 'VENMO', 'ZELLE', 'SQUARE', 'STRIPE',
+  'WALMART', 'COSTCO', 'TARGET', 'APPLE', 'GOOGLE',
+]);
+function isAmbiguousMerchant(merchantKey: string): boolean {
+  const upper = merchantKey.toUpperCase();
+  return [...AMBIGUOUS_MERCHANTS].some(m => upper.includes(m));
+}
+
+export interface BackfillSummary {
+  scanned: number;       // bucket count
+  eligible: number;      // rows that matched recurrence
+  updated: number;       // rows actually written
+  skippedApproved: number;
+  skippedAlreadyTagged: number;
+  skippedNoSubsCategory: number;
+}
+
+interface BackfillRow {
+  id: string;
+  date: string | null;
+  amount: number | null;
+  description_normalized: string | null;
+  description_raw: string | null;
+  predicted_category: string | null;
+  final_category: string | null;
+  review_status: string;
+  match_source: string | null;
+  is_transfer: boolean;
+  is_split_parent: boolean;
+  parent_transaction_id: string | null;
+  exclude_from_expense_totals: boolean;
+}
+
+/**
+ * Re-scan the owner's transactions in the last 180 days and tag recurring
+ * charges as Subscriptions. Idempotent — re-running won't double-tag.
+ */
+export async function backfillRecurringForOwner(
+  ownerId: string,
+  mode: 'personal' | 'business',
+  client = defaultClient,
+): Promise<BackfillSummary> {
+  const summary: BackfillSummary = {
+    scanned: 0, eligible: 0, updated: 0,
+    skippedApproved: 0, skippedAlreadyTagged: 0, skippedNoSubsCategory: 0,
+  };
+
+  // 1) Allowed categories for this mode
+  const { data: cats } = await client
+    .from('category_options')
+    .select('category_name')
+    .eq('owner_id', ownerId)
+    .eq('mode', mode)
+    .eq('is_active', true);
+  const allowedSet = new Set((cats || []).map(c => c.category_name));
+  if (!allowedSet.has('Subscriptions')) {
+    summary.skippedNoSubsCategory = -1; // signal: nothing tagged because cat missing
+    return summary;
+  }
+
+  // 2) Auto threshold
+  const { data: settings } = await client
+    .from('app_settings')
+    .select('business_auto_threshold, personal_auto_threshold')
+    .eq('owner_id', ownerId)
+    .maybeSingle();
+  const autoT = mode === 'business'
+    ? Number(settings?.business_auto_threshold) || 90
+    : Number(settings?.personal_auto_threshold) || 90;
+
+  // 3) Pull all rows in the window (paged)
+  const since = new Date(Date.now() - 180 * 86_400_000).toISOString().slice(0, 10);
+  const all: BackfillRow[] = [];
+  let from = 0;
+  const pageSize = 1000;
+  while (true) {
+    const { data, error } = await client
+      .from('transactions_uploaded')
+      .select('id, date, amount, description_normalized, description_raw, predicted_category, final_category, review_status, match_source, is_transfer, is_split_parent, parent_transaction_id, exclude_from_expense_totals')
+      .eq('owner_id', ownerId)
+      .eq('mode', mode)
+      .gte('date', since)
+      .not('amount', 'is', null)
+      .range(from, from + pageSize - 1);
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+    all.push(...(data as BackfillRow[]));
+    if (data.length < pageSize) break;
+    from += pageSize;
+  }
+
+  // 4) Group by merchant_key
+  const buckets = new Map<string, BackfillRow[]>();
+  for (const r of all) {
+    const desc = r.description_normalized || normalizeDescription(r.description_raw || '');
+    const key = generateMerchantKey(desc);
+    if (!key) continue;
+    if (isAmbiguousMerchant(key)) continue;
+    const list = buckets.get(key) || [];
+    list.push(r);
+    buckets.set(key, list);
+  }
+  summary.scanned = buckets.size;
+
+  // 5) For each bucket, walk chronologically and detect per-row
+  type Update = {
+    id: string;
+    predicted_category: string;
+    match_source: string;
+    match_explanation: string;
+    confidence: number;
+    review_status: string;
+  };
+  const updates: Update[] = [];
+
+  for (const rows of buckets.values()) {
+    if (rows.length < 3) continue;
+    const sorted = [...rows]
+      .filter(r => r.date && r.amount != null)
+      .sort((a, b) => (a.date! < b.date! ? -1 : 1));
+    if (sorted.length < 3) continue;
+
+    for (let i = 3; i < sorted.length; i++) {
+      const cur = sorted[i];
+      // Skip rows we shouldn't touch
+      if (cur.is_transfer || cur.is_split_parent || cur.parent_transaction_id) continue;
+      if (cur.exclude_from_expense_totals) continue;
+      if (cur.review_status === 'approved' || cur.review_status === 'edited' || cur.final_category) {
+        summary.skippedApproved++;
+        continue;
+      }
+
+      const history = sorted.slice(0, i).map(r => ({ date: r.date!, amount: r.amount! }));
+      const result = detectRecurrence(cur.amount!, history);
+      if (!result.isRecurring) continue;
+
+      summary.eligible++;
+
+      if (cur.predicted_category === 'Subscriptions' && cur.match_source === 'recurring_pattern') {
+        summary.skippedAlreadyTagged++;
+        continue;
+      }
+
+      updates.push({
+        id: cur.id,
+        predicted_category: 'Subscriptions',
+        match_source: 'recurring_pattern',
+        match_explanation: result.explanation,
+        confidence: result.confidence,
+        review_status: result.confidence >= autoT ? 'auto_categorized' : 'suggested',
+      });
+    }
+  }
+
+  // 6) Apply in chunks of 50 in parallel
+  const chunkSize = 50;
+  for (let i = 0; i < updates.length; i += chunkSize) {
+    const batch = updates.slice(i, i + chunkSize);
+    await Promise.all(batch.map(u =>
+      client.from('transactions_uploaded').update({
+        predicted_category: u.predicted_category,
+        match_source: u.match_source,
+        match_explanation: u.match_explanation,
+        confidence: u.confidence,
+        review_status: u.review_status,
+      }).eq('id', u.id)
+    ));
+    summary.updated += batch.length;
+  }
+
+  return summary;
+}
+
