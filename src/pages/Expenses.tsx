@@ -23,6 +23,7 @@ import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import {
   Upload, Search, Download, Check, CheckCheck, Edit3, X,
   ArrowLeftRight, AlertTriangle, Ban, FileText, Filter,
@@ -91,6 +92,9 @@ export default function Expenses() {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [extraFilter, setExtraFilter] = useState<string>('all');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
+  const [dateFrom, setDateFrom] = useState<string | null>(null);
+  const [dateTo, setDateTo] = useState<string | null>(null);
+  const [dateLabel, setDateLabel] = useState<string>('All Dates');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [categories, setCategories] = useState<string[]>([]);
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -169,7 +173,9 @@ export default function Expenses() {
           if (effective) return false;
         } else if (effective !== categoryFilter) {
           return false;
-        }
+      }
+      if (dateFrom && (!tx.date || tx.date < dateFrom)) return false;
+      if (dateTo && (!tx.date || tx.date > dateTo)) return false;
       }
       if (search) {
         const s = search.toLowerCase();
@@ -198,7 +204,79 @@ export default function Expenses() {
     });
 
     return result;
-  }, [transactions, statusFilter, extraFilter, categoryFilter, search, sortCol, sortAsc]);
+  }, [transactions, statusFilter, extraFilter, categoryFilter, dateFrom, dateTo, search, sortCol, sortAsc]);
+
+  // Available months derived from transactions for the date filter
+  const availableMonths = useMemo(() => {
+    const set = new Set<string>();
+    transactions.forEach(t => { if (t.date) set.add(t.date.slice(0, 7)); });
+    return Array.from(set).sort().reverse();
+  }, [transactions]);
+
+  // ---- Date filter helpers ----
+  const fmtYMD = (d: Date) => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+  const fmtMonthLabel = (ym: string) => {
+    const [y, m] = ym.split('-').map(Number);
+    return new Date(y, m - 1, 1).toLocaleString('en-US', { month: 'short', year: 'numeric' });
+  };
+  const clearDates = () => {
+    setDateFrom(null);
+    setDateTo(null);
+    setDateLabel('All Dates');
+  };
+  const applyMonth = (ym: string) => {
+    const [y, m] = ym.split('-').map(Number);
+    const first = new Date(y, m - 1, 1);
+    const last = new Date(y, m, 0);
+    setDateFrom(fmtYMD(first));
+    setDateTo(fmtYMD(last));
+    setDateLabel(fmtMonthLabel(ym));
+  };
+  const applyThisMonth = () => {
+    const now = new Date();
+    applyMonth(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`);
+    setDateLabel('This Month');
+  };
+  const applyLastMonth = () => {
+    const now = new Date();
+    const d = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    applyMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+    setDateLabel('Last Month');
+  };
+  const applyLastNDays = (n: number) => {
+    const to = new Date();
+    const from = new Date();
+    from.setDate(from.getDate() - n);
+    setDateFrom(fmtYMD(from));
+    setDateTo(fmtYMD(to));
+    setDateLabel(`Last ${n} Days`);
+  };
+  const applyYTD = () => {
+    const now = new Date();
+    setDateFrom(`${now.getFullYear()}-01-01`);
+    setDateTo(fmtYMD(now));
+    setDateLabel('Year to Date');
+  };
+  const applyLastYear = () => {
+    const y = new Date().getFullYear() - 1;
+    setDateFrom(`${y}-01-01`);
+    setDateTo(`${y}-12-31`);
+    setDateLabel(`${y}`);
+  };
+  const onCustomFrom = (v: string) => {
+    setDateFrom(v || null);
+    setDateLabel(v || dateTo ? `${v || '…'} – ${dateTo || '…'}` : 'All Dates');
+  };
+  const onCustomTo = (v: string) => {
+    setDateTo(v || null);
+    setDateLabel(dateFrom || v ? `${dateFrom || '…'} – ${v || '…'}` : 'All Dates');
+  };
+  const dateActive = !!(dateFrom || dateTo);
 
   // Summary stats — V2
   const stats = useMemo(() => {
@@ -1096,7 +1174,74 @@ export default function Expenses() {
             </SelectContent>
           </Select>
 
-          {/* Approve All Suggested */}
+          {/* Date range filter */}
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="sm" className={`h-8 gap-1.5 text-xs glass-input ${dateActive ? 'border-primary/40 text-primary' : ''}`}>
+                <Calendar className="h-3 w-3" />
+                {dateLabel}
+                <ChevronDown className="h-3 w-3 opacity-50" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-[340px] p-3 space-y-3" align="start">
+              <div>
+                <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1.5">Quick presets</div>
+                <div className="grid grid-cols-2 gap-1">
+                  <Button variant="ghost" size="sm" className="h-7 justify-start text-xs" onClick={clearDates}>All Dates</Button>
+                  <Button variant="ghost" size="sm" className="h-7 justify-start text-xs" onClick={applyThisMonth}>This Month</Button>
+                  <Button variant="ghost" size="sm" className="h-7 justify-start text-xs" onClick={applyLastMonth}>Last Month</Button>
+                  <Button variant="ghost" size="sm" className="h-7 justify-start text-xs" onClick={() => applyLastNDays(30)}>Last 30 Days</Button>
+                  <Button variant="ghost" size="sm" className="h-7 justify-start text-xs" onClick={() => applyLastNDays(90)}>Last 90 Days</Button>
+                  <Button variant="ghost" size="sm" className="h-7 justify-start text-xs" onClick={applyYTD}>Year to Date</Button>
+                  <Button variant="ghost" size="sm" className="h-7 justify-start text-xs col-span-2" onClick={applyLastYear}>Last Year</Button>
+                </div>
+              </div>
+
+              {availableMonths.length > 0 && (
+                <div>
+                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1.5">Pick a month</div>
+                  <Select value="" onValueChange={(v) => v && applyMonth(v)}>
+                    <SelectTrigger className="h-8 glass-input text-xs">
+                      <SelectValue placeholder="Select month..." />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-[260px]">
+                      {availableMonths.map(ym => (
+                        <SelectItem key={ym} value={ym}>{fmtMonthLabel(ym)}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
+              <div>
+                <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1.5">Custom range</div>
+                <div className="flex items-center gap-1.5">
+                  <Input type="date" value={dateFrom || ''} onChange={(e) => onCustomFrom(e.target.value)} className="glass-input h-8 text-xs flex-1" />
+                  <span className="text-xs text-muted-foreground">→</span>
+                  <Input type="date" value={dateTo || ''} onChange={(e) => onCustomTo(e.target.value)} className="glass-input h-8 text-xs flex-1" />
+                </div>
+              </div>
+
+              <div className="flex justify-end pt-1 border-t border-border/40">
+                <Button variant="ghost" size="sm" className="h-7 text-xs gap-1" onClick={clearDates}>
+                  <X className="h-3 w-3" /> Clear
+                </Button>
+              </div>
+            </PopoverContent>
+          </Popover>
+
+          {dateActive && (
+            <button
+              onClick={clearDates}
+              className="inline-flex items-center gap-1 h-8 px-2 rounded-md bg-primary/10 text-primary text-xs hover:bg-primary/20 transition-colors"
+              title="Clear date filter"
+            >
+              {dateLabel}
+              <X className="h-3 w-3" />
+            </button>
+          )}
+
+
           {selectedIds.size === 0 && (() => {
             const suggestedCount = filtered.filter(t => ['suggested', 'ai_suggested', 'auto_categorized'].includes(t.review_status) && (t.final_category || t.predicted_category)).length;
             return suggestedCount > 0 ? (
