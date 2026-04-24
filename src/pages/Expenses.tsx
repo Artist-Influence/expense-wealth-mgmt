@@ -667,7 +667,10 @@ export default function Expenses() {
         Transfer: t.is_transfer ? 'Yes' : 'No',
         Notes: t.final_notes || t.predicted_notes || '',
       }));
-    if (rows.length === 0) { toast.error('No approved/edited transactions to export'); return; }
+    if (rows.length === 0) {
+      toast.error(usingSelection ? 'No approved/edited transactions in selection' : 'No approved/edited transactions to export');
+      return;
+    }
     const headers = Object.keys(rows[0]);
     const csv = [
       headers.join(','),
@@ -680,7 +683,7 @@ export default function Expenses() {
     a.download = `expenses_${mode}_${new Date().toISOString().split('T')[0]}.csv`;
     a.click();
     URL.revokeObjectURL(url);
-    toast.success('CSV exported');
+    toast.success(usingSelection ? `Exported ${rows.length} selected row${rows.length === 1 ? '' : 's'}` : `Exported ${rows.length} row${rows.length === 1 ? '' : 's'}`);
   };
 
   // Upload processing
