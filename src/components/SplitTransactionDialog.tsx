@@ -205,10 +205,24 @@ export function SplitTransactionDialog({ open, onClose, transaction, categories,
                 </div>
                 <div>
                   <Label className="text-[10px] text-muted-foreground">Category</Label>
-                  <Select value={row.category} onValueChange={v => updateRow(row.id, { category: v })}>
+                  <Select
+                    value={row.category}
+                    onValueChange={v => {
+                      if (v === '__add_new__') {
+                        onAddCategory?.(row.id);
+                        return;
+                      }
+                      updateRow(row.id, { category: v });
+                    }}
+                  >
                     <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Select..." /></SelectTrigger>
                     <SelectContent>
                       {categories.map(c => <SelectItem key={c} value={c} className="text-xs">{c}</SelectItem>)}
+                      {onAddCategory && (
+                        <SelectItem value="__add_new__" className="text-xs text-primary font-medium border-t border-border mt-1 pt-1.5">
+                          + Add new category…
+                        </SelectItem>
+                      )}
                     </SelectContent>
                   </Select>
                 </div>
