@@ -70,6 +70,10 @@ interface TransactionDetailDrawerProps {
   onApprove: (tx: Transaction) => Promise<void>;
   onToggleTransfer: (tx: Transaction) => Promise<void>;
   onSplit?: (tx: Transaction) => void;
+  onAddCategory?: () => void;
+  /** When set, drawer auto-applies this value to its category field, then clears it via onPendingCategoryConsumed. */
+  pendingCategoryToSelect?: string | null;
+  onPendingCategoryConsumed?: () => void;
 }
 
 const matchSourceLabels: Record<string, { label: string; icon: React.ReactNode; color: string }> = {
@@ -101,6 +105,9 @@ export function TransactionDetailDrawer({
   onApprove,
   onToggleTransfer,
   onSplit,
+  onAddCategory,
+  pendingCategoryToSelect,
+  onPendingCategoryConsumed,
 }: TransactionDetailDrawerProps) {
   const [editValues, setEditValues] = useState({
     category: '', method: '', notes: '',
@@ -132,6 +139,14 @@ export function TransactionDetailDrawer({
       });
     }
   }, [tx?.id]);
+
+  // When parent creates a new category from the drawer flow, auto-select it.
+  useEffect(() => {
+    if (pendingCategoryToSelect && categories.includes(pendingCategoryToSelect)) {
+      setEditValues(prev => ({ ...prev, category: pendingCategoryToSelect }));
+      onPendingCategoryConsumed?.();
+    }
+  }, [pendingCategoryToSelect, categories, onPendingCategoryConsumed]);
 
   if (!tx) return null;
 
@@ -291,7 +306,16 @@ export function TransactionDetailDrawer({
         <div className="space-y-3 mb-4">
           <div>
             <Label className="text-[11px] text-muted-foreground uppercase tracking-wider">Category</Label>
-            <Select value={editValues.category} onValueChange={v => setEditValues(prev => ({ ...prev, category: v }))}>
+            <Select
+              value={editValues.category}
+              onValueChange={v => {
+                if (v === '__add_new__') {
+                  onAddCategory?.();
+                  return;
+                }
+                setEditValues(prev => ({ ...prev, category: v }));
+              }}
+            >
               <SelectTrigger className="mt-1 h-9 text-sm">
                 <SelectValue placeholder="Select category..." />
               </SelectTrigger>
@@ -299,6 +323,11 @@ export function TransactionDetailDrawer({
                 {categories.map(c => (
                   <SelectItem key={c} value={c}>{c}</SelectItem>
                 ))}
+                {onAddCategory && (
+                  <SelectItem value="__add_new__" className="text-primary font-medium border-t border-border mt-1 pt-1.5">
+                    + Add new category…
+                  </SelectItem>
+                )}
               </SelectContent>
             </Select>
           </div>

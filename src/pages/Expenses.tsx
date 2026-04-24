@@ -7,6 +7,7 @@ import { FileProgressList, type FileQueueItem } from '@/components/FileProgressL
 import { ImportPreviewDialog, type FilePreviewInfo } from '@/components/ImportPreviewDialog';
 import { TransactionDetailDrawer } from '@/components/TransactionDetailDrawer';
 import { SplitTransactionDialog } from '@/components/SplitTransactionDialog';
+import { AddCategoryDialog } from '@/components/AddCategoryDialog';
 import { previewCsvFile, parseCsvFileWithMapping, type ParsePreview, type ColumnMapping } from '@/lib/csv-parser';
 import { categorizeTransactions, categorizeWithAI, updateMerchantMemory } from '@/lib/categorization-engine';
 import { detectMethodFromFilename } from '@/lib/method-detector';
@@ -104,6 +105,17 @@ export default function Expenses() {
   const [sortAsc, setSortAsc] = useState(false);
   const [detailTx, setDetailTx] = useState<Transaction | null>(null);
   const [splitTx, setSplitTx] = useState<Transaction | null>(null);
+  // "+ Add new category" inline dialog — tracks which surface triggered it
+  // so we can auto-apply the new category back to that surface.
+  const [addCategoryOpen, setAddCategoryOpen] = useState(false);
+  const [addCategoryTarget, setAddCategoryTarget] = useState<
+    | { kind: 'inline'; txId: string }
+    | { kind: 'drawer' }
+    | { kind: 'split'; rowId: string }
+    | null
+  >(null);
+  const [pendingDrawerCategory, setPendingDrawerCategory] = useState<string | null>(null);
+  const [pendingSplitCategory, setPendingSplitCategory] = useState<{ rowId: string; name: string } | null>(null);
 
   // Upload state
   const [fileQueue, setFileQueue] = useState<FileQueueItem[]>([]);
@@ -1473,7 +1485,14 @@ export default function Expenses() {
                           ) : (
                             <Select
                               value={tx.final_category || tx.predicted_category || ''}
-                              onValueChange={v => inlineUpdate(tx, 'final_category', v)}
+                              onValueChange={v => {
+                                if (v === '__add_new__') {
+                                  setAddCategoryTarget({ kind: 'inline', txId: tx.id });
+                                  setAddCategoryOpen(true);
+                                  return;
+                                }
+                                inlineUpdate(tx, 'final_category', v);
+                              }}
                             >
                               <SelectTrigger className="h-6 px-1.5 text-xs border-transparent bg-transparent hover:bg-secondary/40 focus:bg-secondary/60 focus:border-border [&>svg]:opacity-0 hover:[&>svg]:opacity-60 focus:[&>svg]:opacity-60">
                                 <SelectValue placeholder="—" />
@@ -1482,6 +1501,9 @@ export default function Expenses() {
                                 {categories.map(c => (
                                   <SelectItem key={c} value={c} className="text-xs">{c}</SelectItem>
                                 ))}
+                                <SelectItem value="__add_new__" className="text-xs text-primary font-medium border-t border-border mt-1 pt-1.5">
+                                  + Add new category…
+                                </SelectItem>
                               </SelectContent>
                             </Select>
                           )}
@@ -1614,6 +1636,12 @@ export default function Expenses() {
         onApprove={approveRow}
         onToggleTransfer={toggleTransfer}
         onSplit={(tx) => { setDetailTx(null); setSplitTx(tx as any); }}
+        onAddCategory={() => {
+          setAddCategoryTarget({ kind: 'drawer' });
+          setAddCategoryOpen(true);
+        }}
+        pendingCategoryToSelect={pendingDrawerCategory}
+        onPendingCategoryConsumed={() => setPendingDrawerCategory(null)}
       />
 
       {/* Split Transaction Dialog */}
@@ -1623,6 +1651,32 @@ export default function Expenses() {
         transaction={splitTx}
         categories={categories}
         onSplit={handleSplit}
+        onAddCategory={(rowId) => {
+          setAddCategoryTarget({ kind: 'split', rowId });
+          setAddCategoryOpen(true);
+        }}
+        pendingCategoryToSelect={pendingSplitCategory}
+        onPendingCategoryConsumed={() => setPendingSplitCategory(null)}
+      />
+
+      {/* Add new category inline dialog */}
+      <AddCategoryDialog
+        open={addCategoryOpen}
+        onClose={() => { setAddCategoryOpen(false); setAddCategoryTarget(null); }}
+        mode={categoryMode}
+        existingCategories={categories}
+        onCreated={async (newName) => {
+          await loadCategories();
+          const target = addCategoryTarget;
+          if (target?.kind === 'inline') {
+            const tx = transactions.find(t => t.id === target.txId);
+            if (tx) await inlineUpdate(tx, 'final_category', newName);
+          } else if (target?.kind === 'drawer') {
+            setPendingDrawerCategory(newName);
+          } else if (target?.kind === 'split') {
+            setPendingSplitCategory({ rowId: target.rowId, name: newName });
+          }
+        }}
       />
 
       <ImportPreviewDialog

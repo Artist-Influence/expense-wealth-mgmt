@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -34,6 +34,10 @@ interface SplitTransactionDialogProps {
   } | null;
   categories: string[];
   onSplit: (parentId: string, children: SplitRow[]) => Promise<void>;
+  onAddCategory?: (rowId: string) => void;
+  /** When set, this row gets the new category applied, then parent clears via onPendingCategoryConsumed. */
+  pendingCategoryToSelect?: { rowId: string; name: string } | null;
+  onPendingCategoryConsumed?: () => void;
 }
 
 const MODE_LABELS: Record<string, string> = {
@@ -61,10 +65,18 @@ function makeRow(mode: string, remaining: number): SplitRow {
   };
 }
 
-export function SplitTransactionDialog({ open, onClose, transaction, categories, onSplit }: SplitTransactionDialogProps) {
+export function SplitTransactionDialog({ open, onClose, transaction, categories, onSplit, onAddCategory, pendingCategoryToSelect, onPendingCategoryConsumed }: SplitTransactionDialogProps) {
   const totalAmount = Math.abs(transaction?.amount || 0);
   const [rows, setRows] = useState<SplitRow[]>([]);
   const [saving, setSaving] = useState(false);
+
+  // Auto-apply newly created category to the row that requested it.
+  useEffect(() => {
+    if (pendingCategoryToSelect && categories.includes(pendingCategoryToSelect.name)) {
+      setRows(prev => prev.map(r => r.id === pendingCategoryToSelect.rowId ? { ...r, category: pendingCategoryToSelect.name } : r));
+      onPendingCategoryConsumed?.();
+    }
+  }, [pendingCategoryToSelect, categories, onPendingCategoryConsumed]);
 
   // Reset rows when dialog opens
   const [lastTxId, setLastTxId] = useState<string | null>(null);
@@ -193,10 +205,24 @@ export function SplitTransactionDialog({ open, onClose, transaction, categories,
                 </div>
                 <div>
                   <Label className="text-[10px] text-muted-foreground">Category</Label>
-                  <Select value={row.category} onValueChange={v => updateRow(row.id, { category: v })}>
+                  <Select
+                    value={row.category}
+                    onValueChange={v => {
+                      if (v === '__add_new__') {
+                        onAddCategory?.(row.id);
+                        return;
+                      }
+                      updateRow(row.id, { category: v });
+                    }}
+                  >
                     <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Select..." /></SelectTrigger>
                     <SelectContent>
                       {categories.map(c => <SelectItem key={c} value={c} className="text-xs">{c}</SelectItem>)}
+                      {onAddCategory && (
+                        <SelectItem value="__add_new__" className="text-xs text-primary font-medium border-t border-border mt-1 pt-1.5">
+                          + Add new category…
+                        </SelectItem>
+                      )}
                     </SelectContent>
                   </Select>
                 </div>
