@@ -140,6 +140,14 @@ export function TransactionDetailDrawer({
     }
   }, [tx?.id]);
 
+  // When parent creates a new category from the drawer flow, auto-select it.
+  useEffect(() => {
+    if (pendingCategoryToSelect && categories.includes(pendingCategoryToSelect)) {
+      setEditValues(prev => ({ ...prev, category: pendingCategoryToSelect }));
+      onPendingCategoryConsumed?.();
+    }
+  }, [pendingCategoryToSelect, categories, onPendingCategoryConsumed]);
+
   if (!tx) return null;
 
   const handleSave = async () => {
