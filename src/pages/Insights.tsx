@@ -56,6 +56,12 @@ export default function Insights() {
   const [incomeData, setIncomeData] = useState<IncomeTransaction[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // ─── Date filter (default: This Year) ───
+  const _now = new Date();
+  const [dateFrom, setDateFrom] = useState<string | null>(`${_now.getFullYear()}-01-01`);
+  const [dateTo, setDateTo] = useState<string | null>(null);
+  const [dateLabel, setDateLabel] = useState<string>('Year to Date');
+
   // Auto-pick the mode that actually has data on first load
   useEffect(() => {
     if (!user || modeAutoSet) return;
