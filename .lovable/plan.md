@@ -1,61 +1,36 @@
-# Selective Export from Checked Rows
+# Fix: Export should include ALL checked rows
 
-All three table pages (Expenses, Income, Reimbursements) already have row-level checkbox selection (`selectedIds: Set<string>`) wired up for bulk operations. The `exportCsv` functions currently ignore that selection and always export the entire `filtered` set. This plan makes Export respect the checkbox selection.
+## Root cause
 
-## Behavior
+The current Expenses `exportCsv` (line 652) takes the checked rows but then runs them through a **second filter** that drops anything whose `review_status` isn't `approved`, `auto_categorized`, or `edited` (and also drops split parents). Result: if you checkbox a row that is still in `needs_review` / `flagged` / `pending`, it silently gets stripped from the CSV — so you see "only one" make it through.
 
-- **Some rows checked** → Export only those checked rows (still constrained to whatever is currently filtered, so checking a row then changing filters can't leak hidden rows).
-- **No rows checked** → Export everything currently visible in the filtered view (today's behavior).
-- A toast confirms the count, e.g. *"Exported 12 selected rows"* vs *"Exported 87 rows"*.
-
-## Files to change
-
-### 1. `src/pages/Expenses.tsx` — `exportCsv` (line ~652)
-Replace the source array. Today:
 ```ts
-const rows = filtered
-  .filter(t => ['approved','auto_categorized','edited'].includes(t.review_status) && !t.is_split_parent)
-  .map(...)
-```
-Change to:
-```ts
-const source = selectedIds.size > 0
-  ? filtered.filter(t => selectedIds.has(t.id))
-  : filtered;
+const source = usingSelection ? filtered.filter(t => selectedIds.has(t.id)) : filtered;
 const rows = source
   .filter(t => ['approved','auto_categorized','edited'].includes(t.review_status) && !t.is_split_parent)
-  .map(...)
+  ...
 ```
-Update the empty-state toast and success toast to reflect selection vs filtered.
 
-### 2. `src/pages/Income.tsx` — `exportCsv` (line ~403)
-Today: `const rows = filtered.length > 0 ? filtered : transactions;`
-Change to:
-```ts
-const rows = selectedIds.size > 0
-  ? filtered.filter(t => selectedIds.has(t.id))
-  : filtered;
-```
-(Drop the fallback to all `transactions` — exporting hidden data when filters are active is misleading.)
+Income and Reimbursements don't have this secondary filter, so they already export everything that's checked.
 
-### 3. `src/pages/Reimbursements.tsx` — `exportCsv` (line ~276)
-Today: `const rows = filtered.map(...)`
-Change to:
+## Fix (Expenses only)
+
+Change the source so the approval-status filter only applies to the **fallback** path (no selection). When the user explicitly checks rows, export every checked row exactly as-is. Also include a `Review Status` column so it's obvious why a row was/wasn't pre-approved.
+
 ```ts
-const source = selectedIds.size > 0
+const source = usingSelection
   ? filtered.filter(t => selectedIds.has(t.id))
-  : filtered;
-const rows = source.map(...)
+  : filtered.filter(t => ['approved','auto_categorized','edited'].includes(t.review_status) && !t.is_split_parent);
 ```
+
+And update the empty-state toast for the selection case to "No selected rows to export".
 
 ## Out of scope
 
-- **Accountant page** (`src/pages/Accountant.tsx`) — preview-only, no row checkboxes; left unchanged.
-- **Tax / Wealth / Allocations / Insights** — no transaction tables with row checkboxes + export.
-- No new UI elements; the existing "X selected" header bar already signals the active selection.
+- Income and Reimbursements exports already honor the full checked set; no change needed.
+- No UI / table changes.
 
 ## QA
 
-- Filter Expenses to one month, check 3 rows, click Export → CSV contains exactly those 3.
-- Same page, clear selection, click Export → CSV contains all approved rows in the filtered view.
-- Repeat on Income and Reimbursements.
+- Filter Expenses, check 5 rows of mixed `review_status` (some approved, some needs-review), click Export → CSV contains all 5.
+- Clear selection, click Export → CSV contains only approved/auto/edited rows in the filtered view (existing behavior).

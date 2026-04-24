@@ -651,24 +651,27 @@ export default function Expenses() {
 
   const exportCsv = () => {
     const usingSelection = selectedIds.size > 0;
-    const source = usingSelection ? filtered.filter(t => selectedIds.has(t.id)) : filtered;
-    const rows = source
-      .filter(t => ['approved', 'auto_categorized', 'edited'].includes(t.review_status) && !t.is_split_parent)
-      .map(t => ({
-        Date: t.date || '',
-        Description: t.description_raw || '',
-        Amount: t.amount != null ? `$${Math.abs(t.amount).toFixed(2)}` : '',
-        Category: t.final_category || t.predicted_category || '',
-        Method: t.final_method || t.predicted_method || '',
-        Mode: t.transaction_mode || t.mode || '',
-        'Economic Owner': t.economic_owner || '',
-        'Tax Treatment': t.tax_treatment || '',
-        Reimbursable: t.is_reimbursable ? 'Yes' : 'No',
-        Transfer: t.is_transfer ? 'Yes' : 'No',
-        Notes: t.final_notes || t.predicted_notes || '',
-      }));
+    // When user explicitly checks rows, export every one of them as-is.
+    // Otherwise fall back to the filtered view restricted to approved-style rows.
+    const source = usingSelection
+      ? filtered.filter(t => selectedIds.has(t.id))
+      : filtered.filter(t => ['approved', 'auto_categorized', 'edited'].includes(t.review_status) && !t.is_split_parent);
+    const rows = source.map(t => ({
+      Date: t.date || '',
+      Description: t.description_raw || '',
+      Amount: t.amount != null ? `$${Math.abs(t.amount).toFixed(2)}` : '',
+      Category: t.final_category || t.predicted_category || '',
+      Method: t.final_method || t.predicted_method || '',
+      Mode: t.transaction_mode || t.mode || '',
+      'Economic Owner': t.economic_owner || '',
+      'Tax Treatment': t.tax_treatment || '',
+      Reimbursable: t.is_reimbursable ? 'Yes' : 'No',
+      Transfer: t.is_transfer ? 'Yes' : 'No',
+      'Review Status': t.review_status || '',
+      Notes: t.final_notes || t.predicted_notes || '',
+    }));
     if (rows.length === 0) {
-      toast.error(usingSelection ? 'No approved/edited transactions in selection' : 'No approved/edited transactions to export');
+      toast.error(usingSelection ? 'No selected rows to export' : 'No approved/edited transactions to export');
       return;
     }
     const headers = Object.keys(rows[0]);
