@@ -144,6 +144,8 @@ export default function Income() {
     return transactions.filter(t => {
       if (filterType !== 'all' && t.income_type !== filterType) return false;
       if (filterStatus !== 'all' && t.status !== filterStatus) return false;
+      if (dateFrom && (!t.date || t.date < dateFrom)) return false;
+      if (dateTo && (!t.date || t.date > dateTo)) return false;
       if (searchQuery) {
         const q = searchQuery.toLowerCase();
         const match = (t.description_raw || '').toLowerCase().includes(q)
@@ -153,7 +155,79 @@ export default function Income() {
       }
       return true;
     });
-  }, [transactions, filterType, filterStatus, searchQuery]);
+  }, [transactions, filterType, filterStatus, dateFrom, dateTo, searchQuery]);
+
+  // Months derived from transactions for the date filter
+  const availableMonths = useMemo(() => {
+    const set = new Set<string>();
+    transactions.forEach(t => { if (t.date) set.add(t.date.slice(0, 7)); });
+    return Array.from(set).sort().reverse();
+  }, [transactions]);
+
+  // ---- Date filter helpers ----
+  const fmtYMD = (d: Date) => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+  const fmtMonthLabel = (ym: string) => {
+    const [y, m] = ym.split('-').map(Number);
+    return new Date(y, m - 1, 1).toLocaleString('en-US', { month: 'short', year: 'numeric' });
+  };
+  const clearDates = () => {
+    setDateFrom(null);
+    setDateTo(null);
+    setDateLabel('All Dates');
+  };
+  const applyMonth = (ym: string) => {
+    const [y, m] = ym.split('-').map(Number);
+    const first = new Date(y, m - 1, 1);
+    const last = new Date(y, m, 0);
+    setDateFrom(fmtYMD(first));
+    setDateTo(fmtYMD(last));
+    setDateLabel(fmtMonthLabel(ym));
+  };
+  const applyThisMonth = () => {
+    const nowD = new Date();
+    applyMonth(`${nowD.getFullYear()}-${String(nowD.getMonth() + 1).padStart(2, '0')}`);
+    setDateLabel('This Month');
+  };
+  const applyLastMonth = () => {
+    const nowD = new Date();
+    const d = new Date(nowD.getFullYear(), nowD.getMonth() - 1, 1);
+    applyMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+    setDateLabel('Last Month');
+  };
+  const applyLastNDays = (n: number) => {
+    const to = new Date();
+    const from = new Date();
+    from.setDate(from.getDate() - n);
+    setDateFrom(fmtYMD(from));
+    setDateTo(fmtYMD(to));
+    setDateLabel(`Last ${n} Days`);
+  };
+  const applyYTD = () => {
+    const nowD = new Date();
+    setDateFrom(`${nowD.getFullYear()}-01-01`);
+    setDateTo(fmtYMD(nowD));
+    setDateLabel('Year to Date');
+  };
+  const applyLastYear = () => {
+    const y = new Date().getFullYear() - 1;
+    setDateFrom(`${y}-01-01`);
+    setDateTo(`${y}-12-31`);
+    setDateLabel(`${y}`);
+  };
+  const onCustomFrom = (v: string) => {
+    setDateFrom(v || null);
+    setDateLabel(v || dateTo ? `${v || '…'} – ${dateTo || '…'}` : 'All Dates');
+  };
+  const onCustomTo = (v: string) => {
+    setDateTo(v || null);
+    setDateLabel(dateFrom || v ? `${dateFrom || '…'} – ${v || '…'}` : 'All Dates');
+  };
+  const dateActive = !!(dateFrom || dateTo);
 
   // Selection
   const allSelected = filtered.length > 0 && filtered.every(t => selectedIds.has(t.id));
