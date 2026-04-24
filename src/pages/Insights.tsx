@@ -313,19 +313,22 @@ export default function Insights() {
 
   // Exclude non-earning income types from savings rate math
   const NON_EARNING_TYPES = ['reimbursement', 'transfer', 'refund', 'loan_proceeds', 'owner_contribution'];
-  const earnedIncome = useMemo(() => incomeData.filter(t => !NON_EARNING_TYPES.includes(t.income_type)), [incomeData]);
+  const earnedIncomeAll = useMemo(() => incomeData.filter(t => !NON_EARNING_TYPES.includes(t.income_type)), [incomeData]);
+  // Date-filtered earned income (drives savings rate totals shown to user)
+  const earnedIncome = useMemo(() => earnedIncomeAll.filter(t => inDateRange(t.date)), [earnedIncomeAll, dateFrom, dateTo]);
 
   // ─── INCOME & SAVINGS TAB DATA ───
+  // Income vs Expenses chart uses ALL data with its own last-12-months window (independent of filter)
   const incomeVsExpenses = useMemo(() => {
     const monthMap = new Map<string, { income: number; expenses: number }>();
-    expenses.forEach(t => {
+    allExpenses.forEach(t => {
       if (!t.date) return;
       const m = t.date.substring(0, 7);
       const entry = monthMap.get(m) || { income: 0, expenses: 0 };
       entry.expenses += Math.abs(t.amount || 0);
       monthMap.set(m, entry);
     });
-    earnedIncome.forEach(t => {
+    earnedIncomeAll.forEach(t => {
       if (!t.date) return;
       const m = t.date.substring(0, 7);
       const entry = monthMap.get(m) || { income: 0, expenses: 0 };
@@ -341,7 +344,7 @@ export default function Insights() {
         expenses: Math.round(d.expenses * 100) / 100,
         net: Math.round((d.income - d.expenses) * 100) / 100,
       }));
-  }, [expenses, earnedIncome]);
+  }, [allExpenses, earnedIncomeAll]);
 
   const savingsRate = useMemo(() => {
     const now = new Date();
@@ -352,35 +355,37 @@ export default function Insights() {
       return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
     };
 
+    // Current/trailing rates always use calendar-current data (not the active filter)
     const calcRate = (months: string[]) => {
       let inc = 0, exp = 0;
-      earnedIncome.forEach(t => { if (t.date && months.includes(t.date.substring(0, 7))) inc += Math.abs(t.amount || 0); });
-      expenses.forEach(t => { if (t.date && months.includes(t.date.substring(0, 7))) exp += Math.abs(t.amount || 0); });
+      earnedIncomeAll.forEach(t => { if (t.date && months.includes(t.date.substring(0, 7))) inc += Math.abs(t.amount || 0); });
+      allExpenses.forEach(t => { if (t.date && months.includes(t.date.substring(0, 7))) exp += Math.abs(t.amount || 0); });
       return inc > 0 ? ((inc - exp) / inc) * 100 : 0;
     };
 
     const currentRate = calcRate([thisMonth]);
     const trailing3 = calcRate([getMonthKey(0), getMonthKey(1), getMonthKey(2)]);
 
+    // Totals reflect the active date filter
     const totalIncome = earnedIncome.reduce((s, t) => s + Math.abs(t.amount || 0), 0);
     const totalExpenses = expenses.reduce((s, t) => s + Math.abs(t.amount || 0), 0);
 
     return { currentRate, trailing3, totalIncome, totalExpenses };
-  }, [expenses, earnedIncome]);
+  }, [expenses, earnedIncome, allExpenses, earnedIncomeAll]);
 
+  // YoY uses calendar-year math, independent of active filter
   const yoyComparison = useMemo(() => {
     const now = new Date();
     const thisYear = now.getFullYear().toString();
     const lastYear = (now.getFullYear() - 1).toString();
 
     let thisYearIncome = 0, lastYearIncome = 0, thisYearExpenses = 0, lastYearExpenses = 0;
-    // Use earnedIncome (excludes reimbursements, transfers, refunds) for YoY
-    earnedIncome.forEach(t => {
+    earnedIncomeAll.forEach(t => {
       if (!t.date) return;
       if (t.date.startsWith(thisYear)) thisYearIncome += Math.abs(t.amount || 0);
       if (t.date.startsWith(lastYear)) lastYearIncome += Math.abs(t.amount || 0);
     });
-    expenses.forEach(t => {
+    allExpenses.forEach(t => {
       if (!t.date) return;
       if (t.date.startsWith(thisYear)) thisYearExpenses += Math.abs(t.amount || 0);
       if (t.date.startsWith(lastYear)) lastYearExpenses += Math.abs(t.amount || 0);
@@ -394,7 +399,7 @@ export default function Insights() {
       incomeChange: pctChange(thisYearIncome, lastYearIncome),
       expenseChange: pctChange(thisYearExpenses, lastYearExpenses),
     };
-  }, [expenses, earnedIncome]);
+  }, [allExpenses, earnedIncomeAll]);
 
   // ─── TRENDS TAB DATA ───
   const categoryTrends = useMemo(() => {
