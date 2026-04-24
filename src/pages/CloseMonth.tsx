@@ -10,7 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Link } from 'react-router-dom';
 import {
-  AlertTriangle, ReceiptText, Landmark, Target, FileSpreadsheet,
+  AlertTriangle, Landmark, Target, FileSpreadsheet,
   CheckCircle2, ChevronRight, ExternalLink
 } from 'lucide-react';
 
@@ -282,7 +282,7 @@ export default function CloseMonth() {
         {/* Progress */}
         <div className="space-y-1.5">
           <div className="flex justify-between text-xs text-muted-foreground">
-            <span>{completedSteps.size} of 6 steps</span>
+            <span>{completedSteps.size} of 5 steps</span>
             <span>{Math.round(progressPercent)}%</span>
           </div>
           <Progress value={progressPercent} className="h-2" />
