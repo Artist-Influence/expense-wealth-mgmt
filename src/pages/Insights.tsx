@@ -8,9 +8,13 @@ import {
 } from 'recharts';
 import {
   TrendingUp, TrendingDown, DollarSign, Tag, Store, ArrowLeftRight,
-  RefreshCw, PiggyBank, AlertTriangle, CheckCircle2, CreditCard
+  RefreshCw, PiggyBank, AlertTriangle, CheckCircle2, CreditCard, Calendar, ChevronDown, X
 } from 'lucide-react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 interface Transaction {
   date: string | null;
