@@ -312,6 +312,85 @@ export default function Expenses() {
     }
   };
 
+  // Inline cell edit — update a single field directly from the table.
+  // Mirrors handleDrawerSave guardrails (category whitelist, status transition, merchant memory).
+  const inlineUpdate = async (tx: Transaction, field: 'final_category' | 'final_method' | 'economic_owner', value: string) => {
+    if (tx.is_split_parent) {
+      toast.error('Split parent — edit child rows instead.');
+      return;
+    }
+
+    let nextValue: string | null = value;
+
+    if (field === 'final_category') {
+      if (!value) {
+        nextValue = null;
+      } else if (categories.length > 0) {
+        const canonical = categories.find(c => c.toLowerCase() === value.toLowerCase());
+        if (!canonical) {
+          toast.error(`"${value}" is not in your approved category list for ${categoryMode} mode`);
+          return;
+        }
+        nextValue = canonical;
+      }
+    }
+
+    const updatePayload: Record<string, any> = { [field]: nextValue };
+
+    // Any meaningful inline edit promotes the row to 'edited' (unless we're clearing the category).
+    if (field === 'final_category') {
+      updatePayload.review_status = nextValue ? 'edited' : 'needs_review';
+    } else if (!['approved'].includes(tx.review_status)) {
+      updatePayload.review_status = 'edited';
+    } else {
+      updatePayload.review_status = 'edited';
+    }
+
+    // Optimistic update
+    setTransactions(prev => prev.map(t => t.id === tx.id ? { ...t, ...updatePayload } as Transaction : t));
+
+    const { error } = await supabase
+      .from('transactions_uploaded')
+      .update(updatePayload)
+      .eq('id', tx.id);
+
+    if (error) {
+      toast.error('Failed to save');
+      await loadTransactions();
+      return;
+    }
+
+    // Update merchant memory the same way the drawer does (skip transfers, splits, duplicates, artifacts).
+    if (
+      field !== 'economic_owner' &&
+      tx.parse_status === 'ok' &&
+      !tx.is_transfer &&
+      !tx.is_split_parent &&
+      !tx.parent_transaction_id &&
+      tx.duplicate_status !== 'possible_duplicate'
+    ) {
+      const desc = tx.description_raw || '';
+      if (!isStatementArtifact(desc, tx.amount || 0)) {
+        const merchantKey = generateMerchantKey(normalizeDescription(desc));
+        const finalCategory = field === 'final_category' ? (nextValue || '') : (tx.final_category || tx.predicted_category || '');
+        const finalMethod = field === 'final_method' ? nextValue : (tx.final_method || tx.predicted_method || null);
+        if (finalCategory) {
+          await updateMerchantMemory(
+            merchantKey,
+            categoryMode as 'personal' | 'business',
+            finalCategory,
+            finalMethod,
+            tx.final_notes || tx.predicted_notes || null,
+            desc,
+            user!.id
+          );
+        }
+      }
+    }
+
+    toast.success('Saved');
+  };
+
   const bulkApprove = async () => {
     const selected = filtered.filter(t => selectedIds.has(t.id));
     for (const tx of selected) await approveRow(tx);
@@ -1047,14 +1126,52 @@ export default function Expenses() {
                       <td className="px-2 py-1 text-right font-mono text-foreground whitespace-nowrap">
                         ${tx.amount != null ? Math.abs(tx.amount).toFixed(2) : '0.00'}
                       </td>
-                      <td className="px-2 py-1">
-                        <span className="text-foreground">{tx.final_category || tx.predicted_category || '—'}</span>
+                      <td className="px-1 py-0.5" onClick={e => e.stopPropagation()}>
+                        {tx.is_split_parent ? (
+                          <span className="text-foreground px-1" title="Split parent — edit child rows instead">
+                            {tx.final_category || tx.predicted_category || '—'}
+                          </span>
+                        ) : (
+                          <Select
+                            value={tx.final_category || tx.predicted_category || ''}
+                            onValueChange={v => inlineUpdate(tx, 'final_category', v)}
+                          >
+                            <SelectTrigger className="h-6 px-1.5 text-xs border-transparent bg-transparent hover:bg-secondary/40 focus:bg-secondary/60 focus:border-border [&>svg]:opacity-0 hover:[&>svg]:opacity-60 focus:[&>svg]:opacity-60">
+                              <SelectValue placeholder="—" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {categories.map(c => (
+                                <SelectItem key={c} value={c} className="text-xs">{c}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        )}
                       </td>
-                      <td className="px-2 py-1">
-                        <span className="text-muted-foreground">{tx.final_method || tx.predicted_method || '—'}</span>
+                      <td className="px-1 py-0.5" onClick={e => e.stopPropagation()}>
+                        {tx.is_split_parent ? (
+                          <span className="text-muted-foreground px-1">{tx.final_method || tx.predicted_method || '—'}</span>
+                        ) : (
+                          <InlineMethodCell tx={tx} onCommit={v => inlineUpdate(tx, 'final_method', v)} />
+                        )}
                       </td>
-                      <td className="px-2 py-1">
-                        <span className="text-muted-foreground text-[10px]">{tx.economic_owner || '—'}</span>
+                      <td className="px-1 py-0.5" onClick={e => e.stopPropagation()}>
+                        {tx.is_split_parent ? (
+                          <span className="text-muted-foreground text-[10px] px-1">{tx.economic_owner || '—'}</span>
+                        ) : (
+                          <Select
+                            value={tx.economic_owner || 'personal'}
+                            onValueChange={v => inlineUpdate(tx, 'economic_owner', v)}
+                          >
+                            <SelectTrigger className="h-6 px-1.5 text-[10px] border-transparent bg-transparent hover:bg-secondary/40 focus:bg-secondary/60 focus:border-border [&>svg]:opacity-0 hover:[&>svg]:opacity-60 focus:[&>svg]:opacity-60">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {['personal', 'artist_influence', 'employer', 'client', 'other'].map(o => (
+                                <SelectItem key={o} value={o} className="text-[11px]">{o.replace(/_/g, ' ')}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        )}
                       </td>
                       <td className="px-2 py-1">
                         <span className={getConfidenceClass(tx.confidence)}>
@@ -1205,4 +1322,31 @@ function getModeDefaults(mode: TransactionMode) {
         reimbursement_status: 'pending',
       };
   }
+}
+
+// Inline method cell: free-text input that commits on blur or Enter, cancels on Esc.
+function InlineMethodCell({ tx, onCommit }: { tx: Transaction; onCommit: (value: string) => void }) {
+  const initial = tx.final_method || tx.predicted_method || '';
+  const [value, setValue] = useState(initial);
+  useEffect(() => { setValue(tx.final_method || tx.predicted_method || ''); }, [tx.id, tx.final_method, tx.predicted_method]);
+
+  const commit = () => {
+    const trimmed = value.trim();
+    if (trimmed === (initial || '').trim()) return;
+    onCommit(trimmed);
+  };
+
+  return (
+    <Input
+      value={value}
+      onChange={e => setValue(e.target.value)}
+      onBlur={commit}
+      onKeyDown={e => {
+        if (e.key === 'Enter') { e.preventDefault(); (e.target as HTMLInputElement).blur(); }
+        else if (e.key === 'Escape') { setValue(initial); (e.target as HTMLInputElement).blur(); }
+      }}
+      placeholder="—"
+      className="h-6 px-1.5 text-xs border-transparent bg-transparent hover:bg-secondary/40 focus:bg-secondary/60 focus:border-border text-muted-foreground placeholder:text-muted-foreground/50"
+    />
+  );
 }
