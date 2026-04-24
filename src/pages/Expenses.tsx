@@ -204,7 +204,79 @@ export default function Expenses() {
     });
 
     return result;
-  }, [transactions, statusFilter, extraFilter, categoryFilter, search, sortCol, sortAsc]);
+  }, [transactions, statusFilter, extraFilter, categoryFilter, dateFrom, dateTo, search, sortCol, sortAsc]);
+
+  // Available months derived from transactions for the date filter
+  const availableMonths = useMemo(() => {
+    const set = new Set<string>();
+    transactions.forEach(t => { if (t.date) set.add(t.date.slice(0, 7)); });
+    return Array.from(set).sort().reverse();
+  }, [transactions]);
+
+  // ---- Date filter helpers ----
+  const fmtYMD = (d: Date) => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+  const fmtMonthLabel = (ym: string) => {
+    const [y, m] = ym.split('-').map(Number);
+    return new Date(y, m - 1, 1).toLocaleString('en-US', { month: 'short', year: 'numeric' });
+  };
+  const clearDates = () => {
+    setDateFrom(null);
+    setDateTo(null);
+    setDateLabel('All Dates');
+  };
+  const applyMonth = (ym: string) => {
+    const [y, m] = ym.split('-').map(Number);
+    const first = new Date(y, m - 1, 1);
+    const last = new Date(y, m, 0);
+    setDateFrom(fmtYMD(first));
+    setDateTo(fmtYMD(last));
+    setDateLabel(fmtMonthLabel(ym));
+  };
+  const applyThisMonth = () => {
+    const now = new Date();
+    applyMonth(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`);
+    setDateLabel('This Month');
+  };
+  const applyLastMonth = () => {
+    const now = new Date();
+    const d = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    applyMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+    setDateLabel('Last Month');
+  };
+  const applyLastNDays = (n: number) => {
+    const to = new Date();
+    const from = new Date();
+    from.setDate(from.getDate() - n);
+    setDateFrom(fmtYMD(from));
+    setDateTo(fmtYMD(to));
+    setDateLabel(`Last ${n} Days`);
+  };
+  const applyYTD = () => {
+    const now = new Date();
+    setDateFrom(`${now.getFullYear()}-01-01`);
+    setDateTo(fmtYMD(now));
+    setDateLabel('Year to Date');
+  };
+  const applyLastYear = () => {
+    const y = new Date().getFullYear() - 1;
+    setDateFrom(`${y}-01-01`);
+    setDateTo(`${y}-12-31`);
+    setDateLabel(`${y}`);
+  };
+  const onCustomFrom = (v: string) => {
+    setDateFrom(v || null);
+    setDateLabel(v || dateTo ? `${v || '…'} – ${dateTo || '…'}` : 'All Dates');
+  };
+  const onCustomTo = (v: string) => {
+    setDateTo(v || null);
+    setDateLabel(dateFrom || v ? `${dateFrom || '…'} – ${v || '…'}` : 'All Dates');
+  };
+  const dateActive = !!(dateFrom || dateTo);
 
   // Summary stats — V2
   const stats = useMemo(() => {
