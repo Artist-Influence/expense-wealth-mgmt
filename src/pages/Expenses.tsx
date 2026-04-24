@@ -1286,6 +1286,40 @@ export default function Expenses() {
           )}
 
 
+          {selectedIds.size === 0 && user && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 gap-1 text-xs glass-input"
+              disabled={scanningRecurring}
+              onClick={async () => {
+                setScanningRecurring(true);
+                const tId = toast.loading(`Scanning ${categoryMode} transactions for recurring charges…`);
+                try {
+                  const summary = await backfillRecurringForOwner(user.id, categoryMode as 'personal' | 'business');
+                  toast.dismiss(tId);
+                  if (summary.skippedNoSubsCategory === -1) {
+                    toast.error('Add a "Subscriptions" category first.');
+                  } else if (summary.updated === 0) {
+                    toast.success(`No new recurring charges found (scanned ${summary.scanned} merchants).`);
+                  } else {
+                    toast.success(`Tagged ${summary.updated} recurring charges as Subscriptions (${summary.eligible} matches across ${summary.scanned} merchants).`);
+                  }
+                  await loadTransactions();
+                } catch (err: any) {
+                  toast.dismiss(tId);
+                  toast.error(`Scan failed: ${err?.message || 'unknown error'}`);
+                  console.error(err);
+                } finally {
+                  setScanningRecurring(false);
+                }
+              }}
+            >
+              <RefreshCw className={`h-3 w-3 ${scanningRecurring ? 'animate-spin' : ''}`} />
+              {scanningRecurring ? 'Scanning…' : 'Re-scan recurring'}
+            </Button>
+          )}
+
           {selectedIds.size === 0 && (() => {
             const suggestedCount = filtered.filter(t => ['suggested', 'ai_suggested', 'auto_categorized'].includes(t.review_status) && (t.final_category || t.predicted_category)).length;
             return suggestedCount > 0 ? (
