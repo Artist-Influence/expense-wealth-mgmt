@@ -92,6 +92,9 @@ export default function Expenses() {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [extraFilter, setExtraFilter] = useState<string>('all');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
+  const [dateFrom, setDateFrom] = useState<string | null>(null);
+  const [dateTo, setDateTo] = useState<string | null>(null);
+  const [dateLabel, setDateLabel] = useState<string>('All Dates');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [categories, setCategories] = useState<string[]>([]);
   const [uploadOpen, setUploadOpen] = useState(false);
