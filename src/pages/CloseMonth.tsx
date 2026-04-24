@@ -16,11 +16,10 @@ import {
 
 const steps = [
   { id: 1, label: 'Review Exceptions', icon: AlertTriangle, desc: 'Approve or fix transactions needing review' },
-  { id: 2, label: 'Confirm Reimbursements', icon: ReceiptText, desc: 'Update pending reimbursement statuses' },
-  { id: 3, label: 'Check Tax Reserves', icon: Landmark, desc: 'Verify tax reserve levels are adequate' },
-  { id: 4, label: 'Review Allocations', icon: Target, desc: 'Review or create the month\'s allocation plan' },
-  { id: 5, label: 'Generate Exports', icon: FileSpreadsheet, desc: 'Download accountant-ready reports' },
-  { id: 6, label: 'Mark Complete', icon: CheckCircle2, desc: 'Summary and confirmation' },
+  { id: 2, label: 'Check Tax Reserves', icon: Landmark, desc: 'Verify tax reserve levels are adequate' },
+  { id: 3, label: 'Review Allocations', icon: Target, desc: 'Review or create the month\'s allocation plan' },
+  { id: 4, label: 'Generate Exports', icon: FileSpreadsheet, desc: 'Download accountant-ready reports' },
+  { id: 5, label: 'Mark Complete', icon: CheckCircle2, desc: 'Summary and confirmation' },
 ];
 
 function getMonthOptions() {
