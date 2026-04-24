@@ -298,7 +298,16 @@ export function TransactionDetailDrawer({
         <div className="space-y-3 mb-4">
           <div>
             <Label className="text-[11px] text-muted-foreground uppercase tracking-wider">Category</Label>
-            <Select value={editValues.category} onValueChange={v => setEditValues(prev => ({ ...prev, category: v }))}>
+            <Select
+              value={editValues.category}
+              onValueChange={v => {
+                if (v === '__add_new__') {
+                  onAddCategory?.();
+                  return;
+                }
+                setEditValues(prev => ({ ...prev, category: v }));
+              }}
+            >
               <SelectTrigger className="mt-1 h-9 text-sm">
                 <SelectValue placeholder="Select category..." />
               </SelectTrigger>
@@ -306,6 +315,11 @@ export function TransactionDetailDrawer({
                 {categories.map(c => (
                   <SelectItem key={c} value={c}>{c}</SelectItem>
                 ))}
+                {onAddCategory && (
+                  <SelectItem value="__add_new__" className="text-primary font-medium border-t border-border mt-1 pt-1.5">
+                    + Add new category…
+                  </SelectItem>
+                )}
               </SelectContent>
             </Select>
           </div>
