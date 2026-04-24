@@ -401,7 +401,9 @@ export default function Income() {
 
   // Export CSV
   const exportCsv = () => {
-    const rows = filtered.length > 0 ? filtered : transactions;
+    const usingSelection = selectedIds.size > 0;
+    const rows = usingSelection ? filtered.filter(t => selectedIds.has(t.id)) : filtered;
+    if (rows.length === 0) { toast.error(usingSelection ? 'No selected rows to export' : 'No rows to export'); return; }
     const header = 'Date,Description,Amount,Income Type,Taxable Status,Source Account,Status,Notes\n';
     const csv = header + rows.map(t =>
       [t.date, `"${(t.description_raw || '').replace(/"/g, '""')}"`, t.amount, t.income_type, t.taxable_status, t.source_account_name || '', t.status, `"${(t.notes || '').replace(/"/g, '""')}"`].join(',')
@@ -411,6 +413,7 @@ export default function Income() {
     const a = document.createElement('a');
     a.href = url; a.download = `income-${thisMonth}.csv`; a.click();
     URL.revokeObjectURL(url);
+    toast.success(usingSelection ? `Exported ${rows.length} selected row${rows.length === 1 ? '' : 's'}` : `Exported ${rows.length} row${rows.length === 1 ? '' : 's'}`);
   };
 
   const fmt = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n);

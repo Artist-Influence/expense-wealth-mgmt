@@ -650,7 +650,9 @@ export default function Expenses() {
   };
 
   const exportCsv = () => {
-    const rows = filtered
+    const usingSelection = selectedIds.size > 0;
+    const source = usingSelection ? filtered.filter(t => selectedIds.has(t.id)) : filtered;
+    const rows = source
       .filter(t => ['approved', 'auto_categorized', 'edited'].includes(t.review_status) && !t.is_split_parent)
       .map(t => ({
         Date: t.date || '',
@@ -665,7 +667,10 @@ export default function Expenses() {
         Transfer: t.is_transfer ? 'Yes' : 'No',
         Notes: t.final_notes || t.predicted_notes || '',
       }));
-    if (rows.length === 0) { toast.error('No approved/edited transactions to export'); return; }
+    if (rows.length === 0) {
+      toast.error(usingSelection ? 'No approved/edited transactions in selection' : 'No approved/edited transactions to export');
+      return;
+    }
     const headers = Object.keys(rows[0]);
     const csv = [
       headers.join(','),
@@ -678,7 +683,7 @@ export default function Expenses() {
     a.download = `expenses_${mode}_${new Date().toISOString().split('T')[0]}.csv`;
     a.click();
     URL.revokeObjectURL(url);
-    toast.success('CSV exported');
+    toast.success(usingSelection ? `Exported ${rows.length} selected row${rows.length === 1 ? '' : 's'}` : `Exported ${rows.length} row${rows.length === 1 ? '' : 's'}`);
   };
 
   // Upload processing
