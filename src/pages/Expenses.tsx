@@ -1421,25 +1421,35 @@ export default function Expenses() {
                         ${tx.amount != null ? Math.abs(tx.amount).toFixed(2) : '0.00'}
                       </td>
                       <td className="px-1 py-0.5" onClick={e => e.stopPropagation()}>
-                        {tx.is_split_parent ? (
-                          <span className="text-foreground px-1" title="Split parent — edit child rows instead">
-                            {tx.final_category || tx.predicted_category || '—'}
-                          </span>
-                        ) : (
-                          <Select
-                            value={tx.final_category || tx.predicted_category || ''}
-                            onValueChange={v => inlineUpdate(tx, 'final_category', v)}
-                          >
-                            <SelectTrigger className="h-6 px-1.5 text-xs border-transparent bg-transparent hover:bg-secondary/40 focus:bg-secondary/60 focus:border-border [&>svg]:opacity-0 hover:[&>svg]:opacity-60 focus:[&>svg]:opacity-60">
-                              <SelectValue placeholder="—" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {categories.map(c => (
-                                <SelectItem key={c} value={c} className="text-xs">{c}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        )}
+                        <div className="flex items-center gap-1">
+                          {tx.match_source === 'recurring_pattern' && (
+                            <span
+                              className="inline-flex items-center justify-center text-[10px] leading-none w-4 h-4 rounded bg-primary/15 text-primary shrink-0"
+                              title={tx.match_explanation || 'Detected recurring charge'}
+                            >
+                              🔁
+                            </span>
+                          )}
+                          {tx.is_split_parent ? (
+                            <span className="text-foreground px-1" title="Split parent — edit child rows instead">
+                              {tx.final_category || tx.predicted_category || '—'}
+                            </span>
+                          ) : (
+                            <Select
+                              value={tx.final_category || tx.predicted_category || ''}
+                              onValueChange={v => inlineUpdate(tx, 'final_category', v)}
+                            >
+                              <SelectTrigger className="h-6 px-1.5 text-xs border-transparent bg-transparent hover:bg-secondary/40 focus:bg-secondary/60 focus:border-border [&>svg]:opacity-0 hover:[&>svg]:opacity-60 focus:[&>svg]:opacity-60">
+                                <SelectValue placeholder="—" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {categories.map(c => (
+                                  <SelectItem key={c} value={c} className="text-xs">{c}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          )}
+                        </div>
                       </td>
                       <td className="px-1 py-0.5" onClick={e => e.stopPropagation()}>
                         {tx.is_split_parent ? (
