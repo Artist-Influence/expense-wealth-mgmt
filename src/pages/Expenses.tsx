@@ -836,7 +836,48 @@ export default function Expenses() {
       }
 
       updateItem(id, { status: 'categorizing' });
-      const results = await categorizeTransactions(rowsToInsert, categoryMode as 'personal' | 'business', user.id, undefined, allowedCategories);
+
+      // Build recurring-charge history map: merchant_key → [{ date, amount }, …] over last 180 days
+      const recurringHistory = new Map<string, { date: string; amount: number }[]>();
+      try {
+        const incomingKeys = new Set<string>();
+        for (const r of rowsToInsert) {
+          const k = generateMerchantKey(r.description_normalized || '');
+          if (k) incomingKeys.add(k);
+        }
+        if (incomingKeys.size > 0) {
+          const since = new Date(Date.now() - 180 * 86_400_000).toISOString().slice(0, 10);
+          let from = 0;
+          const pageSize = 1000;
+          let hasMore = true;
+          while (hasMore) {
+            const { data: priorRows } = await supabase
+              .from('transactions_uploaded')
+              .select('description_normalized, amount, date')
+              .eq('mode', categoryMode)
+              .eq('owner_id', user.id)
+              .gte('date', since)
+              .not('amount', 'is', null)
+              .range(from, from + pageSize - 1);
+            if (priorRows) {
+              for (const row of priorRows) {
+                if (!row.date || row.amount == null) continue;
+                const k = generateMerchantKey(row.description_normalized || '');
+                if (!k || !incomingKeys.has(k)) continue;
+                const list = recurringHistory.get(k) || [];
+                list.push({ date: row.date, amount: Number(row.amount) });
+                recurringHistory.set(k, list);
+              }
+            }
+            hasMore = (priorRows?.length ?? 0) === pageSize;
+            from += pageSize;
+          }
+        }
+      } catch (err) {
+        console.warn('Recurrence history load failed; continuing without:', err);
+      }
+
+      const results = await categorizeTransactions(rowsToInsert, categoryMode as 'personal' | 'business', user.id, undefined, allowedCategories, recurringHistory);
 
       // Layer 5: AI categorization for unmatched rows
       const aiExplanations = new Map<number, string>();
