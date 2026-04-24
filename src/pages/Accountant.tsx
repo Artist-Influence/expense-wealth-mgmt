@@ -9,17 +9,16 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import {
-  FileSpreadsheet, Download, Receipt, DollarSign, ReceiptText,
+  FileSpreadsheet, Download, Receipt, DollarSign,
   Landmark, PiggyBank, BarChart3
 } from 'lucide-react';
 import { toast } from 'sonner';
 
-type ExportType = 'expense_ledger' | 'income_ledger' | 'reimbursement_report' | 'tax_deductions' | 'tax_payments' | 'year_end_summary';
+type ExportType = 'expense_ledger' | 'income_ledger' | 'tax_deductions' | 'tax_payments' | 'year_end_summary';
 
 const exportTypes = [
   { id: 'expense_ledger' as ExportType, label: 'Expense Ledger', icon: Receipt, desc: 'Approved expenses with categories, modes, and flags' },
   { id: 'income_ledger' as ExportType, label: 'Income Ledger', icon: DollarSign, desc: 'All income transactions with type and taxable status' },
-  { id: 'reimbursement_report' as ExportType, label: 'Reimbursement Report', icon: ReceiptText, desc: 'Reimbursement groups with status and amounts' },
   { id: 'tax_deductions' as ExportType, label: 'Tax Deductions', icon: Landmark, desc: 'Tax-deductible expenses grouped by category' },
   { id: 'tax_payments' as ExportType, label: 'Tax Payments', icon: PiggyBank, desc: 'Tax payment transactions made' },
   { id: 'year_end_summary' as ExportType, label: 'Year-End Summary', icon: BarChart3, desc: 'Combined income, expenses, deductions, and net position' },
@@ -145,19 +144,6 @@ export default function Accountant() {
     enabled: !!user,
   });
 
-  const { data: reimbursements } = useQuery({
-    queryKey: ['accountant-reimb', user?.id],
-    queryFn: async () => {
-      if (!user) return [];
-      const { data } = await supabase
-        .from('reimbursement_groups')
-        .select('*')
-        .eq('owner_id', user.id)
-        .order('created_at', { ascending: false });
-      return data || [];
-    },
-    enabled: !!user,
-  });
 
   // Only include approved/edited/auto_categorized expenses in exports
   const approvedStatuses = ['approved', 'auto_categorized', 'edited'];
@@ -167,7 +153,6 @@ export default function Accountant() {
     // Exclude split parents — child rows carry the real amounts
     let result = expenses.filter(e => approvedStatuses.includes(e.review_status) && !e.is_split_parent);
     if (modeFilter === 'all') return result;
-    if (modeFilter === 'reimbursable') return result.filter(e => e.transaction_mode === 'reimbursable_work');
     return result.filter(e => e.transaction_mode === modeFilter);
   }, [expenses, modeFilter]);
 
@@ -178,28 +163,17 @@ export default function Accountant() {
     switch (selectedExport) {
       case 'expense_ledger':
         return {
-          headers: ['Date', 'Description', 'Amount', 'Category', 'Method', 'Mode', 'Transaction Mode', 'Reimbursable', 'Transfer', 'Review Status', 'Notes'],
-          rows: filteredExpenses.map(e => [e.date, e.description_normalized || e.description_raw, String(Math.abs(e.amount ?? 0)), e.final_category, e.final_method, e.mode, e.transaction_mode, e.is_reimbursable ? 'Yes' : 'No', e.is_transfer ? 'Yes' : 'No', e.review_status, e.final_notes]),
+          headers: ['Date', 'Description', 'Amount', 'Category', 'Method', 'Mode', 'Transaction Mode', 'Transfer', 'Review Status', 'Notes'],
+          rows: filteredExpenses.map(e => [e.date, e.description_normalized || e.description_raw, String(Math.abs(e.amount ?? 0)), e.final_category, e.final_method, e.mode, e.transaction_mode, e.is_transfer ? 'Yes' : 'No', e.review_status, e.final_notes]),
         };
       case 'income_ledger':
         return {
           headers: ['Date', 'Description', 'Amount', 'Income Type', 'Taxable', 'Source', 'Is Earning', 'Notes'],
           rows: (income || []).map(i => {
-            const isEarning = !['reimbursement', 'transfer', 'refund', 'loan_proceeds', 'owner_contribution'].includes(i.income_type);
+            const isEarning = !['transfer', 'refund', 'loan_proceeds', 'owner_contribution'].includes(i.income_type);
             return [i.date, i.description_normalized || i.description_raw, String(i.amount ?? 0), i.income_type, i.taxable_status, i.source_account_name, isEarning ? 'Yes' : 'No', i.notes];
           }),
         };
-      case 'reimbursement_report': {
-        // Date-filter reimbursement groups by created_at
-        const filteredReimb = (reimbursements || []).filter(r => {
-          const created = r.created_at?.split('T')[0];
-          return created && created >= dateRange.start && created <= dateRange.end;
-        });
-        return {
-          headers: ['Title', 'To', 'Status', 'Expected', 'Received', 'Submitted', 'Received Date'],
-          rows: filteredReimb.map(r => [r.title, r.reimbursable_to, r.status, String(r.total_expected), String(r.total_received), r.submitted_date, r.received_date]),
-        };
-      }
       case 'tax_deductions':
         return {
           headers: ['Date', 'Description', 'Amount', 'Category', 'Mode'],
@@ -211,15 +185,13 @@ export default function Accountant() {
           rows: taxPayments.map(e => [e.date, e.description_normalized || e.description_raw, String(e.amount ?? 0), e.final_category, e.final_notes]),
         };
       case 'year_end_summary': {
-        // Use only approved expenses, exclude transfers and reimbursables from net
+        // Use only approved expenses, exclude transfers from net
         const approved = (expenses || []).filter(e => approvedStatuses.includes(e.review_status));
-        const nonEarningTypes = ['reimbursement', 'transfer', 'refund', 'loan_proceeds', 'owner_contribution'];
+        const nonEarningTypes = ['transfer', 'refund', 'loan_proceeds', 'owner_contribution'];
         const totalInflows = (income || []).reduce((s, i) => s + (i.amount || 0), 0);
         const totalEarnedIncome = (income || []).filter(i => !nonEarningTypes.includes(i.income_type)).reduce((s, i) => s + (i.amount || 0), 0);
-        const totalReimbInflows = (income || []).filter(i => i.income_type === 'reimbursement').reduce((s, i) => s + (i.amount || 0), 0);
         const totalExpPersonal = approved.filter(e => e.transaction_mode === 'personal' && !e.is_transfer).reduce((s, e) => s + Math.abs(e.amount || 0), 0);
         const totalExpBusiness = approved.filter(e => e.transaction_mode === 'business' && !e.is_transfer).reduce((s, e) => s + Math.abs(e.amount || 0), 0);
-        const totalReimbursable = approved.filter(e => e.transaction_mode === 'reimbursable_work').reduce((s, e) => s + Math.abs(e.amount || 0), 0);
         const totalTransfers = approved.filter(e => e.is_transfer).reduce((s, e) => s + Math.abs(e.amount || 0), 0);
         const totalDeductions = taxDeductions.reduce((s, e) => s + Math.abs(e.amount || 0), 0);
         const totalTaxPaid = taxPayments.reduce((s, e) => s + Math.abs(e.amount || 0), 0);
@@ -227,11 +199,9 @@ export default function Accountant() {
           headers: ['Metric', 'Amount'],
           rows: [
             ['Total Inflows (all sources)', totalInflows.toFixed(2)],
-            ['Total Earned Income (excl. reimbursements/transfers/refunds)', totalEarnedIncome.toFixed(2)],
-            ['Reimbursement Inflows', totalReimbInflows.toFixed(2)],
+            ['Total Earned Income (excl. transfers/refunds)', totalEarnedIncome.toFixed(2)],
             ['Personal Expenses (excl. transfers)', totalExpPersonal.toFixed(2)],
             ['Business Expenses (excl. transfers)', totalExpBusiness.toFixed(2)],
-            ['Reimbursable Expenses (fronted)', totalReimbursable.toFixed(2)],
             ['Transfers Excluded', totalTransfers.toFixed(2)],
             ['Tax Deductions', totalDeductions.toFixed(2)],
             ['Tax Payments Made', totalTaxPaid.toFixed(2)],
@@ -242,7 +212,7 @@ export default function Accountant() {
       default:
         return { headers: [], rows: [] };
     }
-  }, [selectedExport, filteredExpenses, income, reimbursements, taxDeductions, taxPayments, expenses]);
+  }, [selectedExport, filteredExpenses, income, taxDeductions, taxPayments, expenses]);
 
   const handleDownload = () => {
     const exportLabel = exportTypes.find(e => e.id === selectedExport)?.label || selectedExport;
@@ -291,7 +261,7 @@ export default function Accountant() {
                   <SelectItem value="all">All</SelectItem>
                   <SelectItem value="personal">Personal</SelectItem>
                   <SelectItem value="business">Business</SelectItem>
-                  <SelectItem value="reimbursable">Reimbursable</SelectItem>
+                  
                 </SelectContent>
               </Select>
             </div>
