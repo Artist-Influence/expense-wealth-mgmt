@@ -1323,3 +1323,30 @@ function getModeDefaults(mode: TransactionMode) {
       };
   }
 }
+
+// Inline method cell: free-text input that commits on blur or Enter, cancels on Esc.
+function InlineMethodCell({ tx, onCommit }: { tx: Transaction; onCommit: (value: string) => void }) {
+  const initial = tx.final_method || tx.predicted_method || '';
+  const [value, setValue] = useState(initial);
+  useEffect(() => { setValue(tx.final_method || tx.predicted_method || ''); }, [tx.id, tx.final_method, tx.predicted_method]);
+
+  const commit = () => {
+    const trimmed = value.trim();
+    if (trimmed === (initial || '').trim()) return;
+    onCommit(trimmed);
+  };
+
+  return (
+    <Input
+      value={value}
+      onChange={e => setValue(e.target.value)}
+      onBlur={commit}
+      onKeyDown={e => {
+        if (e.key === 'Enter') { e.preventDefault(); (e.target as HTMLInputElement).blur(); }
+        else if (e.key === 'Escape') { setValue(initial); (e.target as HTMLInputElement).blur(); }
+      }}
+      placeholder="—"
+      className="h-6 px-1.5 text-xs border-transparent bg-transparent hover:bg-secondary/40 focus:bg-secondary/60 focus:border-border text-muted-foreground placeholder:text-muted-foreground/50"
+    />
+  );
+}
