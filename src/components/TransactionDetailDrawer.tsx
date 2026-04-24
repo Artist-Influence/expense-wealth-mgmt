@@ -70,6 +70,10 @@ interface TransactionDetailDrawerProps {
   onApprove: (tx: Transaction) => Promise<void>;
   onToggleTransfer: (tx: Transaction) => Promise<void>;
   onSplit?: (tx: Transaction) => void;
+  onAddCategory?: () => void;
+  /** When set, drawer auto-applies this value to its category field, then clears it via onPendingCategoryConsumed. */
+  pendingCategoryToSelect?: string | null;
+  onPendingCategoryConsumed?: () => void;
 }
 
 const matchSourceLabels: Record<string, { label: string; icon: React.ReactNode; color: string }> = {
