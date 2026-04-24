@@ -90,6 +90,7 @@ export default function Expenses() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [extraFilter, setExtraFilter] = useState<string>('all');
+  const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [categories, setCategories] = useState<string[]>([]);
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -162,6 +163,14 @@ export default function Expenses() {
       if (extraFilter === 'uncategorized' && (tx.final_category || tx.predicted_category)) return false;
       if (extraFilter === 'reimbursable' && !tx.is_reimbursable) return false;
       if (extraFilter === 'splits' && !tx.is_split_parent && !tx.parent_transaction_id) return false;
+      if (categoryFilter !== 'all') {
+        const effective = tx.final_category || tx.predicted_category || '';
+        if (categoryFilter === '__uncategorized__') {
+          if (effective) return false;
+        } else if (effective !== categoryFilter) {
+          return false;
+        }
+      }
       if (search) {
         const s = search.toLowerCase();
         return (
@@ -189,7 +198,7 @@ export default function Expenses() {
     });
 
     return result;
-  }, [transactions, statusFilter, extraFilter, search, sortCol, sortAsc]);
+  }, [transactions, statusFilter, extraFilter, categoryFilter, search, sortCol, sortAsc]);
 
   // Summary stats — V2
   const stats = useMemo(() => {
@@ -1071,6 +1080,19 @@ export default function Expenses() {
               <SelectItem value="possible_duplicates">Duplicates</SelectItem>
               <SelectItem value="parse_errors">Parse Errors</SelectItem>
               <SelectItem value="excluded">Excluded</SelectItem>
+            </SelectContent>
+          </Select>
+
+          <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+            <SelectTrigger className="w-[160px] h-8 glass-input text-xs">
+              <SelectValue placeholder="Category" />
+            </SelectTrigger>
+            <SelectContent className="max-h-[320px]">
+              <SelectItem value="all">All Categories</SelectItem>
+              <SelectItem value="__uncategorized__">Uncategorized</SelectItem>
+              {categories.map(cat => (
+                <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+              ))}
             </SelectContent>
           </Select>
 
