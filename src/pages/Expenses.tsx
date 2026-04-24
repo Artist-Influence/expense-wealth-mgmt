@@ -11,6 +11,8 @@ import { previewCsvFile, parseCsvFileWithMapping, type ParsePreview, type Column
 import { categorizeTransactions, categorizeWithAI, updateMerchantMemory } from '@/lib/categorization-engine';
 import { detectMethodFromFilename } from '@/lib/method-detector';
 import { detectTransfer } from '@/lib/transfer-detector';
+import { routeTransaction } from '@/lib/transaction-router';
+import { classifyIncome } from '@/lib/income-classifier';
 import { generateFingerprint, isNearDuplicate } from '@/lib/duplicate-detector';
 import { generateMerchantKey, normalizeDescription } from '@/lib/normalizer';
 import { isStatementArtifact } from '@/lib/csv-parser';
@@ -612,11 +614,81 @@ export default function Expenses() {
 
       updateItem(id, { status: 'parsing' });
       const parsed = await parseCsvFileWithMapping(file, mapping);
-      const validRows = parsed.filter(r => r.parse_status === 'ok');
+      const validRowsAll = parsed.filter(r => r.parse_status === 'ok');
       const parseErrorRows = parsed.filter(r => r.parse_status === 'parse_error');
 
-      if (validRows.length === 0) {
+      if (validRowsAll.length === 0) {
         updateItem(id, { status: 'error', error: `No valid rows. ${parseErrorRows.length} parse errors.` });
+        return;
+      }
+
+      // SIGN-AWARE ROUTING — split rows by where they actually belong before
+      // they pollute the expenses pipeline. Uses the original signed amount and
+      // any Details / Type signal columns the bank kept in source_row_json.
+      const incomeRows: typeof validRowsAll = [];
+      const ccPaymentRowKeys = new Set<string>();   // identify by description+amount
+      const refundRowKeys = new Set<string>();
+      const validRows: typeof validRowsAll = [];
+
+      for (const tx of validRowsAll) {
+        const decision = routeTransaction({
+          signedAmount: tx.amount,
+          description: tx.description_raw || '',
+          sourceRow: (tx.source_row_json as Record<string, unknown> | null) || null,
+        });
+        if (decision.route === 'income') {
+          incomeRows.push(tx);
+          continue;
+        }
+        // Build a stable key for the row to mark CC payment / refund treatment downstream
+        const key = `${tx.date}|${tx.amount}|${tx.description_normalized}`;
+        if (decision.route === 'cc_payment_transfer') ccPaymentRowKeys.add(key);
+        if (decision.route === 'refund') refundRowKeys.add(key);
+        // Store ABS amount for the existing pipeline (display + dedupe expect positives).
+        validRows.push({ ...tx, amount: Math.abs(tx.amount) });
+      }
+
+      // Insert income rows directly into income_transactions and skip the
+      // expenses pipeline for them entirely.
+      let incomeInsertedCount = 0;
+      if (incomeRows.length > 0) {
+        const incomePayload = incomeRows.map(tx => {
+          const cls = classifyIncome(tx.description_raw || '');
+          return {
+            owner_id: user.id,
+            date: tx.date,
+            amount: Math.abs(tx.amount),
+            description_raw: tx.description_raw,
+            description_normalized: tx.description_normalized,
+            income_type: cls.income_type,
+            taxable_status: cls.taxable_status,
+            source_account_name: method || null,
+            source_file_name: file.name,
+            status: 'needs_review',
+          };
+        });
+        const { error: incomeErr } = await supabase.from('income_transactions').insert(incomePayload);
+        if (!incomeErr) incomeInsertedCount = incomePayload.length;
+        else console.error('Income insert failed:', incomeErr);
+      }
+
+      if (validRows.length === 0) {
+        updateItem(id, {
+          status: 'done',
+          result: {
+            batchId: '',
+            total: 0,
+            auto: 0,
+            suggested: 0,
+            review: 0,
+            skipped: 0,
+            possibleDuplicates: 0,
+            transfers: 0,
+            parseErrors: parseErrorRows.length,
+            incomeRouted: incomeInsertedCount,
+          } as any,
+        });
+        toast.success(`${file.name}: routed ${incomeInsertedCount} rows to Income (no expenses)`);
         return;
       }
 
@@ -747,7 +819,10 @@ export default function Expenses() {
           const transfer = detectTransfer(tx.description_raw);
           const isHighConfTransfer = transfer.isTransfer && transfer.transferConfidence === 'high';
           const isMediumTransfer = transfer.transferConfidence === 'medium';
-          if (isHighConfTransfer) transferCount++;
+          const routerKey = `${tx.date}|${tx.amount}|${tx.description_normalized}`;
+          const isCcPayment = ccPaymentRowKeys.has(routerKey);
+          const isRefund = refundRowKeys.has(routerKey);
+          if (isHighConfTransfer || isCcPayment) transferCount++;
 
           let transferCategory: string | null = null;
           if (isHighConfTransfer) {
@@ -789,16 +864,16 @@ export default function Expenses() {
             parse_status: tx.parse_status, parse_error: tx.parse_error,
             duplicate_fingerprint: fp, duplicate_status: dupInfo.status,
             duplicate_of_transaction_id: dupInfo.matchId,
-            is_transfer: isHighConfTransfer,
-            exclude_from_expense_totals: isHighConfTransfer && appSettings.excludeTransfers,
-            transfer_type: transfer.transferType,
+            is_transfer: isHighConfTransfer || isCcPayment,
+            exclude_from_expense_totals: (isHighConfTransfer && appSettings.excludeTransfers) || isCcPayment,
+            transfer_type: isCcPayment ? 'credit_card_payment' : transfer.transferType,
             // V2 fields
             transaction_mode: mode,
             ...modeDefaults,
-            is_non_expense_cash_movement: isHighConfTransfer,
-            treatment_type: isHighConfTransfer ? 'transfer' : 'expense',
-            counts_toward_true_personal_spend: isHighConfTransfer ? false : modeDefaults.counts_toward_true_personal_spend,
-            counts_toward_true_business_spend: isHighConfTransfer ? false : modeDefaults.counts_toward_true_business_spend,
+            is_non_expense_cash_movement: isHighConfTransfer || isCcPayment,
+            treatment_type: isCcPayment ? 'credit_card_payment' : isRefund ? 'refund' : isHighConfTransfer ? 'transfer' : 'expense',
+            counts_toward_true_personal_spend: (isHighConfTransfer || isCcPayment || isRefund) ? false : modeDefaults.counts_toward_true_personal_spend,
+            counts_toward_true_business_spend: (isHighConfTransfer || isCcPayment || isRefund) ? false : modeDefaults.counts_toward_true_business_spend,
           };
         });
         const { error: txError } = await supabase.from('transactions_uploaded').insert(chunk);
@@ -809,10 +884,20 @@ export default function Expenses() {
         await supabase.from('upload_batches').update({ transfers_detected: transferCount }).eq('id', batch.id);
       }
 
+      const refundCount = refundRowKeys.size;
+      const ccPaymentCount = ccPaymentRowKeys.size;
       updateItem(id, {
         status: 'done',
-        result: { batchId: batch.id, total: rowsToInsert.length, auto: autoCount, suggested: suggestedCount, review: reviewCount, skipped: exactDupCount, possibleDuplicates: possibleDupCount, transfers: transferCount, parseErrors: parseErrorRows.length },
+        result: { batchId: batch.id, total: rowsToInsert.length, auto: autoCount, suggested: suggestedCount, review: reviewCount, skipped: exactDupCount, possibleDuplicates: possibleDupCount, transfers: transferCount, parseErrors: parseErrorRows.length, incomeRouted: incomeInsertedCount, refunds: refundCount, ccPayments: ccPaymentCount } as any,
       });
+      if (incomeInsertedCount || refundCount || ccPaymentCount) {
+        toast.success(
+          `${file.name}: ${rowsToInsert.length} expenses` +
+          (refundCount ? `, ${refundCount} refunds` : '') +
+          (ccPaymentCount ? `, ${ccPaymentCount} card payments (transfers)` : '') +
+          (incomeInsertedCount ? `, ${incomeInsertedCount} routed to Income` : '')
+        );
+      }
     } catch (err: any) {
       updateItem(id, { status: 'error', error: err.message || 'Processing failed' });
     }

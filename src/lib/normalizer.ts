@@ -227,7 +227,7 @@ export function parseAmount(value: string): number {
   if (!value) return 0;
   const cleaned = value.replace(/[$,]/g, '').trim();
   const num = parseFloat(cleaned);
-  return isNaN(num) ? 0 : Math.abs(num);
+  return isNaN(num) ? 0 : num;
 }
 
 /**
