@@ -274,7 +274,9 @@ export default function Reimbursements() {
   };
 
   const exportCsv = () => {
-    const rows = filtered.map(t => ({
+    const usingSelection = selectedIds.size > 0;
+    const source = usingSelection ? filtered.filter(t => selectedIds.has(t.id)) : filtered;
+    const rows = source.map(t => ({
       Date: t.date || '',
       Merchant: t.description_raw || '',
       Amount: t.amount != null ? `$${Math.abs(t.amount).toFixed(2)}` : '',
@@ -284,7 +286,7 @@ export default function Reimbursements() {
       'Report ID': groups.find(g => g.id === t.linked_reimbursement_group_id)?.report_id || '',
       Status: t.reimbursement_status,
     }));
-    if (!rows.length) { toast.error('No rows to export'); return; }
+    if (!rows.length) { toast.error(usingSelection ? 'No selected rows to export' : 'No rows to export'); return; }
     const headers = Object.keys(rows[0]);
     const csv = [
       headers.join(','),
@@ -297,7 +299,7 @@ export default function Reimbursements() {
     a.download = `reimbursements_${new Date().toISOString().split('T')[0]}.csv`;
     a.click();
     URL.revokeObjectURL(url);
-    toast.success('Expense report exported');
+    toast.success(usingSelection ? `Exported ${rows.length} selected row${rows.length === 1 ? '' : 's'}` : `Exported ${rows.length} row${rows.length === 1 ? '' : 's'}`);
   };
 
   const getAging = (date: string | null) => {
