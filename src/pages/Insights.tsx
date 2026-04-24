@@ -211,32 +211,39 @@ export default function Insights() {
     const lastMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
     const lastMonth = `${lastMonthDate.getFullYear()}-${String(lastMonthDate.getMonth() + 1).padStart(2, '0')}`;
 
-    const thisMonthTxns = expenses.filter(t => t.date?.startsWith(thisMonth));
-    const lastMonthTxns = expenses.filter(t => t.date?.startsWith(lastMonth));
+    // Calendar-month cards always reflect actual current/prior calendar month (momentum context)
+    const thisMonthTxns = allExpenses.filter(t => t.date?.startsWith(thisMonth));
+    const lastMonthTxns = allExpenses.filter(t => t.date?.startsWith(lastMonth));
     const thisMonthSpend = thisMonthTxns.reduce((s, t) => s + Math.abs(t.amount || 0), 0);
     const lastMonthSpend = lastMonthTxns.reduce((s, t) => s + Math.abs(t.amount || 0), 0);
     const momChange = lastMonthSpend > 0 ? ((thisMonthSpend - lastMonthSpend) / lastMonthSpend) * 100 : 0;
 
-    // Only use final_category from approved/edited rows for charts
-    const approvedExpenses = expenses.filter(t => ['approved', 'auto_categorized', 'edited'].includes(t.review_status));
+    // Top Cat / Top Merchant respect the active date range
+    const approvedScoped = expenses.filter(t => ['approved', 'auto_categorized', 'edited'].includes(t.review_status));
     const catMap = new Map<string, number>();
-    approvedExpenses.forEach(t => {
+    approvedScoped.forEach(t => {
       const cat = t.final_category || 'Uncategorized';
       catMap.set(cat, (catMap.get(cat) || 0) + Math.abs(t.amount || 0));
     });
     const topCategory = [...catMap.entries()].sort((a, b) => b[1] - a[1])[0];
 
     const merchMap = new Map<string, number>();
-    approvedExpenses.forEach(t => {
+    approvedScoped.forEach(t => {
       const desc = (t.description_normalized || t.description_raw || 'Unknown').substring(0, 30);
       merchMap.set(desc, (merchMap.get(desc) || 0) + Math.abs(t.amount || 0));
     });
     const topMerchant = [...merchMap.entries()].sort((a, b) => b[1] - a[1])[0];
 
-    const transfersExcluded = transactions.filter(t => t.exclude_from_expense_totals).reduce((s, t) => s + Math.abs(t.amount || 0), 0);
+    // Transfers excluded — respect date range
+    const transfersExcluded = transactions
+      .filter(t => t.exclude_from_expense_totals && inDateRange(t.date))
+      .reduce((s, t) => s + Math.abs(t.amount || 0), 0);
 
-    return { thisMonthSpend, lastMonthSpend, momChange, topCategory, topMerchant, transfersExcluded };
-  }, [expenses, transactions]);
+    // Period total (drives clarity when filter != "this month")
+    const periodSpend = expenses.reduce((s, t) => s + Math.abs(t.amount || 0), 0);
+
+    return { thisMonthSpend, lastMonthSpend, momChange, topCategory, topMerchant, transfersExcluded, periodSpend };
+  }, [expenses, allExpenses, transactions, dateFrom, dateTo]);
 
   // Only approved/edited data in charts
   const approvedExpenses = useMemo(() => expenses.filter(t => ['approved', 'auto_categorized', 'edited'].includes(t.review_status)), [expenses]);
