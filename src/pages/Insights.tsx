@@ -465,18 +465,90 @@ export default function Insights() {
     <div className="min-h-screen bg-background">
       <AppNav />
       <div className="container py-4 animate-fade-in">
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
           <div>
             <h1 className="text-lg font-semibold text-foreground">Insights</h1>
-            <p className="text-[10px] text-muted-foreground">Charts use approved/edited data only · Income is cross-mode · Expenses are {mode}-filtered</p>
+            <p className="text-[10px] text-muted-foreground">
+              Showing: <span className="text-foreground/80 font-medium">{dateActive ? dateLabel : 'All Dates'}</span> · {mode === 'business' ? 'Business' : 'Personal'} · Approved/edited only
+            </p>
           </div>
-          <div className="flex rounded-lg border border-border/40 overflow-hidden">
-            <button onClick={() => setMode('personal')} className={`px-3 py-1.5 text-xs font-medium transition-colors ${mode === 'personal' ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground'}`}>
-              Personal
-            </button>
-            <button onClick={() => setMode('business')} className={`px-3 py-1.5 text-xs font-medium transition-colors ${mode === 'business' ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground'}`}>
-              Business
-            </button>
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Date filter */}
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" size="sm" className={`h-9 gap-1.5 text-xs bg-card border-border ${dateActive ? 'border-primary/40 text-primary' : ''}`}>
+                  <Calendar className="h-3.5 w-3.5" />
+                  {dateActive ? dateLabel : 'All Dates'}
+                  <ChevronDown className="h-3 w-3 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-[340px] p-3 space-y-3" align="end">
+                <div>
+                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1.5">Quick presets</div>
+                  <div className="grid grid-cols-2 gap-1">
+                    <Button variant="ghost" size="sm" className="h-7 justify-start text-xs" onClick={clearDates}>All Dates</Button>
+                    <Button variant="ghost" size="sm" className="h-7 justify-start text-xs" onClick={applyThisMonth}>This Month</Button>
+                    <Button variant="ghost" size="sm" className="h-7 justify-start text-xs" onClick={applyLastMonth}>Last Month</Button>
+                    <Button variant="ghost" size="sm" className="h-7 justify-start text-xs" onClick={() => applyLastNDays(30)}>Last 30 Days</Button>
+                    <Button variant="ghost" size="sm" className="h-7 justify-start text-xs" onClick={() => applyLastNDays(90)}>Last 90 Days</Button>
+                    <Button variant="ghost" size="sm" className="h-7 justify-start text-xs" onClick={applyThisQuarter}>This Quarter</Button>
+                    <Button variant="ghost" size="sm" className="h-7 justify-start text-xs" onClick={applyYTD}>Year to Date</Button>
+                    <Button variant="ghost" size="sm" className="h-7 justify-start text-xs" onClick={applyLastYear}>Last Year</Button>
+                  </div>
+                </div>
+
+                {availableMonths.length > 0 && (
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1.5">Pick a month</div>
+                    <Select value="" onValueChange={(v) => v && applyMonth(v)}>
+                      <SelectTrigger className="h-8 bg-card border-border text-xs">
+                        <SelectValue placeholder="Select month..." />
+                      </SelectTrigger>
+                      <SelectContent className="max-h-[260px]">
+                        {availableMonths.map(ym => (
+                          <SelectItem key={ym} value={ym}>{fmtMonthLabel(ym)}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
+                <div>
+                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1.5">Custom range</div>
+                  <div className="flex items-center gap-1.5">
+                    <Input type="date" value={dateFrom || ''} onChange={(e) => onCustomFrom(e.target.value)} className="bg-card border-border h-8 text-xs flex-1" />
+                    <span className="text-xs text-muted-foreground">→</span>
+                    <Input type="date" value={dateTo || ''} onChange={(e) => onCustomTo(e.target.value)} className="bg-card border-border h-8 text-xs flex-1" />
+                  </div>
+                </div>
+
+                <div className="flex justify-end pt-1 border-t border-border/40">
+                  <Button variant="ghost" size="sm" className="h-7 text-xs gap-1" onClick={clearDates}>
+                    <X className="h-3 w-3" /> Clear
+                  </Button>
+                </div>
+              </PopoverContent>
+            </Popover>
+
+            {dateActive && (
+              <button
+                onClick={clearDates}
+                className="inline-flex items-center gap-1 h-9 px-2 rounded-md bg-primary/10 text-primary text-xs hover:bg-primary/20 transition-colors"
+                title="Clear date filter"
+              >
+                {dateLabel}
+                <X className="h-3 w-3" />
+              </button>
+            )}
+
+            <div className="flex rounded-lg border border-border/40 overflow-hidden">
+              <button onClick={() => setMode('personal')} className={`px-3 py-1.5 text-xs font-medium transition-colors ${mode === 'personal' ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground'}`}>
+                Personal
+              </button>
+              <button onClick={() => setMode('business')} className={`px-3 py-1.5 text-xs font-medium transition-colors ${mode === 'business' ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground'}`}>
+                Business
+              </button>
+            </div>
           </div>
         </div>
 
