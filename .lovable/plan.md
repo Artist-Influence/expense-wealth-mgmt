@@ -1,56 +1,72 @@
-# Backfill recurring detection on existing transactions
+# Fix Date Filter Not Filtering Expenses Table
 
-Run the recurrence detector against all already-imported rows (last 180 days) and tag eligible ones as **Subscriptions**, exactly like the import flow does for new rows.
+## Problem
 
-## Current state of the data
-- 781 rows in last 180 days
-- 780 unapproved, 0 approved
-- → essentially the entire dataset is fair game for backfill
+On the **Expenses** page, selecting a month (e.g. "Apr 2026") or any date range from the date filter pill updates the label but the table keeps showing all rows. The same is true for "This Month", "Last Month", "Last N Days", "YTD", and custom From/To inputs.
 
-## What the user sees
+## Root Cause
 
-1. A new **"Re-scan recurring"** button in the Expenses toolbar (next to "Approve All Suggested"). One click → progress toast → updated rows refresh in place with the 🔁 badge.
-2. Rows that the detector confirms get:
-   - `predicted_category` = "Subscriptions"
-   - `match_source` = "recurring_pattern"
-   - `match_explanation` = e.g. *"Recurring monthly @ $14.99 (5 prior charges, ±$0.00, ~30d cadence)"*
-   - `confidence` = 88–96
-   - `review_status` = "auto_categorized" if conf ≥ user's auto threshold, else "suggested"
-3. **Untouched**:
-   - Rows already approved/edited (`review_status` in `approved`/`edited`)
-   - Rows with a `final_category` already set
-   - Transfers, split parents, child rows of splits, excluded rows
-   - Ambiguous merchants (PayPal, Venmo, Amazon, etc.)
-   - Buckets where "Subscriptions" isn't in the user's allowed category list (it is, in both modes — confirmed)
+In `src/pages/Expenses.tsx` (the `filtered` useMemo, around lines 161–191), the closing brace of the `if (categoryFilter !== 'all') { ... }` block is misplaced. As a result, the two date checks:
 
-## Technical implementation
+```ts
+if (dateFrom && (!tx.date || tx.date < dateFrom)) return false;
+if (dateTo   && (!tx.date || tx.date > dateTo))   return false;
+```
 
-### 1. New function in `src/lib/recurrence-detector.ts`
-Add `backfillRecurringForOwner(ownerId, mode, supabaseClient)` that:
-- Loads the owner's last 180 days of transactions filtered by mode.
-- Loads the owner's allowed `category_options` for that mode.
-- Loads `app_settings` for the owner to get `business_auto_threshold` / `personal_auto_threshold`.
-- Groups rows by `merchant_key` (computed via existing `generateMerchantKey(normalizeDescription(...))`).
-- For each merchant-bucket with ≥3 charges, walks chronologically and for each row treats prior rows as history, calling existing `detectRecurrence(amount, history)`.
-- Skips ambiguous merchants, transfers, split parents/children, excluded rows, already-approved rows, rows with final_category.
-- Skips rows already correctly tagged (`predicted_category='Subscriptions' AND match_source='recurring_pattern'`) so re-running is idempotent.
-- Returns `{ scanned, eligible, updated, skipped }` and a list of update payloads.
-- Applies updates in chunks of 50 in parallel.
+…are **nested inside** the `categoryFilter !== 'all'` branch. When category filter is `"all"` (the default — and what the user has set), the entire block is skipped and the date checks never run. The state (`dateFrom`, `dateTo`) is set correctly, but the predicate ignores it.
 
-### 2. UI hook in `src/pages/Expenses.tsx`
-- Add a `Re-scan recurring` Button near the existing "Approve All Suggested" cluster. Visible only when `selectedIds.size === 0` to keep the toolbar clean.
-- On click: call the backfill function with the current `categoryMode`, show a `toast.loading` → `toast.success(\`Tagged ${updated} recurring charges (${eligible} matches found)\`)`, then `loadTransactions()` to refresh.
-- Spinner state via `const [scanning, setScanning] = useState(false)`.
+## Fix
 
-### 3. Run it once now (after merge)
-Once the button exists, the user clicks it once for `personal` and once for `business`. Same code path that future imports will use, so no drift between backfill and runtime logic.
+Re-indent / re-brace the predicate so date checks run unconditionally, alongside the other top-level checks (status, extra, category, search). One block, correct nesting:
 
-## Why a button (not a one-off script)
-- Reuses the live detector — no second copy of the math to keep in sync.
-- Re-runnable any time (after deleting bad data, importing historical CSVs, changing thresholds).
-- Same RLS / auth path — no service-key script needed.
-- Lives in the codebase as a feature, not a forgotten admin script.
+```ts
+let result = transactions.filter(tx => {
+  if (statusFilter !== 'all' && tx.review_status !== statusFilter) return false;
+  if (extraFilter === 'transfers' && !tx.is_transfer && tx.transfer_type !== 'possible_transfer') return false;
+  // ...other extraFilter cases unchanged...
 
-## Out of scope
-- Backfilling rows older than 180 days (not enough history before that to be reliable).
-- Auto-running on app load (would surprise the user).
+  if (categoryFilter !== 'all') {
+    const effective = tx.final_category || tx.predicted_category || '';
+    if (categoryFilter === '__uncategorized__') {
+      if (effective) return false;
+    } else if (effective !== categoryFilter) {
+      return false;
+    }
+  }
+
+  // Date filter — top level, always applied
+  if (dateFrom && (!tx.date || tx.date < dateFrom)) return false;
+  if (dateTo   && (!tx.date || tx.date > dateTo))   return false;
+
+  if (search) {
+    const s = search.toLowerCase();
+    return (
+      (tx.description_raw || '').toLowerCase().includes(s) ||
+      (tx.predicted_category || '').toLowerCase().includes(s) ||
+      (tx.final_category || '').toLowerCase().includes(s)
+    );
+  }
+  return true;
+});
+```
+
+## Scope Check — Other Pages
+
+I audited every page for similar issues:
+
+- **Income, Reimbursements, Tax, MerchantMemory, Wealth** — no date/month filter UI on their tables, so nothing to fix there. (Their summary cards already correctly scope to "this month" via `t.date?.startsWith(thisMonth)`.)
+- **Allocations, CloseMonth, Accountant** — month/period selectors are wired into their queries (`.gte('date', dateRange.start).lte('date', dateRange.end)` or `.eq('month', selectedMonth)`) and work correctly.
+
+So the fix is isolated to the Expenses predicate.
+
+## Files Changed
+
+- `src/pages/Expenses.tsx` — re-brace the `filtered` useMemo predicate (~10 lines).
+
+## Verification
+
+After the fix:
+1. Open Expenses with no filters — full list shows.
+2. Click date pill → "Apr 2026" → table immediately narrows to rows where `date` is between `2026-04-01` and `2026-04-30`.
+3. Switch category filter to a specific category and confirm date filter still applies (combined behavior).
+4. Click the "✕ Apr 2026" clear chip → all rows return.
