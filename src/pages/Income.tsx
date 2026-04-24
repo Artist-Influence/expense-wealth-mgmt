@@ -16,9 +16,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import {
   DollarSign, TrendingUp, Shield, ShieldOff, Briefcase, Banknote,
-  Search, Download, Plus, Check, Trash2, Upload, Link2, Receipt
+  Search, Download, Plus, Check, Trash2, Upload, Link2, Receipt,
+  Calendar, ChevronDown, X
 } from 'lucide-react';
 
 interface IncomeTransaction {
