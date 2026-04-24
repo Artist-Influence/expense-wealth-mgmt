@@ -312,6 +312,85 @@ export default function Expenses() {
     }
   };
 
+  // Inline cell edit — update a single field directly from the table.
+  // Mirrors handleDrawerSave guardrails (category whitelist, status transition, merchant memory).
+  const inlineUpdate = async (tx: Transaction, field: 'final_category' | 'final_method' | 'economic_owner', value: string) => {
+    if (tx.is_split_parent) {
+      toast.error('Split parent — edit child rows instead.');
+      return;
+    }
+
+    let nextValue: string | null = value;
+
+    if (field === 'final_category') {
+      if (!value) {
+        nextValue = null;
+      } else if (categories.length > 0) {
+        const canonical = categories.find(c => c.toLowerCase() === value.toLowerCase());
+        if (!canonical) {
+          toast.error(`"${value}" is not in your approved category list for ${categoryMode} mode`);
+          return;
+        }
+        nextValue = canonical;
+      }
+    }
+
+    const updatePayload: Record<string, any> = { [field]: nextValue };
+
+    // Any meaningful inline edit promotes the row to 'edited' (unless we're clearing the category).
+    if (field === 'final_category') {
+      updatePayload.review_status = nextValue ? 'edited' : 'needs_review';
+    } else if (!['approved'].includes(tx.review_status)) {
+      updatePayload.review_status = 'edited';
+    } else {
+      updatePayload.review_status = 'edited';
+    }
+
+    // Optimistic update
+    setTransactions(prev => prev.map(t => t.id === tx.id ? { ...t, ...updatePayload } as Transaction : t));
+
+    const { error } = await supabase
+      .from('transactions_uploaded')
+      .update(updatePayload)
+      .eq('id', tx.id);
+
+    if (error) {
+      toast.error('Failed to save');
+      await loadTransactions();
+      return;
+    }
+
+    // Update merchant memory the same way the drawer does (skip transfers, splits, duplicates, artifacts).
+    if (
+      field !== 'economic_owner' &&
+      tx.parse_status === 'ok' &&
+      !tx.is_transfer &&
+      !tx.is_split_parent &&
+      !tx.parent_transaction_id &&
+      tx.duplicate_status !== 'possible_duplicate'
+    ) {
+      const desc = tx.description_raw || '';
+      if (!isStatementArtifact(desc, tx.amount || 0)) {
+        const merchantKey = generateMerchantKey(normalizeDescription(desc));
+        const finalCategory = field === 'final_category' ? (nextValue || '') : (tx.final_category || tx.predicted_category || '');
+        const finalMethod = field === 'final_method' ? nextValue : (tx.final_method || tx.predicted_method || null);
+        if (finalCategory) {
+          await updateMerchantMemory(
+            merchantKey,
+            categoryMode as 'personal' | 'business',
+            finalCategory,
+            finalMethod,
+            tx.final_notes || tx.predicted_notes || null,
+            desc,
+            user!.id
+          );
+        }
+      }
+    }
+
+    toast.success('Saved');
+  };
+
   const bulkApprove = async () => {
     const selected = filtered.filter(t => selectedIds.has(t.id));
     for (const tx of selected) await approveRow(tx);
