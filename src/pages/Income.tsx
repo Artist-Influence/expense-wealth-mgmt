@@ -742,7 +742,7 @@ export default function Income() {
         </div>
 
         <p className="text-xs text-muted-foreground text-center">
-          Showing {filtered.length} of {transactions.length} income transactions · This month: {thisMonth}
+          Showing {filtered.length} of {transactions.length} income transactions · {dateActive ? dateLabel : 'All Dates'}
         </p>
       </div>
 
