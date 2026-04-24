@@ -176,32 +176,6 @@ export default function CloseMonth() {
       case 2:
         return (
           <div className="space-y-3">
-            <Badge variant={pendingReimb?.length ? 'default' : 'secondary'} className="text-xs">
-              {pendingReimb?.length || 0} pending
-            </Badge>
-            {pendingReimb && pendingReimb.length > 0 ? (
-              <div className="space-y-1.5 max-h-40 overflow-auto">
-                {pendingReimb.map(r => (
-                  <div key={r.id} className="flex justify-between items-center text-xs bg-secondary/30 rounded px-2.5 py-1.5">
-                    <span className="text-foreground truncate max-w-[200px]">{r.title}</span>
-                    <span className="text-muted-foreground font-mono">${Number(r.total_expected).toFixed(2)}</span>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-xs text-muted-foreground">✓ No pending reimbursements</p>
-            )}
-            <div className="flex gap-2">
-              <Button size="sm" variant="outline" className="text-xs gap-1" asChild>
-                <Link to="/reimbursements"><ExternalLink className="h-3 w-3" /> Go to Reimbursements</Link>
-              </Button>
-              <Button size="sm" className="text-xs" onClick={() => markStepComplete(2)}>Mark Done</Button>
-            </div>
-          </div>
-        );
-      case 3:
-        return (
-          <div className="space-y-3">
             <div className="grid grid-cols-2 gap-3 text-xs">
               <div className="bg-secondary/30 rounded p-2.5">
                 <p className="text-muted-foreground">Month Income</p>
@@ -216,11 +190,11 @@ export default function CloseMonth() {
               <Button size="sm" variant="outline" className="text-xs gap-1" asChild>
                 <Link to="/tax"><ExternalLink className="h-3 w-3" /> Go to Tax</Link>
               </Button>
-              <Button size="sm" className="text-xs" onClick={() => markStepComplete(3)}>Mark Done</Button>
+              <Button size="sm" className="text-xs" onClick={() => markStepComplete(2)}>Mark Done</Button>
             </div>
           </div>
         );
-      case 4:
+      case 3:
         return (
           <div className="space-y-3">
             {allocationPlan ? (
@@ -245,11 +219,11 @@ export default function CloseMonth() {
               <Button size="sm" variant="outline" className="text-xs gap-1" asChild>
                 <Link to="/allocations"><ExternalLink className="h-3 w-3" /> Go to Allocations</Link>
               </Button>
-              <Button size="sm" className="text-xs" onClick={() => markStepComplete(4)}>Mark Done</Button>
+              <Button size="sm" className="text-xs" onClick={() => markStepComplete(3)}>Mark Done</Button>
             </div>
           </div>
         );
-      case 5:
+      case 4:
         return (
           <div className="space-y-3">
             <p className="text-xs text-muted-foreground">Generate and download reports for this month's data.</p>
@@ -257,14 +231,14 @@ export default function CloseMonth() {
               <Button size="sm" variant="outline" className="text-xs gap-1" asChild>
                 <Link to="/accountant"><ExternalLink className="h-3 w-3" /> Go to Accountant</Link>
               </Button>
-              <Button size="sm" className="text-xs" onClick={() => markStepComplete(5)}>Mark Done</Button>
+              <Button size="sm" className="text-xs" onClick={() => markStepComplete(4)}>Mark Done</Button>
             </div>
           </div>
         );
-      case 6:
+      case 5:
         return (
           <div className="space-y-3">
-            <div className="grid grid-cols-3 gap-3 text-xs">
+            <div className="grid grid-cols-2 gap-3 text-xs">
               <div className="bg-secondary/30 rounded p-2.5 text-center">
                 <p className="font-mono font-medium text-foreground text-lg">{completedSteps.size}</p>
                 <p className="text-muted-foreground">Steps Done</p>
@@ -273,13 +247,9 @@ export default function CloseMonth() {
                 <p className="font-mono font-medium text-foreground text-lg">{exceptions?.length || 0}</p>
                 <p className="text-muted-foreground">Exceptions</p>
               </div>
-              <div className="bg-secondary/30 rounded p-2.5 text-center">
-                <p className="font-mono font-medium text-foreground text-lg">{pendingReimb?.length || 0}</p>
-                <p className="text-muted-foreground">Pending Reimb.</p>
-              </div>
             </div>
-            {completedSteps.size === 5 ? (
-              <Button size="sm" className="text-xs w-full gap-1.5" onClick={() => markStepComplete(6)}>
+            {completedSteps.size === 4 ? (
+              <Button size="sm" className="text-xs w-full gap-1.5" onClick={() => markStepComplete(5)}>
                 <CheckCircle2 className="h-3.5 w-3.5" /> Close Month
               </Button>
             ) : (
