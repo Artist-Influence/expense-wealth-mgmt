@@ -70,20 +70,6 @@ export default function CloseMonth() {
     enabled: !!user,
   });
 
-  // Pending reimbursements
-  const { data: pendingReimb } = useQuery({
-    queryKey: ['close-reimb', user?.id],
-    queryFn: async () => {
-      if (!user) return [];
-      const { data } = await supabase
-        .from('reimbursement_groups')
-        .select('id, title, status, total_expected, total_received')
-        .eq('owner_id', user.id)
-        .in('status', ['pending', 'submitted']);
-      return data || [];
-    },
-    enabled: !!user,
-  });
 
   // Tax profile
   const { data: taxProfile } = useQuery({
@@ -140,10 +126,10 @@ export default function CloseMonth() {
 
   const markStepComplete = (step: number) => {
     setCompletedSteps(prev => new Set(prev).add(step));
-    if (step < 6) setActiveStep(step + 1);
+    if (step < 5) setActiveStep(step + 1);
   };
 
-  const progressPercent = (completedSteps.size / 6) * 100;
+  const progressPercent = (completedSteps.size / 5) * 100;
 
   const renderStepContent = (step: number) => {
     switch (step) {
