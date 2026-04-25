@@ -701,6 +701,13 @@ export default function Income() {
               <div><Label className="text-xs">Amount</Label><Input type="number" placeholder="0.00" value={manualAmount} onChange={e => setManualAmount(e.target.value)} className="bg-card" /></div>
             </div>
             <div><Label className="text-xs">Description</Label><Input value={manualDesc} onChange={e => setManualDesc(e.target.value)} className="bg-card" /></div>
+            <div>
+              <Label className="text-xs">Mode</Label>
+              <Select value={manualMode} onValueChange={(v) => setManualMode(v as 'personal' | 'business')}>
+                <SelectTrigger className="bg-card"><SelectValue /></SelectTrigger>
+                <SelectContent>{MODE_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label className="text-xs">Income Type</Label>
