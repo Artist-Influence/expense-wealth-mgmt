@@ -13,6 +13,7 @@ import {
   Landmark, PiggyBank, BarChart3
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { NON_EARNING_TYPES } from '@/lib/income-classifier';
 
 type ExportType = 'expense_ledger' | 'income_ledger' | 'tax_deductions' | 'tax_payments' | 'year_end_summary';
 
@@ -187,9 +188,8 @@ export default function Accountant() {
       case 'year_end_summary': {
         // Use only approved expenses, exclude transfers from net
         const approved = (expenses || []).filter(e => approvedStatuses.includes(e.review_status));
-        const nonEarningTypes = ['transfer', 'refund', 'loan_proceeds', 'owner_contribution'];
         const totalInflows = (income || []).reduce((s, i) => s + (i.amount || 0), 0);
-        const totalEarnedIncome = (income || []).filter(i => !nonEarningTypes.includes(i.income_type)).reduce((s, i) => s + (i.amount || 0), 0);
+        const totalEarnedIncome = (income || []).filter(i => !(NON_EARNING_TYPES as readonly string[]).includes(i.income_type)).reduce((s, i) => s + (i.amount || 0), 0);
         const totalExpPersonal = approved.filter(e => e.transaction_mode === 'personal' && !e.is_transfer).reduce((s, e) => s + Math.abs(e.amount || 0), 0);
         const totalExpBusiness = approved.filter(e => e.transaction_mode === 'business' && !e.is_transfer).reduce((s, e) => s + Math.abs(e.amount || 0), 0);
         const totalTransfers = approved.filter(e => e.is_transfer).reduce((s, e) => s + Math.abs(e.amount || 0), 0);

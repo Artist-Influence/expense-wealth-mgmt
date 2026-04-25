@@ -12,6 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { ArrowDown, ArrowRight, ChevronLeft, ChevronRight, Lock, Sparkles, Minus } from 'lucide-react';
 import { useState, useMemo, useEffect } from 'react';
 import { toast } from 'sonner';
+import { NON_EARNING_TYPES } from '@/lib/income-classifier';
 
 const fmt = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 });
 
@@ -39,8 +40,7 @@ export default function Allocations() {
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   });
 
-  // Fetch income for month — exclude reimbursements, transfers, refunds from allocation math
-  const NON_EARNING_TYPES = ['reimbursement', 'transfer', 'refund', 'loan_proceeds', 'owner_contribution'];
+  // Earned-income filter shared with Insights, CloseMonth, Tax, Accountant.
 
   const { data: monthIncome = 0 } = useQuery({
     queryKey: ['alloc_income', selectedMonth],
@@ -55,7 +55,7 @@ export default function Allocations() {
         .gte('date', start)
         .lte('date', end);
       return (data || [])
-        .filter(r => !NON_EARNING_TYPES.includes(r.income_type))
+        .filter(r => !(NON_EARNING_TYPES as readonly string[]).includes(r.income_type))
         .reduce((s, r) => s + Number(r.amount || 0), 0);
     },
     enabled: !!user,
