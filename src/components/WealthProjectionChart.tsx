@@ -45,6 +45,7 @@ type Assumption = {
   annual_rate_pct: number; // e.g. 8 = 8%
   monthly_contribution: number; // dollars
   stop_age: number;
+  benchmark_symbol?: string; // e.g. ^GSPC, BTC-USD, basket:..., or __none__
 };
 type AssumptionMap = Record<string, Assumption>;
 
