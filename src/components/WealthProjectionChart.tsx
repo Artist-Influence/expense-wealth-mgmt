@@ -90,7 +90,14 @@ const fmtUsd = (n: number) => {
   return `$${Math.round(n).toLocaleString()}`;
 };
 
-export function WealthProjectionChart({ accounts }: { accounts: ProjAccount[] }) {
+export function WealthProjectionChart({
+  accounts,
+  snapshotsByAccount = {},
+}: {
+  accounts: ProjAccount[];
+  /** Map of account id -> sorted snapshot history. Powers realized-rate calc. */
+  snapshotsByAccount?: Record<string, RateSnap[]>;
+}) {
   const [age, setAge] = useState<number>(() => {
     const v = Number(localStorage.getItem(AGE_KEY));
     return Number.isFinite(v) && v > 0 ? v : 30;
@@ -109,7 +116,12 @@ export function WealthProjectionChart({ accounts }: { accounts: ProjAccount[] })
           annual_rate_pct: defaultRateFor(a),
           monthly_contribution: defaultMonthlyContribution(a),
           stop_age: TARGET_AGE,
+          benchmark_symbol: defaultSymbolFor(a),
         };
+        changed = true;
+      } else if (!next[a.id].benchmark_symbol) {
+        // Backfill the symbol field for users who already had assumptions saved.
+        next[a.id] = { ...next[a.id], benchmark_symbol: defaultSymbolFor(a) };
         changed = true;
       }
     }
