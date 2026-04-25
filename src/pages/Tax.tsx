@@ -125,7 +125,7 @@ export default function Tax() {
   }
 
   async function loadDeductions() {
-    const { data } = await supabase
+    let q = supabase
       .from('transactions_uploaded')
       .select('final_category, amount, review_status')
       .eq('owner_id', user!.id)
@@ -134,10 +134,12 @@ export default function Tax() {
       .in('review_status', ['approved', 'auto_categorized', 'edited'])
       .gte('date', yearStart)
       .lte('date', yearEnd);
+    if (scope !== 'all') q = q.eq('transaction_mode', scope);
+    const { data } = await q;
     setDeductionRows((data as DeductionRow[]) || []);
 
     // Also count unreviewed deductions for warning
-    const { count } = await supabase
+    let cq = supabase
       .from('transactions_uploaded')
       .select('id', { count: 'exact', head: true })
       .eq('owner_id', user!.id)
@@ -145,6 +147,8 @@ export default function Tax() {
       .in('review_status', ['needs_review', 'suggested', 'ai_suggested'])
       .gte('date', yearStart)
       .lte('date', yearEnd);
+    if (scope !== 'all') cq = cq.eq('transaction_mode', scope);
+    const { count } = await cq;
     setUnreviewedDeductionCount(count || 0);
   }
 
