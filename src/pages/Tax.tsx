@@ -99,7 +99,7 @@ export default function Tax() {
   useEffect(() => {
     if (!user) return;
     loadAll();
-  }, [user, scope]);
+  }, [user, scope, selectedYear]);
 
   useEffect(() => {
     if (typeof window !== 'undefined') localStorage.setItem('tax_scope', scope);
@@ -107,8 +107,25 @@ export default function Tax() {
 
   async function loadAll() {
     setLoading(true);
-    await Promise.all([loadProfile(), loadIncome(), loadDeductions(), loadTaxPayments()]);
+    await Promise.all([loadProfile(), loadIncome(), loadDeductions(), loadTaxPayments(), loadProjection()]);
     setLoading(false);
+  }
+
+  // Projection always pulls personal+business splits independent of `scope` so the
+  // "Income vs Expenses" projection card can show side-by-side personal vs business.
+  async function loadProjection() {
+    const [{ data: incPersonal }, { data: incBusiness }, { data: dedPersonal }, { data: dedBusiness }] = await Promise.all([
+      supabase.from('income_transactions').select('amount, taxable_status').eq('owner_id', user!.id).eq('mode', 'personal').gte('date', yearStart).lte('date', yearEnd),
+      supabase.from('income_transactions').select('amount, taxable_status').eq('owner_id', user!.id).eq('mode', 'business').gte('date', yearStart).lte('date', yearEnd),
+      supabase.from('transactions_uploaded').select('amount').eq('owner_id', user!.id).eq('transaction_mode', 'personal').eq('counts_as_tax_deduction', true).eq('is_split_parent', false).in('review_status', ['approved', 'auto_categorized', 'edited']).gte('date', yearStart).lte('date', yearEnd),
+      supabase.from('transactions_uploaded').select('amount').eq('owner_id', user!.id).eq('transaction_mode', 'business').eq('counts_as_tax_deduction', true).eq('is_split_parent', false).in('review_status', ['approved', 'auto_categorized', 'edited']).gte('date', yearStart).lte('date', yearEnd),
+    ]);
+    const sumTaxable = (rows: any[] | null) => (rows || []).filter(r => r.taxable_status === 'taxable').reduce((s, r) => s + Number(r.amount || 0), 0);
+    const sumDed = (rows: any[] | null) => (rows || []).reduce((s, r) => s + Math.abs(Number(r.amount || 0)), 0);
+    setProjection({
+      personal: { taxable: sumTaxable(incPersonal), deductions: sumDed(dedPersonal) },
+      business: { taxable: sumTaxable(incBusiness), deductions: sumDed(dedBusiness) },
+    });
   }
 
   async function loadProfile() {
