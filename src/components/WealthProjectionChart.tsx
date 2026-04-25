@@ -401,7 +401,7 @@ export function WealthProjectionChart({
 
         {/* Assumptions panel */}
         {showSettings && (
-          <div className="mb-3 rounded-md border border-border/60 bg-muted/20 p-2 space-y-1.5 max-h-56 overflow-y-auto">
+          <div className="mb-3 rounded-md border border-border/60 bg-muted/20 p-2 space-y-0.5 max-h-96 overflow-y-auto">
             <div className="grid grid-cols-12 gap-2 text-[10px] font-medium text-muted-foreground px-1">
               <div className="col-span-4">Account</div>
               <div className="col-span-3">Annual rate %</div>
