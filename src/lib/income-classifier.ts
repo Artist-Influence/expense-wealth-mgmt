@@ -2,7 +2,10 @@ export interface IncomeClassification {
   income_type: string;
   taxable_status: string;
   confidence: number;
+  suggested_mode: 'personal' | 'business';
 }
+
+const BUSINESS_TYPES = new Set(['business_revenue', 'owner_contribution', 'loan_proceeds']);
 
 const RULES: { patterns: RegExp; income_type: string; taxable_status: string; confidence: number }[] = [
   { patterns: /\b(payroll|salary|direct deposit|wages|pay\s?check|adp|gusto|paychex)\b/i, income_type: 'payroll', taxable_status: 'taxable', confidence: 90 },
@@ -17,13 +20,18 @@ const RULES: { patterns: RegExp; income_type: string; taxable_status: string; co
 ];
 
 export function classifyIncome(description: string): IncomeClassification {
-  const text = (description || '').toLowerCase();
+  const desc = description || '';
   for (const rule of RULES) {
-    if (rule.patterns.test(text)) {
-      return { income_type: rule.income_type, taxable_status: rule.taxable_status, confidence: rule.confidence };
+    if (rule.patterns.test(desc)) {
+      return {
+        income_type: rule.income_type,
+        taxable_status: rule.taxable_status,
+        confidence: rule.confidence,
+        suggested_mode: BUSINESS_TYPES.has(rule.income_type) ? 'business' : 'personal',
+      };
     }
   }
-  return { income_type: 'other', taxable_status: 'unknown', confidence: 0 };
+  return { income_type: 'other', taxable_status: 'unknown', confidence: 0, suggested_mode: 'personal' };
 }
 
 export const INCOME_TYPE_OPTIONS = [
@@ -43,4 +51,9 @@ export const TAXABLE_STATUS_OPTIONS = [
   { value: 'non_taxable', label: 'Non-Taxable' },
   { value: 'partially_taxable', label: 'Partially Taxable' },
   { value: 'unknown', label: 'Unknown' },
+];
+
+export const MODE_OPTIONS = [
+  { value: 'personal', label: 'Personal' },
+  { value: 'business', label: 'Business' },
 ];

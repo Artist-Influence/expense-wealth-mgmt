@@ -3,7 +3,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
 import { AppNav } from '@/components/AppNav';
 import { CsvUploader } from '@/components/CsvUploader';
-import { classifyIncome, INCOME_TYPE_OPTIONS, TAXABLE_STATUS_OPTIONS } from '@/lib/income-classifier';
+import { classifyIncome, INCOME_TYPE_OPTIONS, TAXABLE_STATUS_OPTIONS, MODE_OPTIONS } from '@/lib/income-classifier';
 import { normalizeDescription } from '@/lib/normalizer';
 import { toast } from 'sonner';
 import Papa from 'papaparse';
@@ -31,6 +31,7 @@ interface IncomeTransaction {
   amount: number | null;
   income_type: string;
   taxable_status: string;
+  mode: string;
   source_account_name: string | null;
   linked_expense_id: string | null;
   linked_reimbursement_group_id: string | null;
@@ -62,9 +63,11 @@ export default function Income() {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<string>('all');
+  const [filterMode, setFilterMode] = useState<'all' | 'personal' | 'business'>('all');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showManualEntry, setShowManualEntry] = useState(false);
   const [showUploader, setShowUploader] = useState(false);
+  const [csvImportMode, setCsvImportMode] = useState<'personal' | 'business'>('personal');
   const [dateFrom, setDateFrom] = useState<string | null>(null);
   const [dateTo, setDateTo] = useState<string | null>(null);
   const [dateLabel, setDateLabel] = useState<string>('All Dates');
@@ -75,6 +78,7 @@ export default function Income() {
   const [manualAmount, setManualAmount] = useState('');
   const [manualType, setManualType] = useState('other');
   const [manualTaxable, setManualTaxable] = useState('unknown');
+  const [manualMode, setManualMode] = useState<'personal' | 'business'>('personal');
   const [manualAccount, setManualAccount] = useState('');
   const [manualNotes, setManualNotes] = useState('');
 
@@ -110,23 +114,36 @@ export default function Income() {
   const summaryCards = useMemo(() => {
     const dateActive = !!(dateFrom || dateTo);
     const inRange = transactions.filter(t => {
-      if (!dateActive) return true; // default: ALL dates
+      if (dateActive) {
+        if (dateFrom && (!t.date || t.date < dateFrom)) return false;
+        if (dateTo && (!t.date || t.date > dateTo)) return false;
+      }
+      if (filterMode !== 'all' && t.mode !== filterMode) return false;
+      return true;
+    });
+    // Always compute personal/business splits from the date-filtered set (ignore mode filter so the cards still show both)
+    const dateRangeAll = transactions.filter(t => {
+      if (!dateActive) return true;
       if (dateFrom && (!t.date || t.date < dateFrom)) return false;
       if (dateTo && (!t.date || t.date > dateTo)) return false;
       return true;
     });
+    const personalIncome = dateRangeAll.filter(t => t.mode === 'personal').reduce((s, t) => s + (t.amount || 0), 0);
+    const businessIncome = dateRangeAll.filter(t => t.mode === 'business').reduce((s, t) => s + (t.amount || 0), 0);
+
     const totalInflows = inRange.reduce((s, t) => s + (t.amount || 0), 0);
     const taxable = inRange.filter(t => t.taxable_status === 'taxable').reduce((s, t) => s + (t.amount || 0), 0);
     const nonTaxable = inRange.filter(t => t.taxable_status === 'non_taxable').reduce((s, t) => s + (t.amount || 0), 0);
     const revenue = inRange.filter(t => t.income_type === 'business_revenue').reduce((s, t) => s + (t.amount || 0), 0);
     const payroll = inRange.filter(t => t.income_type === 'payroll').reduce((s, t) => s + (t.amount || 0), 0);
     const other = inRange.filter(t => !['business_revenue', 'payroll'].includes(t.income_type)).reduce((s, t) => s + (t.amount || 0), 0);
-    return { totalInflows, taxable, nonTaxable, revenue, payroll, other };
-  }, [transactions, dateFrom, dateTo]);
+    return { totalInflows, taxable, nonTaxable, revenue, payroll, other, personalIncome, businessIncome };
+  }, [transactions, dateFrom, dateTo, filterMode]);
 
   // Filtering
   const filtered = useMemo(() => {
     return transactions.filter(t => {
+      if (filterMode !== 'all' && t.mode !== filterMode) return false;
       if (filterType !== 'all' && t.income_type !== filterType) return false;
       if (filterStatus !== 'all' && t.status !== filterStatus) return false;
       if (dateFrom && (!t.date || t.date < dateFrom)) return false;
@@ -140,7 +157,7 @@ export default function Income() {
       }
       return true;
     });
-  }, [transactions, filterType, filterStatus, dateFrom, dateTo, searchQuery]);
+  }, [transactions, filterMode, filterType, filterStatus, dateFrom, dateTo, searchQuery]);
 
   // Months derived from transactions for the date filter
   const availableMonths = useMemo(() => {
@@ -280,6 +297,8 @@ export default function Income() {
           amount: normalizedAmount,
           income_type: classification.income_type,
           taxable_status: classification.taxable_status,
+          // Honor user-selected mode for the import; the classifier's suggested_mode is a fallback hint
+          mode: csvImportMode,
           status: classification.confidence >= 80 ? 'auto_classified' : 'needs_review',
           source_file_name: file.name,
         });
@@ -310,6 +329,7 @@ export default function Income() {
       amount: amt,
       income_type: manualType,
       taxable_status: manualTaxable,
+      mode: manualMode,
       source_account_name: manualAccount || null,
       notes: manualNotes || null,
       status: 'approved',
@@ -319,7 +339,7 @@ export default function Income() {
       toast.success('Income entry added');
       setShowManualEntry(false);
       setManualDate(''); setManualDesc(''); setManualAmount(''); setManualType('other');
-      setManualTaxable('unknown'); setManualAccount(''); setManualNotes('');
+      setManualTaxable('unknown'); setManualMode('personal'); setManualAccount(''); setManualNotes('');
       fetchTransactions();
     }
   };
@@ -377,11 +397,13 @@ export default function Income() {
   const fmt = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n);
 
   const cards = [
-    { label: 'Total Inflows', value: summaryCards.totalInflows, icon: DollarSign, color: 'text-primary' },
+    { label: 'Personal Income', value: summaryCards.personalIncome, icon: Banknote, color: 'text-foreground' },
+    { label: 'Business Income', value: summaryCards.businessIncome, icon: Briefcase, color: 'text-primary' },
+    { label: filterMode === 'all' ? 'Total Inflows' : `${filterMode === 'business' ? 'Business' : 'Personal'} Total`, value: summaryCards.totalInflows, icon: DollarSign, color: 'text-primary' },
     { label: 'Taxable', value: summaryCards.taxable, icon: Shield, color: 'text-destructive' },
     { label: 'Non-Taxable', value: summaryCards.nonTaxable, icon: ShieldOff, color: 'text-success' },
-    { label: 'Business Revenue', value: summaryCards.revenue, icon: Briefcase, color: 'text-primary' },
     { label: 'Payroll', value: summaryCards.payroll, icon: Banknote, color: 'text-foreground' },
+    { label: 'Business Revenue', value: summaryCards.revenue, icon: Briefcase, color: 'text-primary' },
     { label: 'Other', value: summaryCards.other, icon: Receipt, color: 'text-muted-foreground' },
   ];
 
@@ -395,10 +417,10 @@ export default function Income() {
             <p className="text-sm text-muted-foreground">Track inflows and classify by type. <span className="text-[10px] text-muted-foreground/70">Summary: {dateActive ? dateLabel : 'All Dates'}</span></p>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={() => setShowUploader(!showUploader)}>
+            <Button variant="outline" size="sm" onClick={() => { if (!showUploader && filterMode !== 'all') setCsvImportMode(filterMode); setShowUploader(!showUploader); }}>
               <Upload className="h-4 w-4 mr-1" /> Import CSV
             </Button>
-            <Button variant="outline" size="sm" onClick={() => setShowManualEntry(true)}>
+            <Button variant="outline" size="sm" onClick={() => { setManualMode(filterMode === 'business' ? 'business' : 'personal'); setShowManualEntry(true); }}>
               <Plus className="h-4 w-4 mr-1" /> Add Entry
             </Button>
             <Button variant="outline" size="sm" onClick={exportCsv}>
@@ -407,8 +429,28 @@ export default function Income() {
           </div>
         </div>
 
+        {/* Mode toggle */}
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground uppercase tracking-wide">View:</span>
+          <div className="inline-flex rounded-md border border-border bg-card p-0.5">
+            {(['all', 'personal', 'business'] as const).map(m => (
+              <button
+                key={m}
+                onClick={() => setFilterMode(m)}
+                className={`px-3 py-1 text-xs rounded-[4px] transition-colors ${
+                  filterMode === m
+                    ? 'bg-primary text-primary-foreground'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-secondary/40'
+                }`}
+              >
+                {m === 'all' ? 'All' : m === 'personal' ? 'Personal' : 'Business'}
+              </button>
+            ))}
+          </div>
+        </div>
+
         {/* Summary Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
           {cards.map(c => (
             <Card key={c.label} className="glass-panel border-border/50">
               <CardContent className="p-4">
@@ -424,7 +466,28 @@ export default function Income() {
 
         {/* CSV Uploader */}
         {showUploader && (
-          <CsvUploader onFilesSelect={handleCsvFiles} disabled={false} />
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 text-xs">
+              <span className="text-muted-foreground uppercase tracking-wide">Import as:</span>
+              <div className="inline-flex rounded-md border border-border bg-card p-0.5">
+                {(['personal', 'business'] as const).map(m => (
+                  <button
+                    key={m}
+                    onClick={() => setCsvImportMode(m)}
+                    className={`px-3 py-1 rounded-[4px] transition-colors ${
+                      csvImportMode === m
+                        ? (m === 'business' ? 'bg-primary text-primary-foreground' : 'bg-secondary text-foreground')
+                        : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    {m === 'personal' ? 'Personal' : 'Business'}
+                  </button>
+                ))}
+              </div>
+              <span className="text-muted-foreground/70">All rows in this CSV will be tagged as {csvImportMode}.</span>
+            </div>
+            <CsvUploader onFilesSelect={handleCsvFiles} disabled={false} />
+          </div>
         )}
 
         {/* Filters & Bulk Actions */}
@@ -520,6 +583,10 @@ export default function Income() {
 
           {selectedIds.size > 0 && (
             <div className="flex gap-2 ml-auto">
+              <Select onValueChange={v => bulkUpdate('mode', v)}>
+                <SelectTrigger className="w-[130px] bg-card border-border"><SelectValue placeholder="Set Mode" /></SelectTrigger>
+                <SelectContent>{MODE_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
+              </Select>
               <Select onValueChange={v => bulkUpdate('income_type', v)}>
                 <SelectTrigger className="w-[140px] bg-card border-border"><SelectValue placeholder="Set Type" /></SelectTrigger>
                 <SelectContent>{INCOME_TYPE_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
@@ -547,6 +614,7 @@ export default function Income() {
                 <TableHead>Date</TableHead>
                 <TableHead>Description</TableHead>
                 <TableHead className="text-right">Amount</TableHead>
+                <TableHead>Mode</TableHead>
                 <TableHead>Income Type</TableHead>
                 <TableHead>Taxable</TableHead>
                 <TableHead>Source</TableHead>
@@ -556,9 +624,9 @@ export default function Income() {
             </TableHeader>
             <TableBody>
               {loading ? (
-                <TableRow><TableCell colSpan={9} className="text-center text-muted-foreground py-12">Loading...</TableCell></TableRow>
+                <TableRow><TableCell colSpan={10} className="text-center text-muted-foreground py-12">Loading...</TableCell></TableRow>
               ) : filtered.length === 0 ? (
-                <TableRow><TableCell colSpan={9} className="text-center text-muted-foreground py-12">
+                <TableRow><TableCell colSpan={10} className="text-center text-muted-foreground py-12">
                   No income transactions yet. Import a CSV or add an entry manually.
                 </TableCell></TableRow>
               ) : filtered.map(tx => (
@@ -567,6 +635,16 @@ export default function Income() {
                   <TableCell className="text-sm font-mono text-muted-foreground">{tx.date || '—'}</TableCell>
                   <TableCell className="text-sm text-foreground max-w-[240px] truncate">{tx.description_raw || '—'}</TableCell>
                   <TableCell className="text-right font-mono text-sm text-success">{tx.amount != null ? fmt(tx.amount) : '—'}</TableCell>
+                  <TableCell>
+                    <Select value={tx.mode} onValueChange={v => updateField(tx.id, 'mode', v)}>
+                      <SelectTrigger className="h-7 text-xs border-0 bg-transparent p-0 w-auto">
+                        <Badge variant="outline" className={`text-xs ${tx.mode === 'business' ? 'bg-primary/15 text-primary border-primary/25' : 'bg-secondary text-foreground border-border'}`}>
+                          {tx.mode === 'business' ? 'Business' : 'Personal'}
+                        </Badge>
+                      </SelectTrigger>
+                      <SelectContent>{MODE_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
+                    </Select>
+                  </TableCell>
                   <TableCell>
                     <Select value={tx.income_type} onValueChange={v => updateField(tx.id, 'income_type', v)}>
                       <SelectTrigger className="h-7 text-xs border-0 bg-transparent p-0 w-auto">
@@ -623,6 +701,13 @@ export default function Income() {
               <div><Label className="text-xs">Amount</Label><Input type="number" placeholder="0.00" value={manualAmount} onChange={e => setManualAmount(e.target.value)} className="bg-card" /></div>
             </div>
             <div><Label className="text-xs">Description</Label><Input value={manualDesc} onChange={e => setManualDesc(e.target.value)} className="bg-card" /></div>
+            <div>
+              <Label className="text-xs">Mode</Label>
+              <Select value={manualMode} onValueChange={(v) => setManualMode(v as 'personal' | 'business')}>
+                <SelectTrigger className="bg-card"><SelectValue /></SelectTrigger>
+                <SelectContent>{MODE_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label className="text-xs">Income Type</Label>
