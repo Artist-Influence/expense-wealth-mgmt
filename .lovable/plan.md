@@ -1,46 +1,60 @@
-## Insights — Accuracy Check + Date Filters
+## Insights — Money In vs Out + Savings Suggestions
 
-### Are the current numbers accurate?
+Add a clear cash-flow view (money in vs money out, with net) plus a smart "Where to save" panel that gives actionable suggestions based on actual spending patterns. Both will respect the existing date filter, mode toggle, and approved-transaction rules.
 
-Yes — **but with a caveat**. The charts (Spend by Category, Monthly Spend Trend, Top Merchants, Recurring) all pull from the same correctly-filtered dataset:
+### 1. New "Cash Flow" section (top of Spending tab)
 
-- Mode-scoped (Personal vs Business toggle, top right)
-- Only `approved` / `auto_categorized` / `edited` rows
-- Excludes transfers, split parents, parse errors, and any row flagged `exclude_from_expense_totals`
+A 4-card strip + a stacked chart, scoped to the active date filter:
 
-So the totals you're seeing (e.g. $6,723.01 for 2026-01 business) are real and correct.
+```text
+┌─────────────┬─────────────┬─────────────┬─────────────┐
+│ Money In    │ Money Out   │ Net         │ Savings %   │
+│ $24,310.00  │ $18,772.41  │ +$5,537.59  │ 22.8%       │
+│ ↑ vs prior  │ ↓ vs prior  │  green/red  │  vs target  │
+└─────────────┴─────────────┴─────────────┴─────────────┘
+```
 
-**The caveat**: there is currently **no date filter** on the Insights page. Every chart is showing **all-time data**. "Spend by Category" is lifetime totals, not "this month" or "this quarter." That's why it can feel off — you're looking at cumulative numbers, not period-scoped ones.
+- **Money In**: sum of `earned income` in the selected window (excludes reimbursements, transfers, refunds, loan proceeds, owner contributions — same rule already used for `earnedIncome`).
+- **Money Out**: sum of approved expenses in the selected window (already computed as `expenses`).
+- **Net**: In − Out, color-coded green/red.
+- **Savings %**: Net / In, with comparison vs prior equal-length window.
 
-The Monthly Trend chart is the only one with a time dimension, and it caps at the last 12 months.
+Below the cards: a **monthly Income vs Expenses bar+line chart** scoped to the active filter (currently this chart lives in the Income tab and is hard-coded to last 12 months — we'll add a filter-aware version here, keep the 12-month one in place on the Income tab as the long-term reference).
 
-### What I'll fix
+### 2. New "Where to Save" suggestions panel (Spending tab, below Recurring Charges)
 
-1. **Add a date filter bar** to the Insights page header (next to the Personal/Business toggle), with these presets:
-   - This Month / Last Month / This Quarter / This Year / Last Year / All Time / Custom (date range picker)
-   - Default: **This Year** (matches user mental model better than "all time")
-   - Persisted in URL query so refresh keeps the filter
+A ranked list of concrete, data-driven suggestions. Each row shows the suggestion, the estimated monthly savings, and a one-line "why."
 
-2. **Wire the filter into every memo** so it actually drives the data:
-   - `overview` cards (This Month / Last Month / MoM / Top Cat / Top Merchant / Transfers Excluded → become period-scoped)
-   - `categoryData` (Spend by Category bar chart)
-   - `monthlyTrend` (re-scoped to the selected window, not hard-coded last 12)
-   - `topMerchants` table
-   - `recurringCharges` detection
-   - Income & Savings tab cards (savings rate, YoY)
-   - Trends tab visualizations
+Suggestion engine rules (all derived client-side from already-loaded data):
 
-3. **Header subtitle update**: show active scope, e.g. *"Showing: This Year · Business · Approved/edited only"* so it's always clear what's being measured.
+1. **Subscription audit** — list every charge categorized as `Subscriptions` from the Recurring Charges detector. Flag any that haven't been charged in 60+ days as "possibly unused — cancel?"; sum the rest as "your monthly subscription load."
+2. **Top-3 discretionary categories** — for categories like Dining, Entertainment, Shopping, Substances, Coffee, Rideshare, etc., compare the period's monthly average to the trailing 6-month average. If current is 20%+ above baseline, suggest "trim back to baseline → save ~$X/mo."
+3. **Duplicate-service detection** — if 2+ recurring charges share a category (e.g. two streaming services, two gym memberships), flag the cheaper one as a "consider consolidating."
+4. **High-frequency small charges** — merchants with 8+ transactions in the period and avg transaction < $15 (typical coffee/snack pattern). Show total monthly spend and frame as "small charges add up to $X/mo."
+5. **Savings headroom** — if Net is positive and Savings % is below 20%, suggest "you have $X/mo of unused headroom — route to investments." Link to the Allocations page.
+6. **Tax reserve gap** *(business mode only)* — pull from `tax_profiles` reserve %; if business net income × reserve % is greater than what's been allocated YTD, surface "You're under-reserved by ~$X for taxes."
 
-4. **"This Month" / "Last Month" overview cards**: rename to be relative to the active filter (e.g. when filter = "This Year", these cards still mean current/prior calendar month for momentum context — keep them, but label them clearly so they don't conflict with the active period).
+Each suggestion shows:
+- Title (one line)
+- Estimated impact ($/mo or one-time)
+- Why (one sentence with the underlying numbers)
+- Optional CTA link (e.g., "Open Allocations", "Open Recurring")
 
-### Technical notes
+### 3. Hide-or-defer behavior
 
-- Single `dateRange` state `{ from: Date | null, to: Date | null, preset: string }` in `Insights.tsx`.
-- One shared `dateFilteredExpenses` / `dateFilteredIncome` memo feeds every downstream calculation — no per-chart filtering logic to avoid drift.
-- Reuse the existing date-preset component pattern from `Income.tsx` for consistency.
-- No DB schema changes; pure client-side filtering on already-fetched data.
+- All suggestions cap at top 6, sorted by estimated monthly impact descending.
+- Empty state: "Looks tight — no obvious cuts. Focus on growing income or routing surplus to Allocations."
+- Suggestions are read-only for now (no dismiss/snooze persistence) — keeps scope contained. Can add a `suggestion_dismissals` table later if useful.
 
 ### Files
 
-- `src/pages/Insights.tsx` (add filter UI + thread `dateRange` through all `useMemo` blocks)
+- `src/pages/Insights.tsx` — add Cash Flow card strip + filter-aware Income vs Expenses chart at top of Spending tab; add "Where to Save" panel below Recurring Charges; add a `suggestions` `useMemo` + a `cashFlow` `useMemo`.
+
+No database changes. No new dependencies. Pure client-side computation off existing fetched data.
+
+### Technical notes
+
+- `cashFlow` memo: `{ moneyIn, moneyOut, net, savingsPct, priorMoneyIn, priorMoneyOut, priorNet }` — prior window = same length immediately before active window (e.g. if active = Jan-Mar, prior = Oct-Dec).
+- `suggestions` memo: returns `{ id, title, impactMonthly, why, cta?: { label, href } }[]`. Each rule is a small pure function over `expenses`, `earnedIncome`, `recurringCharges`, and (optionally) `taxProfile`.
+- Reuse existing `inDateRange`, `expenses`, `earnedIncome`, `recurringCharges`, and `monthlyTrend` so totals stay consistent with the rest of the page.
+- Tax-reserve rule fetches `tax_profiles` once on mount (cached in state), only used when `mode === 'business'`.
