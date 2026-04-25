@@ -377,7 +377,7 @@ export default function Expenses() {
 
     const { error } = await supabase
       .from('transactions_uploaded')
-      .update(updatePayload)
+      .update(updatePayload as never)
       .eq('id', id);
 
     if (!error) {
@@ -454,7 +454,7 @@ export default function Expenses() {
 
     const { error } = await supabase
       .from('transactions_uploaded')
-      .update(updatePayload)
+      .update(updatePayload as never)
       .eq('id', tx.id);
 
     if (error) {
@@ -543,7 +543,7 @@ export default function Expenses() {
       updates.is_reimbursable = true;
       updates.reimbursement_status = 'pending';
     }
-    await supabase.from('transactions_uploaded').update(updates).in('id', ids);
+    await supabase.from('transactions_uploaded').update(updates as never).in('id', ids);
     setSelectedIds(new Set());
     await loadTransactions();
     toast.success(`Switched ${ids.length} rows to ${MODE_CONFIG[targetMode].label}`);

@@ -345,7 +345,7 @@ export default function Income() {
   };
 
   const updateField = async (id: string, field: string, value: string) => {
-    const { error } = await supabase.from('income_transactions').update({ [field]: value }).eq('id', id);
+    const { error } = await supabase.from('income_transactions').update({ [field]: value } as never).eq('id', id);
     if (error) toast.error('Update failed');
     else setTransactions(prev => prev.map(t => t.id === id ? { ...t, [field]: value } : t));
   };
@@ -354,7 +354,7 @@ export default function Income() {
   const bulkUpdate = async (field: string, value: string) => {
     if (selectedIds.size === 0) return;
     const ids = Array.from(selectedIds);
-    const { error } = await supabase.from('income_transactions').update({ [field]: value }).in('id', ids);
+    const { error } = await supabase.from('income_transactions').update({ [field]: value } as never).in('id', ids);
     if (error) toast.error('Bulk update failed');
     else {
       setTransactions(prev => prev.map(t => ids.includes(t.id) ? { ...t, [field]: value } : t));
