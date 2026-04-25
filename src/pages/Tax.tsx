@@ -285,16 +285,29 @@ export default function Tax() {
       <AppNav />
       <div className="container py-8 space-y-8">
         {/* Header */}
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between flex-wrap gap-3">
           <div>
             <h1 className="text-2xl font-semibold text-foreground">Tax Reserves — {currentYear}</h1>
             <p className="text-sm text-muted-foreground">
               {profile.filing_status.replace(/_/g, ' ')} · {profile.city}, {profile.state}
             </p>
           </div>
-          <Button variant="outline" size="sm" onClick={() => { setDraft(profile); setEditOpen(true); }}>
-            <Settings className="h-4 w-4 mr-1" /> Edit Profile
-          </Button>
+          <div className="flex items-center gap-2">
+            <div className="inline-flex rounded-md border border-border/40 p-0.5 bg-secondary/40 text-xs">
+              {(['personal', 'business', 'all'] as const).map(s => (
+                <button
+                  key={s}
+                  onClick={() => setScope(s)}
+                  className={`px-3 py-1 rounded-sm capitalize transition-colors ${scope === s ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                >
+                  {s === 'all' ? 'All' : s}
+                </button>
+              ))}
+            </div>
+            <Button variant="outline" size="sm" onClick={() => { setDraft(profile); setEditOpen(true); }}>
+              <Settings className="h-4 w-4 mr-1" /> Edit Profile
+            </Button>
+          </div>
         </div>
 
         {/* Summary Cards */}
