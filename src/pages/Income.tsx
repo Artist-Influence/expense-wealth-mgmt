@@ -3,7 +3,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
 import { AppNav } from '@/components/AppNav';
 import { CsvUploader } from '@/components/CsvUploader';
-import { classifyIncome, INCOME_TYPE_OPTIONS, TAXABLE_STATUS_OPTIONS } from '@/lib/income-classifier';
+import { classifyIncome, INCOME_TYPE_OPTIONS, TAXABLE_STATUS_OPTIONS, MODE_OPTIONS } from '@/lib/income-classifier';
 import { normalizeDescription } from '@/lib/normalizer';
 import { toast } from 'sonner';
 import Papa from 'papaparse';
