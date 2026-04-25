@@ -636,6 +636,16 @@ export default function Income() {
                   <TableCell className="text-sm text-foreground max-w-[240px] truncate">{tx.description_raw || '—'}</TableCell>
                   <TableCell className="text-right font-mono text-sm text-success">{tx.amount != null ? fmt(tx.amount) : '—'}</TableCell>
                   <TableCell>
+                    <Select value={tx.mode} onValueChange={v => updateField(tx.id, 'mode', v)}>
+                      <SelectTrigger className="h-7 text-xs border-0 bg-transparent p-0 w-auto">
+                        <Badge variant="outline" className={`text-xs ${tx.mode === 'business' ? 'bg-primary/15 text-primary border-primary/25' : 'bg-secondary text-foreground border-border'}`}>
+                          {tx.mode === 'business' ? 'Business' : 'Personal'}
+                        </Badge>
+                      </SelectTrigger>
+                      <SelectContent>{MODE_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
+                    </Select>
+                  </TableCell>
+                  <TableCell>
                     <Select value={tx.income_type} onValueChange={v => updateField(tx.id, 'income_type', v)}>
                       <SelectTrigger className="h-7 text-xs border-0 bg-transparent p-0 w-auto">
                         <Badge variant="outline" className={`text-xs ${INCOME_TYPE_BADGE[tx.income_type]?.class || ''}`}>
