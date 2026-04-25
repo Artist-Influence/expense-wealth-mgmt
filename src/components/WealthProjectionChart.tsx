@@ -411,49 +411,106 @@ export function WealthProjectionChart({
             {accounts.map(a => {
               const ass = assumptions[a.id];
               if (!ass) return null;
+              const live = liveRateByAccount[a.id];
+              const isOverride = overrides.has(a.id);
+              const realized = realizedCagr(
+                snapshotsByAccount[a.id] || [],
+                a.contributions_ytd > 0
+                  ? a.contributions_ytd
+                  : a.contribution_target_monthly * Math.max(
+                      1,
+                      (snapshotsByAccount[a.id]?.length || 1) - 1,
+                    ),
+              );
+              const liveRate = live?.rate;
+              const realizedDelta =
+                realized.cagr_pct != null && liveRate != null
+                  ? realized.cagr_pct - liveRate
+                  : null;
               return (
-                <div key={a.id} className="grid grid-cols-12 gap-2 items-center text-[11px] px-1">
-                  <div className="col-span-4 flex items-center gap-1.5 truncate">
-                    <span className="h-2 w-2 rounded-full shrink-0" style={{ background: colorFor(a.id) }} />
-                    <span className="truncate">{a.account_name}</span>
+                <div key={a.id} className="px-1 py-1 border-b border-border/30 last:border-b-0">
+                  <div className="grid grid-cols-12 gap-2 items-center text-[11px]">
+                    <div className="col-span-4 flex items-center gap-1.5 truncate">
+                      <span className="h-2 w-2 rounded-full shrink-0" style={{ background: colorFor(a.id) }} />
+                      <span className="truncate">{a.account_name}</span>
+                    </div>
+                    <div className="col-span-3 flex items-center gap-1">
+                      <Input
+                        type="number"
+                        step="0.5"
+                        value={ass.annual_rate_pct}
+                        onChange={e => updateAssumption(a.id, { annual_rate_pct: Number(e.target.value) || 0 }, { manual: true })}
+                        className="h-6 text-[11px] px-1.5"
+                      />
+                      <LiveRateCalculator
+                        accountName={a.account_name}
+                        symbol={ass.benchmark_symbol || defaultSymbolFor(a)}
+                        onSymbolChange={(sym) => updateAssumption(a.id, { benchmark_symbol: sym })}
+                        currentRate={ass.annual_rate_pct}
+                        onApply={(r) => updateAssumption(a.id, { annual_rate_pct: r }, { manual: true })}
+                        snapshots={snapshotsByAccount[a.id] || []}
+                        contributionsYtd={a.contributions_ytd}
+                        contributionTargetMonthly={a.contribution_target_monthly}
+                      />
+                    </div>
+                    <div className="col-span-3">
+                      <Input
+                        type="number"
+                        step="50"
+                        value={ass.monthly_contribution}
+                        onChange={e => updateAssumption(a.id, { monthly_contribution: Number(e.target.value) || 0 }, { manual: true })}
+                        className="h-6 text-[11px] px-1.5"
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <Input
+                        type="number"
+                        min={age}
+                        max={TARGET_AGE}
+                        value={ass.stop_age}
+                        onChange={e => updateAssumption(a.id, { stop_age: Math.max(age, Math.min(TARGET_AGE, Number(e.target.value) || TARGET_AGE)) }, { manual: true })}
+                        className="h-6 text-[11px] px-1.5"
+                      />
+                    </div>
                   </div>
-                  <div className="col-span-3 flex items-center gap-1">
-                    <Input
-                      type="number"
-                      step="0.5"
-                      value={ass.annual_rate_pct}
-                      onChange={e => updateAssumption(a.id, { annual_rate_pct: Number(e.target.value) || 0 })}
-                      className="h-6 text-[11px] px-1.5"
-                    />
-                    <LiveRateCalculator
-                      accountName={a.account_name}
-                      symbol={ass.benchmark_symbol || defaultSymbolFor(a)}
-                      onSymbolChange={(sym) => updateAssumption(a.id, { benchmark_symbol: sym })}
-                      currentRate={ass.annual_rate_pct}
-                      onApply={(r) => updateAssumption(a.id, { annual_rate_pct: r })}
-                      snapshots={snapshotsByAccount[a.id] || []}
-                      contributionsYtd={a.contributions_ytd}
-                      contributionTargetMonthly={a.contribution_target_monthly}
-                    />
-                  </div>
-                  <div className="col-span-3">
-                    <Input
-                      type="number"
-                      step="50"
-                      value={ass.monthly_contribution}
-                      onChange={e => updateAssumption(a.id, { monthly_contribution: Number(e.target.value) || 0 })}
-                      className="h-6 text-[11px] px-1.5"
-                    />
-                  </div>
-                  <div className="col-span-2">
-                    <Input
-                      type="number"
-                      min={age}
-                      max={TARGET_AGE}
-                      value={ass.stop_age}
-                      onChange={e => updateAssumption(a.id, { stop_age: Math.max(age, Math.min(TARGET_AGE, Number(e.target.value) || TARGET_AGE)) })}
-                      className="h-6 text-[11px] px-1.5"
-                    />
+                  {/* Status row: live/manual badge + realized-vs-benchmark delta */}
+                  <div className="flex items-center gap-2 flex-wrap mt-1 pl-3.5 text-[9.5px] text-muted-foreground">
+                    {isOverride ? (
+                      <button
+                        type="button"
+                        onClick={() => clearOverride(a.id)}
+                        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-border/60 hover:border-primary/60 hover:text-foreground transition-colors"
+                        title="Click to unlock — live data will overwrite this rate"
+                      >
+                        <Lock className="h-2.5 w-2.5" />
+                        manual · {ass.annual_rate_pct.toFixed(1)}%
+                      </button>
+                    ) : liveRate != null ? (
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-emerald-500/30 bg-emerald-500/5 text-emerald-500/90">
+                        <Zap className="h-2.5 w-2.5" />
+                        auto · {liveRate.toFixed(1)}% ({live.label} 10y)
+                      </span>
+                    ) : live?.label ? (
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-border/40">
+                        {live.label} (no live data)
+                      </span>
+                    ) : null}
+                    {realized.cagr_pct != null && (
+                      <span className="inline-flex items-center gap-1">
+                        realized
+                        <span className={realized.cagr_pct >= 0 ? 'text-emerald-500' : 'text-rose-500'}>
+                          {realized.cagr_pct >= 0 ? '+' : ''}{realized.cagr_pct.toFixed(1)}%
+                        </span>
+                        {realizedDelta != null && (
+                          <>
+                            ·
+                            <span className={realizedDelta >= 0 ? 'text-emerald-500' : 'text-rose-500'}>
+                              {realizedDelta >= 0 ? '+' : ''}{realizedDelta.toFixed(1)}pp vs benchmark
+                            </span>
+                          </>
+                        )}
+                      </span>
+                    )}
                   </div>
                 </div>
               );
