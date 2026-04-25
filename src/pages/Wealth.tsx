@@ -11,11 +11,13 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import { Plus, Pencil, TrendingUp, Wallet, Target, DollarSign, Trash2, RefreshCw, Sparkles } from 'lucide-react';
+import { Plus, Pencil, TrendingUp, Wallet, Target, DollarSign, Trash2, RefreshCw, Sparkles, CalendarPlus, X } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
 import { ModeScopeToggle, readPersistedScope, type ModeScope } from '@/components/ModeScopeToggle';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { CombinedWealthChart, type Snapshot } from '@/components/CombinedWealthChart';
 
 const ACCOUNT_TYPES = [
   { value: 'roth_ira', label: 'Roth IRA' },
@@ -80,6 +82,95 @@ const DEFAULT_AUTO_ACCOUNTS: Array<{
   { name: 'Pokémon',     account_type: 'collectibles', platform: 'TCGPlayer / Zelle', pattern: 'tcgplayer|pokemon' },
 ];
 
+// ---------------------------------------------------------------
+// Inline editor popover for an account's monthly balance snapshots.
+// Lets you add/edit/delete YYYY-MM-01 balance points without leaving the card.
+// ---------------------------------------------------------------
+function SnapshotEditor({
+  account,
+  snapshots,
+  onSave,
+  onDelete,
+}: {
+  account: { id: string; account_name: string };
+  snapshots: Array<{ as_of_date: string; balance: number }>;
+  onSave: (date: string, balance: number) => void;
+  onDelete: (date: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const today = new Date();
+  const defaultMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+  const [month, setMonth] = useState(defaultMonth);
+  const [amount, setAmount] = useState<string>('');
+  const fmtUsd = (n: number) => '$' + Math.round(n).toLocaleString();
+
+  const handleAdd = () => {
+    const num = Number(amount);
+    if (!Number.isFinite(num) || num <= 0) {
+      toast.error('Enter a valid balance');
+      return;
+    }
+    onSave(`${month}-01`, num);
+    setAmount('');
+  };
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button variant="ghost" size="icon" className="h-5 w-5" title="Edit monthly balances">
+          <CalendarPlus className="h-3 w-3" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-72 p-3 space-y-2.5" align="end">
+        <div className="text-xs font-semibold text-foreground">{account.account_name} balances</div>
+        <div className="space-y-1 max-h-40 overflow-y-auto">
+          {snapshots.length === 0 && (
+            <div className="text-[10px] text-muted-foreground italic">No history yet — add a month below.</div>
+          )}
+          {snapshots.map(s => (
+            <div key={s.as_of_date} className="flex items-center justify-between gap-2 text-[11px] py-0.5">
+              <span className="text-muted-foreground tabular-nums">
+                {new Date(s.as_of_date).toLocaleString('en-US', { month: 'short', year: 'numeric' })}
+              </span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-foreground tabular-nums font-medium">{fmtUsd(Number(s.balance))}</span>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-4 w-4 text-muted-foreground hover:text-destructive"
+                  onClick={() => onDelete(s.as_of_date)}
+                  title="Remove"
+                >
+                  <X className="h-3 w-3" />
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="pt-2 border-t border-border/50 space-y-1.5">
+          <Label className="text-[10px] text-muted-foreground">Add / overwrite a month</Label>
+          <div className="flex gap-1.5">
+            <Input
+              type="month"
+              value={month}
+              onChange={e => setMonth(e.target.value)}
+              className="h-7 text-xs"
+            />
+            <Input
+              type="number"
+              placeholder="Balance"
+              value={amount}
+              onChange={e => setAmount(e.target.value)}
+              className="h-7 text-xs"
+            />
+            <Button size="sm" className="h-7 text-xs px-2" onClick={handleAdd}>Save</Button>
+          </div>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 export default function Wealth() {
   const { user } = useAuth();
   const qc = useQueryClient();
@@ -100,6 +191,56 @@ export default function Wealth() {
     enabled: !!user,
   });
 
+  const { data: snapshots = [] } = useQuery({
+    queryKey: ['account_balance_snapshots', user?.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('account_balance_snapshots')
+        .select('account_id, as_of_date, balance')
+        .order('as_of_date', { ascending: true });
+      if (error) throw error;
+      return (data || []).map(s => ({
+        account_id: s.account_id,
+        as_of_date: s.as_of_date,
+        balance: Number(s.balance),
+      })) as Snapshot[];
+    },
+    enabled: !!user,
+  });
+
+  const upsertSnapshot = useMutation({
+    mutationFn: async ({ account_id, as_of_date, balance }: { account_id: string; as_of_date: string; balance: number }) => {
+      const { error } = await supabase
+        .from('account_balance_snapshots')
+        .upsert(
+          { owner_id: user!.id, account_id, as_of_date, balance },
+          { onConflict: 'account_id,as_of_date' }
+        );
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['account_balance_snapshots', user?.id] });
+      toast.success('Balance saved');
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+
+  const deleteSnapshot = useMutation({
+    mutationFn: async ({ account_id, as_of_date }: { account_id: string; as_of_date: string }) => {
+      const { error } = await supabase
+        .from('account_balance_snapshots')
+        .delete()
+        .eq('account_id', account_id)
+        .eq('as_of_date', as_of_date);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['account_balance_snapshots', user?.id] });
+      toast.success('Balance removed');
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+
   const upsert = useMutation({
     mutationFn: async (values: typeof form) => {
       const payload = {
@@ -115,16 +256,29 @@ export default function Wealth() {
         notes: values.notes || null,
         auto_track_pattern: values.auto_track_pattern || null,
       };
+      let savedId = editingId;
       if (editingId) {
         const { error } = await supabase.from('investment_accounts').update(payload).eq('id', editingId);
         if (error) throw error;
       } else {
-        const { error } = await supabase.from('investment_accounts').insert(payload);
+        const { data, error } = await supabase.from('investment_accounts').insert(payload).select('id').single();
         if (error) throw error;
+        savedId = data?.id || null;
+      }
+      // Auto-snapshot today's balance so the chart's "Today" point and history stay in sync.
+      if (savedId && Number(payload.current_balance) > 0) {
+        const today = new Date().toISOString().slice(0, 10);
+        await supabase
+          .from('account_balance_snapshots')
+          .upsert(
+            { owner_id: user!.id, account_id: savedId, as_of_date: today, balance: Number(payload.current_balance) },
+            { onConflict: 'account_id,as_of_date' }
+          );
       }
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['investment_accounts'] });
+      qc.invalidateQueries({ queryKey: ['account_balance_snapshots', user?.id] });
       setDialogOpen(false);
       setEditingId(null);
       setForm(emptyForm);
@@ -349,6 +503,19 @@ export default function Wealth() {
           </Card>
         </div>
 
+        {/* Combined wealth-over-time chart (scope-aware) */}
+        {scopedAccounts.length > 0 && (
+          <CombinedWealthChart
+            accounts={scopedAccounts.map(a => ({
+              id: a.id,
+              account_name: a.account_name,
+              mode: a.mode,
+              current_balance: Number(a.current_balance),
+            }))}
+            snapshots={snapshots.filter(s => scopedAccounts.some(a => a.id === s.account_id))}
+          />
+        )}
+
         {isLoading && <p className="text-muted-foreground text-xs">Loading…</p>}
         {!isLoading && accounts.length === 0 && (
           <Card className="p-6 text-center">
@@ -403,31 +570,47 @@ export default function Wealth() {
                         <p className="text-[10px] text-muted-foreground">{fmt(Number(a.contributions_ytd))} contributed YTD</p>
                       )}
 
-                      {/* Growth chart: Jan 1 baseline → Today current_balance */}
+                      {/* Snapshot-driven growth chart + inline editor */}
                       {(() => {
-                        const baseline = Number(a.starting_balance_year || 0) > 0
-                          ? Number(a.starting_balance_year)
-                          : Math.max(0, Number(a.current_balance) - Number(a.contributions_ytd));
+                        const accSnaps = snapshots
+                          .filter(s => s.account_id === a.id)
+                          .sort((x, y) => x.as_of_date.localeCompare(y.as_of_date));
                         const current = Number(a.current_balance);
-                        if (baseline <= 0 && current <= 0) return null;
-                        const contributed = Number(a.contributions_ytd || 0);
-                        const growth = current - baseline - contributed; // appreciation only
-                        const data = [
-                          { label: 'Jan 1', value: baseline },
-                          { label: '+ contrib', value: baseline + contributed },
-                          { label: 'Today', value: current },
-                        ];
-                        const delta = current - baseline;
+                        const today = new Date().toISOString().slice(0, 10);
+
+                        // Build chart data: snapshots + today (if not already a snapshot)
+                        const data = accSnaps.map(s => ({
+                          label: new Date(s.as_of_date).toLocaleString('en-US', { month: 'short', year: '2-digit' }),
+                          value: Number(s.balance),
+                          date: s.as_of_date,
+                        }));
+                        if (data.length === 0 || data[data.length - 1].date !== today) {
+                          data.push({ label: 'Today', value: current, date: today });
+                        }
+                        if (data.length === 0) return null;
+
+                        const baseline = data[0].value;
+                        const latest = data[data.length - 1].value;
+                        const delta = latest - baseline;
                         const deltaPct = baseline > 0 ? (delta / baseline) * 100 : 0;
+
                         return (
                           <div className="pt-1 border-t border-border/50">
                             <div className="flex items-center justify-between text-[10px] mb-0.5">
                               <span className="text-muted-foreground">Growth YTD</span>
-                              <span className={delta >= 0 ? 'text-[hsl(var(--success))]' : 'text-destructive'}>
-                                {delta >= 0 ? '+' : ''}{fmt(delta)}{baseline > 0 ? ` (${deltaPct.toFixed(1)}%)` : ''}
-                              </span>
+                              <div className="flex items-center gap-2">
+                                <span className={delta >= 0 ? 'text-[hsl(var(--success))]' : 'text-destructive'}>
+                                  {delta >= 0 ? '+' : ''}{fmt(delta)}{baseline > 0 ? ` (${deltaPct.toFixed(1)}%)` : ''}
+                                </span>
+                                <SnapshotEditor
+                                  account={a}
+                                  snapshots={accSnaps}
+                                  onSave={(date, balance) => upsertSnapshot.mutate({ account_id: a.id, as_of_date: date, balance })}
+                                  onDelete={(date) => deleteSnapshot.mutate({ account_id: a.id, as_of_date: date })}
+                                />
+                              </div>
                             </div>
-                            <div className="h-12 -mx-1">
+                            <div className="h-16 -mx-1">
                               <ResponsiveContainer width="100%" height="100%">
                                 <LineChart data={data} margin={{ top: 2, right: 4, left: 4, bottom: 2 }}>
                                   <Line
@@ -437,7 +620,7 @@ export default function Wealth() {
                                     strokeWidth={1.5}
                                     dot={{ r: 2 }}
                                   />
-                                  <XAxis dataKey="label" hide />
+                                  <XAxis dataKey="label" tick={{ fontSize: 9, fill: 'hsl(var(--muted-foreground))' }} />
                                   <YAxis hide domain={['dataMin', 'dataMax']} />
                                   <Tooltip
                                     contentStyle={{ background: 'hsl(var(--popover))', border: '1px solid hsl(var(--border))', fontSize: 11, padding: '4px 8px' }}
@@ -448,8 +631,7 @@ export default function Wealth() {
                             </div>
                             <div className="flex justify-between text-[9px] text-muted-foreground">
                               <span>Start {fmt(baseline)}</span>
-                              <span>Contrib {fmt(contributed)}</span>
-                              <span>Apprec {growth >= 0 ? '+' : ''}{fmt(growth)}</span>
+                              <span>Today {fmt(latest)}</span>
                             </div>
                           </div>
                         );

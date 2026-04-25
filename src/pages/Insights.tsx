@@ -51,6 +51,29 @@ const CHART_COLORS = [
 
 const fmt = (n: number) => '$' + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+// Review-mode → which review_status values we count in totals/charts.
+//   manual    = only what's been clicked through (current legacy behavior)
+//   suggested = adds rule/AI suggested rows that haven't been clicked yet (NEW DEFAULT)
+//   all       = also include needs_review (raw cash-flow view)
+type ReviewMode = 'manual' | 'suggested' | 'all';
+const REVIEW_MODE_KEY = 'insights_review_mode';
+const STATUSES_BY_MODE: Record<ReviewMode, ReadonlyArray<string>> = {
+  manual:    ['approved', 'auto_categorized', 'edited'],
+  suggested: ['approved', 'auto_categorized', 'edited', 'suggested', 'ai_suggested'],
+  all:       ['approved', 'auto_categorized', 'edited', 'suggested', 'ai_suggested', 'needs_review'],
+};
+const REVIEW_MODE_LABEL: Record<ReviewMode, string> = {
+  manual: 'Approved only',
+  suggested: 'Approved + suggested',
+  all: 'Include needs-review',
+};
+const readReviewMode = (): ReviewMode => {
+  if (typeof window === 'undefined') return 'suggested';
+  const v = window.localStorage.getItem(REVIEW_MODE_KEY);
+  if (v === 'manual' || v === 'suggested' || v === 'all') return v;
+  return 'suggested';
+};
+
 export default function Insights() {
   const { user } = useAuth();
   const [mode, setMode] = useState<'personal' | 'business'>('personal');
@@ -59,6 +82,15 @@ export default function Insights() {
   const [incomeData, setIncomeData] = useState<IncomeTransaction[]>([]);
   const [taxReservePct, setTaxReservePct] = useState<number>(0);
   const [loading, setLoading] = useState(true);
+
+  // Review-mode filter (drives every chart/card)
+  const [reviewMode, setReviewMode] = useState<ReviewMode>(readReviewMode);
+  const COUNTED_STATUSES = useMemo(() => new Set(STATUSES_BY_MODE[reviewMode]), [reviewMode]);
+  const isCounted = (s: string) => COUNTED_STATUSES.has(s);
+  const setReviewModePersisted = (m: ReviewMode) => {
+    setReviewMode(m);
+    if (typeof window !== 'undefined') window.localStorage.setItem(REVIEW_MODE_KEY, m);
+  };
 
   // ─── Date filter (default: This Year) ───
   const _now = new Date();
@@ -232,7 +264,7 @@ export default function Insights() {
     const momChange = lastMonthSpend > 0 ? ((thisMonthSpend - lastMonthSpend) / lastMonthSpend) * 100 : 0;
 
     // Top Cat / Top Merchant respect the active date range
-    const approvedScoped = expenses.filter(t => ['approved', 'auto_categorized', 'edited'].includes(t.review_status));
+    const approvedScoped = expenses.filter(t => isCounted(t.review_status));
     const catMap = new Map<string, number>();
     approvedScoped.forEach(t => {
       const cat = t.final_category || 'Uncategorized';
@@ -259,7 +291,7 @@ export default function Insights() {
   }, [expenses, allExpenses, transactions, dateFrom, dateTo]);
 
   // Only approved/edited data in charts
-  const approvedExpenses = useMemo(() => expenses.filter(t => ['approved', 'auto_categorized', 'edited'].includes(t.review_status)), [expenses]);
+  const approvedExpenses = useMemo(() => expenses.filter(t => isCounted(t.review_status)), [expenses, COUNTED_STATUSES]);
 
   const categoryData = useMemo(() => {
     const catMap = new Map<string, number>();
@@ -592,7 +624,7 @@ export default function Insights() {
     const catBaselineTotals = new Map<string, number>();
     const baselineMonthSet = new Set<string>();
     allExpenses
-      .filter(t => ['approved', 'auto_categorized', 'edited'].includes(t.review_status))
+      .filter(t => isCounted(t.review_status))
       .filter(t => t.date && t.date >= baselineCutoff)
       .forEach(t => {
         const cat = t.final_category || 'Uncategorized';
@@ -732,7 +764,7 @@ export default function Insights() {
           <div>
             <h1 className="text-lg font-semibold text-foreground">Insights</h1>
             <p className="text-[10px] text-muted-foreground">
-              Showing: <span className="text-foreground/80 font-medium">{dateActive ? dateLabel : 'All Dates'}</span> · {mode === 'business' ? 'Business' : 'Personal'} · Approved/edited only
+              Showing: <span className="text-foreground/80 font-medium">{dateActive ? dateLabel : 'All Dates'}</span> · {mode === 'business' ? 'Business' : 'Personal'} · <span className="text-foreground/80 font-medium">{REVIEW_MODE_LABEL[reviewMode]}</span>
             </p>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
@@ -812,6 +844,17 @@ export default function Insights() {
                 Business
               </button>
             </div>
+
+            <Select value={reviewMode} onValueChange={(v) => setReviewModePersisted(v as ReviewMode)}>
+              <SelectTrigger className="h-9 w-[180px] bg-card border-border text-xs" title="Which transactions are counted in totals">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="suggested">Approved + suggested</SelectItem>
+                <SelectItem value="manual">Approved only</SelectItem>
+                <SelectItem value="all">Include needs-review</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </div>
 
