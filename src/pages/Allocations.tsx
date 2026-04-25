@@ -301,8 +301,21 @@ export default function Allocations() {
     <div className="min-h-screen bg-background">
       <AppNav />
       <div className="container py-6 space-y-6">
-        <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-semibold text-foreground">Allocations</h1>
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-semibold text-foreground">Allocations</h1>
+            <div className="inline-flex rounded-md border border-border/40 p-0.5 bg-secondary/40 text-xs">
+              {(['personal', 'business'] as const).map(s => (
+                <button
+                  key={s}
+                  onClick={() => setScope(s)}
+                  className={`px-3 py-1 rounded-sm capitalize transition-colors ${scope === s ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          </div>
           <div className="flex items-center gap-2">
             <Button variant="ghost" size="icon" onClick={() => navigateMonth(-1)} disabled={monthOptions.indexOf(selectedMonth) === 0}>
               <ChevronLeft className="h-4 w-4" />
