@@ -56,6 +56,7 @@ export default function Insights() {
   const [modeAutoSet, setModeAutoSet] = useState(false);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [incomeData, setIncomeData] = useState<IncomeTransaction[]>([]);
+  const [taxReservePct, setTaxReservePct] = useState<number>(0);
   const [loading, setLoading] = useState(true);
 
   // ─── Date filter (default: This Year) ───
