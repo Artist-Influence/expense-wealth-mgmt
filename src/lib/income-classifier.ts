@@ -8,7 +8,7 @@ export interface IncomeClassification {
 const BUSINESS_TYPES = new Set(['business_revenue', 'owner_contribution', 'loan_proceeds']);
 
 const RULES: { patterns: RegExp; income_type: string; taxable_status: string; confidence: number }[] = [
-  { patterns: /\b(payroll|salary|direct deposit|wages|pay\s?check|adp|gusto|paychex)\b/i, income_type: 'payroll', taxable_status: 'taxable', confidence: 90 },
+  { patterns: /\b(payroll|salary|direct\s*deposit|wages|pay\s?check|adp|gusto|paychex|deel|justworks|rippling|trinet|onpay|bamboohr)\b|SALARY[-\s]/i, income_type: 'payroll', taxable_status: 'taxable', confidence: 90 },
   { patterns: /\b(reimbursement|expense repay|expense reimb|reimburse)\b/i, income_type: 'reimbursement', taxable_status: 'non_taxable', confidence: 85 },
   { patterns: /\b(refund|return|credit|cashback|cash back)\b/i, income_type: 'refund', taxable_status: 'non_taxable', confidence: 80 },
   { patterns: /\b(transfer|xfer|zelle|venmo|paypal|wire)\b/i, income_type: 'transfer', taxable_status: 'non_taxable', confidence: 75 },

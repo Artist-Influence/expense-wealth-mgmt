@@ -24,7 +24,7 @@ interface RouterInput {
  * Heuristic: sender-like description signals an inflow even when no
  * Details/Type column exists in the source CSV.
  */
-const INCOME_DESCRIPTION_HINTS = /\b(deposit|payroll|direct deposit|payment from|received from|zelle from|venmo from|paypal from|refund|return|reimburs|interest|dividend|cashback|cash back|stripe payout|square deposit|tax refund)\b/i;
+const INCOME_DESCRIPTION_HINTS = /\b(deposit|payroll|direct\s*deposit|salary|wages|paycheck|payment\s*from|received\s*from|zelle\s*from|venmo\s*from|paypal\s*from|refund|return|reimburs|interest|dividend|cashback|cash\s*back|stripe\s*payout|square\s*deposit|tax\s*refund|deel|gusto|adp|paychex|justworks|rippling|trinet|oasis|onpay|bamboohr)\b|SALARY[-\s]|PAYMENTS\s*ID:/i;
 
 function readField(row: Record<string, unknown> | null | undefined, key: string): string {
   if (!row) return '';
