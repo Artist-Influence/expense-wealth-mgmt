@@ -47,6 +47,7 @@ type Account = {
   is_active: boolean;
   notes: string | null;
   updated_at: string;
+  mode: 'personal' | 'business';
 };
 
 const emptyForm = {
@@ -60,6 +61,7 @@ const emptyForm = {
   priority: 0,
   is_active: true,
   notes: '',
+  mode: 'personal' as 'personal' | 'business',
 };
 
 export default function Wealth() {
