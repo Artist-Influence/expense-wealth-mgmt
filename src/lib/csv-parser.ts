@@ -190,7 +190,7 @@ export function parseCsvFileWithMapping(file: File, mapping: ColumnMapping): Pro
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (e) => {
-      const text = stripBom(e.target?.result as string || '');
+      const text = trimToTransactionHeader(stripBom(e.target?.result as string || ''));
       Papa.parse<CsvRow>(text, {
         header: true,
         skipEmptyLines: true,
