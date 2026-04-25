@@ -397,11 +397,13 @@ export default function Income() {
   const fmt = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n);
 
   const cards = [
-    { label: 'Total Inflows', value: summaryCards.totalInflows, icon: DollarSign, color: 'text-primary' },
+    { label: 'Personal Income', value: summaryCards.personalIncome, icon: Banknote, color: 'text-foreground' },
+    { label: 'Business Income', value: summaryCards.businessIncome, icon: Briefcase, color: 'text-primary' },
+    { label: filterMode === 'all' ? 'Total Inflows' : `${filterMode === 'business' ? 'Business' : 'Personal'} Total`, value: summaryCards.totalInflows, icon: DollarSign, color: 'text-primary' },
     { label: 'Taxable', value: summaryCards.taxable, icon: Shield, color: 'text-destructive' },
     { label: 'Non-Taxable', value: summaryCards.nonTaxable, icon: ShieldOff, color: 'text-success' },
-    { label: 'Business Revenue', value: summaryCards.revenue, icon: Briefcase, color: 'text-primary' },
     { label: 'Payroll', value: summaryCards.payroll, icon: Banknote, color: 'text-foreground' },
+    { label: 'Business Revenue', value: summaryCards.revenue, icon: Briefcase, color: 'text-primary' },
     { label: 'Other', value: summaryCards.other, icon: Receipt, color: 'text-muted-foreground' },
   ];
 
