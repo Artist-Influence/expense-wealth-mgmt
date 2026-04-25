@@ -294,6 +294,8 @@ export default function Wealth() {
     },
     onError: (e: any) => toast.error(e.message),
   });
+
+  const upsertSnapshot = useMutation({
     mutationFn: async ({ account_id, as_of_date, balance }: { account_id: string; as_of_date: string; balance: number }) => {
       const { error } = await supabase
         .from('account_balance_snapshots')
