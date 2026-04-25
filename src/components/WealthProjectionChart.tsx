@@ -90,6 +90,36 @@ function saveAssumptions(map: AssumptionMap) {
   try { localStorage.setItem(ASSUMP_KEY, JSON.stringify(map)); } catch { /* ignore */ }
 }
 
+function loadOverrides(): Set<string> {
+  try {
+    const raw = localStorage.getItem(OVERRIDE_KEY);
+    return raw ? new Set<string>(JSON.parse(raw)) : new Set();
+  } catch {
+    return new Set();
+  }
+}
+function saveOverrides(s: Set<string>) {
+  try { localStorage.setItem(OVERRIDE_KEY, JSON.stringify([...s])); } catch { /* ignore */ }
+}
+
+// Direct call to the market-rates edge function (mirrors LiveRateCalculator's fetcher).
+async function fetchLiveRate(symbolOrBasket: string): Promise<{ cagr_10y: number | null; cagr_5y: number | null } | null> {
+  if (!symbolOrBasket || symbolOrBasket === '__none__') return null;
+  const params: Record<string, string> = symbolOrBasket.startsWith('basket:')
+    ? { basket: symbolOrBasket.slice('basket:'.length) }
+    : { symbol: symbolOrBasket };
+  const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID;
+  const url = `https://${projectId}.functions.supabase.co/market-rates?${new URLSearchParams(params)}`;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return { cagr_10y: data.cagr_10y, cagr_5y: data.cagr_5y };
+  } catch {
+    return null;
+  }
+}
+
 const fmtUsd = (n: number) => {
   const abs = Math.abs(n);
   if (abs >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`;
