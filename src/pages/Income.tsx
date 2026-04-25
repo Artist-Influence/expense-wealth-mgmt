@@ -3,7 +3,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
 import { AppNav } from '@/components/AppNav';
 import { CsvUploader } from '@/components/CsvUploader';
-import { classifyIncome, INCOME_TYPE_OPTIONS, TAXABLE_STATUS_OPTIONS, MODE_OPTIONS } from '@/lib/income-classifier';
+import { classifyIncome, INCOME_TYPE_OPTIONS, TAXABLE_STATUS_OPTIONS, MODE_OPTIONS, NON_EARNING_TYPES } from '@/lib/income-classifier';
 import { normalizeDescription } from '@/lib/normalizer';
 import { toast } from 'sonner';
 import Papa from 'papaparse';
@@ -136,8 +136,11 @@ export default function Income() {
     const nonTaxable = inRange.filter(t => t.taxable_status === 'non_taxable').reduce((s, t) => s + (t.amount || 0), 0);
     const revenue = inRange.filter(t => t.income_type === 'business_revenue').reduce((s, t) => s + (t.amount || 0), 0);
     const payroll = inRange.filter(t => t.income_type === 'payroll').reduce((s, t) => s + (t.amount || 0), 0);
-    const other = inRange.filter(t => !['business_revenue', 'payroll'].includes(t.income_type)).reduce((s, t) => s + (t.amount || 0), 0);
-    return { totalInflows, taxable, nonTaxable, revenue, payroll, other, personalIncome, businessIncome };
+    // Non-earning = transfers, refunds, reimbursements, owner contribs, loan proceeds, tax refunds
+    const nonEarning = inRange.filter(t => (NON_EARNING_TYPES as readonly string[]).includes(t.income_type)).reduce((s, t) => s + (t.amount || 0), 0);
+    // Other earned = anything earned that's not payroll or business revenue (interest, "other")
+    const otherEarned = inRange.filter(t => !(NON_EARNING_TYPES as readonly string[]).includes(t.income_type) && !['business_revenue', 'payroll'].includes(t.income_type)).reduce((s, t) => s + (t.amount || 0), 0);
+    return { totalInflows, taxable, nonTaxable, revenue, payroll, nonEarning, otherEarned, personalIncome, businessIncome };
   }, [transactions, dateFrom, dateTo, filterMode]);
 
   // Filtering
@@ -397,26 +400,30 @@ export default function Income() {
   const fmt = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n);
 
   const cards = [
-    // Personal Income card: only when viewing All or Personal
-    ...(filterMode !== 'business'
-      ? [{ label: 'Personal Income', value: summaryCards.personalIncome, icon: Banknote, color: 'text-foreground' }]
+    // Headline total — only one, contextual to the active filter
+    {
+      label: filterMode === 'all' ? 'Total Inflows' : filterMode === 'business' ? 'Business Income' : 'Personal Income',
+      value: filterMode === 'all' ? summaryCards.totalInflows : filterMode === 'business' ? summaryCards.businessIncome : summaryCards.personalIncome,
+      icon: filterMode === 'business' ? Briefcase : Banknote,
+      color: filterMode === 'business' ? 'text-primary' : 'text-foreground',
+    },
+    // When viewing All, also show split
+    ...(filterMode === 'all'
+      ? [
+          { label: 'Personal', value: summaryCards.personalIncome, icon: Banknote, color: 'text-foreground' },
+          { label: 'Business', value: summaryCards.businessIncome, icon: Briefcase, color: 'text-primary' },
+        ]
       : []),
-    // Business Income card: only when viewing All or Business
-    ...(filterMode !== 'personal'
-      ? [{ label: 'Business Income', value: summaryCards.businessIncome, icon: Briefcase, color: 'text-primary' }]
-      : []),
-    { label: filterMode === 'all' ? 'Total Inflows' : `${filterMode === 'business' ? 'Business' : 'Personal'} Total`, value: summaryCards.totalInflows, icon: DollarSign, color: 'text-primary' },
     { label: 'Taxable', value: summaryCards.taxable, icon: Shield, color: 'text-destructive' },
     { label: 'Non-Taxable', value: summaryCards.nonTaxable, icon: ShieldOff, color: 'text-success' },
-    // Payroll only meaningful in Personal/All views
     ...(filterMode !== 'business'
       ? [{ label: 'Payroll', value: summaryCards.payroll, icon: Banknote, color: 'text-foreground' }]
       : []),
-    // Business Revenue only meaningful in Business/All views
     ...(filterMode !== 'personal'
       ? [{ label: 'Business Revenue', value: summaryCards.revenue, icon: Briefcase, color: 'text-primary' }]
       : []),
-    { label: 'Other', value: summaryCards.other, icon: Receipt, color: 'text-muted-foreground' },
+    { label: 'Other Earned', value: summaryCards.otherEarned, icon: Receipt, color: 'text-muted-foreground' },
+    { label: 'Transfers / Non-Earning', value: summaryCards.nonEarning, icon: Receipt, color: 'text-muted-foreground' },
   ];
 
   return (
