@@ -417,7 +417,7 @@ export default function Income() {
             <p className="text-sm text-muted-foreground">Track inflows and classify by type. <span className="text-[10px] text-muted-foreground/70">Summary: {dateActive ? dateLabel : 'All Dates'}</span></p>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={() => setShowUploader(!showUploader)}>
+            <Button variant="outline" size="sm" onClick={() => { if (!showUploader && filterMode !== 'all') setCsvImportMode(filterMode); setShowUploader(!showUploader); }}>
               <Upload className="h-4 w-4 mr-1" /> Import CSV
             </Button>
             <Button variant="outline" size="sm" onClick={() => { setManualMode(filterMode === 'business' ? 'business' : 'personal'); setShowManualEntry(true); }}>
