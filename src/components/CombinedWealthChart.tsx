@@ -1,0 +1,236 @@
+import { useMemo, useState } from 'react';
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { TrendingUp } from 'lucide-react';
+
+export type Snapshot = { account_id: string; as_of_date: string; balance: number };
+export type AccountLite = { id: string; account_name: string; mode: string; current_balance: number };
+
+const PALETTE = [
+  'hsl(225, 70%, 60%)',
+  'hsl(145, 50%, 50%)',
+  'hsl(38, 85%, 58%)',
+  'hsl(280, 55%, 60%)',
+  'hsl(0, 60%, 58%)',
+  'hsl(180, 55%, 50%)',
+  'hsl(330, 55%, 58%)',
+  'hsl(60, 65%, 50%)',
+];
+
+const fmt = (n: number) => '$' + Math.round(n).toLocaleString();
+
+export function CombinedWealthChart({
+  accounts,
+  snapshots,
+}: {
+  accounts: AccountLite[];
+  snapshots: Snapshot[];
+}) {
+  const [hidden, setHidden] = useState<Set<string>>(new Set());
+
+  const colorFor = (id: string) => {
+    const idx = accounts.findIndex(a => a.id === id);
+    return PALETTE[idx % PALETTE.length];
+  };
+
+  // Build month series from min snapshot date through current month, plus a "today" point.
+  const series = useMemo(() => {
+    if (accounts.length === 0) return [] as any[];
+
+    // Collect all (account_id -> sorted snapshots)
+    const byAcc = new Map<string, Snapshot[]>();
+    for (const s of snapshots) {
+      if (!byAcc.has(s.account_id)) byAcc.set(s.account_id, []);
+      byAcc.get(s.account_id)!.push(s);
+    }
+    byAcc.forEach(arr => arr.sort((a, b) => a.as_of_date.localeCompare(b.as_of_date)));
+
+    // Build list of month keys (YYYY-MM-01) from earliest snapshot to current month
+    const allDates = snapshots.map(s => s.as_of_date).sort();
+    if (allDates.length === 0) {
+      // No history yet — just plot today's current balances as a single point
+      const today = new Date().toISOString().slice(0, 10);
+      const row: any = { label: 'Today', _date: today };
+      let total = 0;
+      accounts.forEach(a => {
+        if (hidden.has(a.id)) return;
+        row[a.id] = Number(a.current_balance) || 0;
+        total += Number(a.current_balance) || 0;
+      });
+      row.total = total;
+      return [row];
+    }
+
+    const startD = new Date(allDates[0]);
+    const now = new Date();
+    const months: string[] = [];
+    const cur = new Date(startD.getFullYear(), startD.getMonth(), 1);
+    while (cur <= now) {
+      months.push(`${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, '0')}-01`);
+      cur.setMonth(cur.getMonth() + 1);
+    }
+    // Append a "Today" anchor that uses current_balance for accounts (live value)
+    const todayKey = now.toISOString().slice(0, 10);
+
+    // Helper: most recent snapshot at-or-before a given date for an account.
+    const balanceAt = (accId: string, dateStr: string): number | null => {
+      const arr = byAcc.get(accId) || [];
+      let last: number | null = null;
+      for (const s of arr) {
+        if (s.as_of_date <= dateStr) last = Number(s.balance);
+        else break;
+      }
+      return last;
+    };
+
+    const rows = months.map(m => {
+      const label = new Date(m).toLocaleString('en-US', { month: 'short', year: '2-digit' });
+      const row: any = { label, _date: m };
+      let total = 0;
+      let any = false;
+      for (const a of accounts) {
+        const v = balanceAt(a.id, m);
+        if (v != null) {
+          row[a.id] = v;
+          if (!hidden.has(a.id)) {
+            total += v;
+            any = true;
+          }
+        }
+      }
+      row.total = any ? total : null;
+      return row;
+    });
+
+    // Add today row (current_balance values)
+    const todayRow: any = { label: 'Today', _date: todayKey };
+    let totalToday = 0;
+    let anyToday = false;
+    for (const a of accounts) {
+      const v = Number(a.current_balance) || balanceAt(a.id, todayKey) || 0;
+      todayRow[a.id] = v;
+      if (!hidden.has(a.id)) {
+        totalToday += v;
+        anyToday = true;
+      }
+    }
+    todayRow.total = anyToday ? totalToday : null;
+    rows.push(todayRow);
+
+    return rows;
+  }, [accounts, snapshots, hidden]);
+
+  const toggle = (id: string) => {
+    setHidden(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  if (accounts.length === 0) return null;
+
+  const visibleAccounts = accounts.filter(a => !hidden.has(a.id));
+  const grandTotalNow = visibleAccounts.reduce((s, a) => s + (Number(a.current_balance) || 0), 0);
+
+  return (
+    <Card>
+      <CardHeader className="p-3 pb-1 flex flex-row items-center justify-between space-y-0">
+        <div className="flex items-center gap-2">
+          <TrendingUp className="h-3.5 w-3.5 text-primary" />
+          <CardTitle className="text-[11px] font-medium text-muted-foreground">
+            Wealth Over Time
+          </CardTitle>
+        </div>
+        <div className="text-xs text-muted-foreground">
+          Visible total today: <span className="text-foreground font-semibold">{fmt(grandTotalNow)}</span>
+        </div>
+      </CardHeader>
+      <CardContent className="p-3 pt-1">
+        <div className="h-[260px]">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={series} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="2 4" stroke="hsl(var(--border))" opacity={0.5} />
+              <XAxis dataKey="label" tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} />
+              <YAxis
+                tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
+                tickFormatter={(v) => v >= 1000 ? `$${Math.round(v / 1000)}k` : `$${v}`}
+              />
+              <Tooltip
+                contentStyle={{
+                  background: 'hsl(var(--popover))',
+                  border: '1px solid hsl(var(--border))',
+                  borderRadius: 8,
+                  fontSize: 11,
+                }}
+                formatter={(value: any, name: any) => {
+                  if (value == null) return ['—', name];
+                  const acc = accounts.find(a => a.id === name);
+                  return [fmt(Number(value)), acc?.account_name || (name === 'total' ? 'Total' : name)];
+                }}
+              />
+              {/* Total line on top */}
+              <Line
+                type="monotone"
+                dataKey="total"
+                stroke="hsl(var(--foreground))"
+                strokeWidth={2.5}
+                dot={{ r: 3 }}
+                connectNulls
+                name="total"
+              />
+              {accounts.map(a => (
+                <Line
+                  key={a.id}
+                  type="monotone"
+                  dataKey={a.id}
+                  stroke={colorFor(a.id)}
+                  strokeWidth={hidden.has(a.id) ? 0 : 1.75}
+                  dot={hidden.has(a.id) ? false : { r: 2 }}
+                  connectNulls
+                  name={a.id}
+                  hide={hidden.has(a.id)}
+                />
+              ))}
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+
+        {/* Clickable legend */}
+        <div className="flex flex-wrap items-center gap-1.5 mt-2 pt-2 border-t border-border/50">
+          <button
+            type="button"
+            onClick={() => setHidden(new Set())}
+            className="text-[10px] px-2 py-0.5 rounded-full border border-border/60 text-muted-foreground hover:text-foreground hover:border-foreground/40 transition-colors"
+          >
+            Show all
+          </button>
+          {accounts.map(a => {
+            const off = hidden.has(a.id);
+            return (
+              <button
+                key={a.id}
+                type="button"
+                onClick={() => toggle(a.id)}
+                className={`flex items-center gap-1.5 text-[10px] px-2 py-0.5 rounded-full border transition-all ${
+                  off
+                    ? 'border-border/40 text-muted-foreground/60 line-through'
+                    : 'border-border/60 text-foreground hover:border-foreground/40'
+                }`}
+                title={off ? 'Click to show' : 'Click to hide'}
+              >
+                <span
+                  className="h-2 w-2 rounded-full"
+                  style={{ background: off ? 'hsl(var(--muted))' : colorFor(a.id) }}
+                />
+                {a.account_name}
+                <span className="text-muted-foreground">{fmt(Number(a.current_balance) || 0)}</span>
+              </button>
+            );
+          })}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
