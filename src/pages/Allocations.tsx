@@ -12,6 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { ArrowDown, ArrowRight, ChevronLeft, ChevronRight, Lock, Sparkles, Minus } from 'lucide-react';
 import { useState, useMemo, useEffect } from 'react';
 import { toast } from 'sonner';
+import { NON_EARNING_TYPES } from '@/lib/income-classifier';
 
 const fmt = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 });
 
@@ -38,12 +39,19 @@ export default function Allocations() {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   });
+  // Personal vs Business scope. Persisted across sessions.
+  const [scope, setScope] = useState<'personal' | 'business'>(() => {
+    if (typeof window === 'undefined') return 'personal';
+    return (localStorage.getItem('alloc_scope') as 'personal' | 'business') || 'personal';
+  });
+  useEffect(() => {
+    if (typeof window !== 'undefined') localStorage.setItem('alloc_scope', scope);
+  }, [scope]);
 
-  // Fetch income for month — exclude reimbursements, transfers, refunds from allocation math
-  const NON_EARNING_TYPES = ['reimbursement', 'transfer', 'refund', 'loan_proceeds', 'owner_contribution'];
+  // Earned-income filter shared with Insights, CloseMonth, Tax, Accountant.
 
   const { data: monthIncome = 0 } = useQuery({
-    queryKey: ['alloc_income', selectedMonth],
+    queryKey: ['alloc_income', selectedMonth, scope],
     queryFn: async () => {
       const [y, m] = selectedMonth.split('-');
       const start = `${y}-${m}-01`;
@@ -52,10 +60,11 @@ export default function Allocations() {
         .from('income_transactions')
         .select('amount, income_type')
         .eq('owner_id', user!.id)
+        .eq('mode', scope)
         .gte('date', start)
         .lte('date', end);
       return (data || [])
-        .filter(r => !NON_EARNING_TYPES.includes(r.income_type))
+        .filter(r => !(NON_EARNING_TYPES as readonly string[]).includes(r.income_type))
         .reduce((s, r) => s + Number(r.amount || 0), 0);
     },
     enabled: !!user,
@@ -63,7 +72,7 @@ export default function Allocations() {
 
   // Fetch expenses for month
   const { data: monthExpenses = 0 } = useQuery({
-    queryKey: ['alloc_expenses', selectedMonth],
+    queryKey: ['alloc_expenses', selectedMonth, scope],
     queryFn: async () => {
       const [y, m] = selectedMonth.split('-');
       const start = `${y}-${m}-01`;
@@ -73,6 +82,7 @@ export default function Allocations() {
         .from('transactions_uploaded')
         .select('amount')
         .eq('owner_id', user!.id)
+        .eq('transaction_mode', scope)
         .gte('date', start)
         .lte('date', end)
         .eq('exclude_from_expense_totals', false)
@@ -84,7 +94,7 @@ export default function Allocations() {
 
   // Fetch unreviewed transaction count for data quality warning
   const { data: unreviewedCount = 0 } = useQuery({
-    queryKey: ['alloc_unreviewed', selectedMonth],
+    queryKey: ['alloc_unreviewed', selectedMonth, scope],
     queryFn: async () => {
       const [y, m] = selectedMonth.split('-');
       const start = `${y}-${m}-01`;
@@ -93,6 +103,7 @@ export default function Allocations() {
         .from('transactions_uploaded')
         .select('id', { count: 'exact', head: true })
         .eq('owner_id', user!.id)
+        .eq('transaction_mode', scope)
         .gte('date', start)
         .lte('date', end)
         .in('review_status', ['needs_review', 'suggested', 'ai_suggested']);
@@ -290,8 +301,21 @@ export default function Allocations() {
     <div className="min-h-screen bg-background">
       <AppNav />
       <div className="container py-6 space-y-6">
-        <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-semibold text-foreground">Allocations</h1>
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-semibold text-foreground">Allocations</h1>
+            <div className="inline-flex rounded-md border border-border/40 p-0.5 bg-secondary/40 text-xs">
+              {(['personal', 'business'] as const).map(s => (
+                <button
+                  key={s}
+                  onClick={() => setScope(s)}
+                  className={`px-3 py-1 rounded-sm capitalize transition-colors ${scope === s ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          </div>
           <div className="flex items-center gap-2">
             <Button variant="ghost" size="icon" onClick={() => navigateMonth(-1)} disabled={monthOptions.indexOf(selectedMonth) === 0}>
               <ChevronLeft className="h-4 w-4" />

@@ -301,7 +301,7 @@ export default function Expenses() {
     const transfersExcluded = transactions.filter(t => t.exclude_from_expense_totals).length;
 
     const totalCashOut = activeTxns
-      .filter(t => t.parse_status !== 'parse_error' && !t.is_non_expense_cash_movement)
+      .filter(t => t.parse_status !== 'parse_error' && !t.is_non_expense_cash_movement && !t.is_transfer && !t.exclude_from_expense_totals)
       .reduce((sum, t) => sum + Math.abs(t.amount || 0), 0);
 
     const truePersonalSpend = activeTxns

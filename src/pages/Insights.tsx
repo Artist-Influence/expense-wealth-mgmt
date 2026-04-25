@@ -17,6 +17,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { NON_EARNING_TYPES } from '@/lib/income-classifier';
 
 interface Transaction {
   date: string | null;
@@ -324,8 +325,7 @@ export default function Insights() {
   }, [approvedExpenses]);
 
   // Exclude non-earning income types from savings rate math
-  const NON_EARNING_TYPES = ['reimbursement', 'transfer', 'refund', 'loan_proceeds', 'owner_contribution'];
-  const earnedIncomeAll = useMemo(() => incomeData.filter(t => !NON_EARNING_TYPES.includes(t.income_type)), [incomeData]);
+  const earnedIncomeAll = useMemo(() => incomeData.filter(t => !(NON_EARNING_TYPES as readonly string[]).includes(t.income_type)), [incomeData]);
   // Date-filtered earned income (drives savings rate totals shown to user)
   const earnedIncome = useMemo(() => earnedIncomeAll.filter(t => inDateRange(t.date)), [earnedIncomeAll, dateFrom, dateTo]);
 

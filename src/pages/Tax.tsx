@@ -72,6 +72,11 @@ export default function Tax() {
   const [deductionRows, setDeductionRows] = useState<DeductionRow[]>([]);
   const [taxPayments, setTaxPayments] = useState<TaxPaymentRow[]>([]);
   const [unreviewedDeductionCount, setUnreviewedDeductionCount] = useState(0);
+  // Personal vs Business scope. Persisted across sessions.
+  const [scope, setScope] = useState<'personal' | 'business' | 'all'>(() => {
+    if (typeof window === 'undefined') return 'personal';
+    return (localStorage.getItem('tax_scope') as 'personal' | 'business' | 'all') || 'personal';
+  });
 
   // Draft for setup/edit form
   const [draft, setDraft] = useState<Partial<TaxProfile>>({});
@@ -83,7 +88,11 @@ export default function Tax() {
   useEffect(() => {
     if (!user) return;
     loadAll();
-  }, [user]);
+  }, [user, scope]);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') localStorage.setItem('tax_scope', scope);
+  }, [scope]);
 
   async function loadAll() {
     setLoading(true);
@@ -104,17 +113,19 @@ export default function Tax() {
   }
 
   async function loadIncome() {
-    const { data } = await supabase
+    let q = supabase
       .from('income_transactions')
       .select('income_type, taxable_status, amount')
       .eq('owner_id', user!.id)
       .gte('date', yearStart)
       .lte('date', yearEnd);
+    if (scope !== 'all') q = q.eq('mode', scope);
+    const { data } = await q;
     setIncomeRows((data as IncomeRow[]) || []);
   }
 
   async function loadDeductions() {
-    const { data } = await supabase
+    let q = supabase
       .from('transactions_uploaded')
       .select('final_category, amount, review_status')
       .eq('owner_id', user!.id)
@@ -123,10 +134,12 @@ export default function Tax() {
       .in('review_status', ['approved', 'auto_categorized', 'edited'])
       .gte('date', yearStart)
       .lte('date', yearEnd);
+    if (scope !== 'all') q = q.eq('transaction_mode', scope);
+    const { data } = await q;
     setDeductionRows((data as DeductionRow[]) || []);
 
     // Also count unreviewed deductions for warning
-    const { count } = await supabase
+    let cq = supabase
       .from('transactions_uploaded')
       .select('id', { count: 'exact', head: true })
       .eq('owner_id', user!.id)
@@ -134,6 +147,8 @@ export default function Tax() {
       .in('review_status', ['needs_review', 'suggested', 'ai_suggested'])
       .gte('date', yearStart)
       .lte('date', yearEnd);
+    if (scope !== 'all') cq = cq.eq('transaction_mode', scope);
+    const { count } = await cq;
     setUnreviewedDeductionCount(count || 0);
   }
 
@@ -190,7 +205,7 @@ export default function Tax() {
   // --- Calculations ---
   const taxableIncome = useMemo(() => {
     return incomeRows
-      .filter(r => r.taxable_status === 'taxable' || r.taxable_status === 'partially_taxable')
+      .filter(r => r.taxable_status === 'taxable')
       .reduce((s, r) => s + (r.amount || 0), 0);
   }, [incomeRows]);
 
@@ -223,7 +238,7 @@ export default function Tax() {
       const key = r.income_type || 'other';
       if (!map[key]) map[key] = { taxable: 0, excluded: 0 };
       const amt = r.amount || 0;
-      if (r.taxable_status === 'taxable' || r.taxable_status === 'partially_taxable') {
+      if (r.taxable_status === 'taxable') {
         map[key].taxable += amt;
       } else {
         map[key].excluded += amt;
@@ -270,16 +285,29 @@ export default function Tax() {
       <AppNav />
       <div className="container py-8 space-y-8">
         {/* Header */}
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between flex-wrap gap-3">
           <div>
             <h1 className="text-2xl font-semibold text-foreground">Tax Reserves — {currentYear}</h1>
             <p className="text-sm text-muted-foreground">
               {profile.filing_status.replace(/_/g, ' ')} · {profile.city}, {profile.state}
             </p>
           </div>
-          <Button variant="outline" size="sm" onClick={() => { setDraft(profile); setEditOpen(true); }}>
-            <Settings className="h-4 w-4 mr-1" /> Edit Profile
-          </Button>
+          <div className="flex items-center gap-2">
+            <div className="inline-flex rounded-md border border-border/40 p-0.5 bg-secondary/40 text-xs">
+              {(['personal', 'business', 'all'] as const).map(s => (
+                <button
+                  key={s}
+                  onClick={() => setScope(s)}
+                  className={`px-3 py-1 rounded-sm capitalize transition-colors ${scope === s ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                >
+                  {s === 'all' ? 'All' : s}
+                </button>
+              ))}
+            </div>
+            <Button variant="outline" size="sm" onClick={() => { setDraft(profile); setEditOpen(true); }}>
+              <Settings className="h-4 w-4 mr-1" /> Edit Profile
+            </Button>
+          </div>
         </div>
 
         {/* Summary Cards */}

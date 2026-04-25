@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { AppNav } from '@/components/AppNav';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Link } from 'react-router-dom';
+import { NON_EARNING_TYPES } from '@/lib/income-classifier';
 import {
   AlertTriangle, Landmark, Target, FileSpreadsheet,
   CheckCircle2, ChevronRight, ExternalLink
@@ -49,19 +50,28 @@ export default function CloseMonth() {
   });
   const [activeStep, setActiveStep] = useState(1);
   const [completedSteps, setCompletedSteps] = useState<Set<number>>(new Set());
+  // Personal vs Business scope. Persisted across sessions.
+  const [scope, setScope] = useState<'personal' | 'business'>(() => {
+    if (typeof window === 'undefined') return 'personal';
+    return (localStorage.getItem('close_scope') as 'personal' | 'business') || 'personal';
+  });
+  useEffect(() => {
+    if (typeof window !== 'undefined') localStorage.setItem('close_scope', scope);
+  }, [scope]);
 
   const monthOptions = useMemo(getMonthOptions, []);
   const dateRange = useMemo(() => getDateRange(selectedMonth), [selectedMonth]);
 
   // Exceptions count
   const { data: exceptions } = useQuery({
-    queryKey: ['close-exceptions', user?.id, dateRange],
+    queryKey: ['close-exceptions', user?.id, dateRange, scope],
     queryFn: async () => {
       if (!user) return [];
       const { data } = await supabase
         .from('transactions_uploaded')
         .select('id, description_normalized, amount, date, review_status')
         .eq('owner_id', user.id)
+        .eq('transaction_mode', scope)
         .in('review_status', ['needs_review', 'suggested', 'ai_suggested'])
         .gte('date', dateRange.start)
         .lte('date', dateRange.end);
@@ -86,18 +96,19 @@ export default function CloseMonth() {
     enabled: !!user,
   });
 
-  // Income for month
+  // Income for month — earned-only, mode-scoped
   const { data: monthIncome } = useQuery({
-    queryKey: ['close-income', user?.id, dateRange],
+    queryKey: ['close-income', user?.id, dateRange, scope],
     queryFn: async () => {
       if (!user) return [];
       const { data } = await supabase
         .from('income_transactions')
-        .select('amount')
+        .select('amount, income_type')
         .eq('owner_id', user.id)
+        .eq('mode', scope)
         .gte('date', dateRange.start)
         .lte('date', dateRange.end);
-      return data || [];
+      return (data || []).filter(r => !(NON_EARNING_TYPES as readonly string[]).includes(r.income_type));
     },
     enabled: !!user,
   });
@@ -266,17 +277,30 @@ export default function CloseMonth() {
     <div className="min-h-screen bg-background">
       <AppNav />
       <div className="container py-6 space-y-6">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between flex-wrap gap-3">
           <div>
             <h1 className="text-2xl font-semibold text-foreground">Close Month</h1>
             <p className="text-sm text-muted-foreground">Guided monthly review — work through each step to close the books.</p>
           </div>
-          <Select value={selectedMonth} onValueChange={(v) => { setSelectedMonth(v); setCompletedSteps(new Set()); setActiveStep(1); }}>
-            <SelectTrigger className="w-[180px] h-9 text-xs"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {monthOptions.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <div className="flex items-center gap-2">
+            <div className="inline-flex rounded-md border border-border/40 p-0.5 bg-secondary/40 text-xs">
+              {(['personal', 'business'] as const).map(s => (
+                <button
+                  key={s}
+                  onClick={() => { setScope(s); setCompletedSteps(new Set()); setActiveStep(1); }}
+                  className={`px-3 py-1 rounded-sm capitalize transition-colors ${scope === s ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+            <Select value={selectedMonth} onValueChange={(v) => { setSelectedMonth(v); setCompletedSteps(new Set()); setActiveStep(1); }}>
+              <SelectTrigger className="w-[180px] h-9 text-xs"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {monthOptions.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
 
         {/* Progress */}
