@@ -70,7 +70,7 @@ export default function Wealth() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm);
-
+  const [scope, setScope] = useState<ModeScope>(() => readPersistedScope('wealth_scope', 'all'));
   const { data: accounts = [], isLoading } = useQuery({
     queryKey: ['investment_accounts'],
     queryFn: async () => {
