@@ -259,6 +259,12 @@ export default function Wealth() {
                       <div className="min-w-0">
                         <CardTitle className="text-sm font-semibold text-foreground truncate">{a.account_name}</CardTitle>
                         <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                          <Badge
+                            variant="outline"
+                            className={`text-[10px] px-1.5 py-0 ${a.mode === 'business' ? 'bg-primary/15 text-primary border-primary/25' : 'bg-secondary text-foreground border-border'}`}
+                          >
+                            {a.mode === 'business' ? 'Business' : 'Personal'}
+                          </Badge>
                           <Badge variant="secondary" className="text-[10px] px-1.5 py-0">{typeLabel(a.account_type)}</Badge>
                           {a.platform && <span className="text-[10px] text-muted-foreground">{a.platform}</span>}
                           {!a.is_active && <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-destructive border-destructive/30">Inactive</Badge>}
