@@ -148,8 +148,14 @@ export default function Reimbursements() {
     setLoading(false);
   };
 
+  // Scope-filter once; everything (filtered list + stats) flows from this.
+  const scopedTxs = useMemo(() => {
+    if (scope === 'all') return transactions;
+    return transactions.filter(t => (t.mode || 'personal') === scope);
+  }, [transactions, scope]);
+
   const filtered = useMemo(() => {
-    let result = transactions;
+    let result = scopedTxs;
     if (tab === 'pending') result = result.filter(t => ['none', 'pending'].includes(t.reimbursement_status));
     else if (tab === 'submitted') result = result.filter(t => ['submitted', 'approved'].includes(t.reimbursement_status));
     else if (tab === 'reimbursed') result = result.filter(t => ['reimbursed', 'partially_reimbursed'].includes(t.reimbursement_status));
@@ -163,7 +169,7 @@ export default function Reimbursements() {
       );
     }
     return result;
-  }, [transactions, tab, search]);
+  }, [scopedTxs, tab, search]);
 
   // Stats
   const stats = useMemo(() => {
