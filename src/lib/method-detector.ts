@@ -3,6 +3,7 @@ const METHOD_PATTERNS: [RegExp, string][] = [
   [/bo?a[\s_-]*5563/i, 'BoA 5563'],
   [/bo?a[\s_-]*5592/i, 'BoA 5592'],
   [/bo?a[\s_-]*5573/i, 'BoA 5573'],
+  [/bo?a[\s_-]*5373/i, 'BoA 5373'],
   [/bo?a[\s_-]*credit/i, 'BoA Credit Card'],
   [/chase[\s_-]*2662/i, 'Chase Credit Card'],
   [/chase[\s_-]*8886/i, 'Chase Checking/Debit'],

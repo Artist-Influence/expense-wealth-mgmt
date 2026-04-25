@@ -1,91 +1,43 @@
-## Income — split Personal vs Business
+## Three small fixes
 
-### Problem
+### 1. Add BoA 5373 as a payment method
 
-The Income page treats everything as one undifferentiated stream. There's no `mode` (Personal/Business) column on `income_transactions`, no toggle on the page, and the existing Personal/Business switch on Insights doesn't filter income at all — so business revenue and personal payroll are mixed together everywhere.
-
-Current data: 128 income rows, 79 of them tagged `income_type = business_revenue` ($225K), the rest are mixed personal payroll/refunds/transfers ($73K).
-
-### Fix overview
-
-1. **DB**: add a `mode` column to `income_transactions` and backfill existing rows from `income_type`.
-2. **Income page**: add mode toggle (All / Personal / Business), capture mode on CSV import + manual entry, and split summary cards.
-3. **Insights**: wire the existing Personal/Business toggle to also filter income.
-
-### 1. Database migration
-
-```sql
--- Add mode column
-ALTER TABLE income_transactions
-  ADD COLUMN mode text NOT NULL DEFAULT 'personal';
-
--- Backfill: business_revenue → business; everything else stays personal
-UPDATE income_transactions
-  SET mode = 'business'
-  WHERE income_type = 'business_revenue';
-
--- Index for fast filtering
-CREATE INDEX idx_income_transactions_owner_mode
-  ON income_transactions(owner_id, mode);
-```
-
-This gives a sensible starting state. The user can re-classify any row that was guessed wrong via the new dropdown.
-
-### 2. Income page (`src/pages/Income.tsx`)
-
-**Mode toggle in header** (next to the existing date filter):
-```
-[ All ] [ Personal ] [ Business ]
-```
-- Default: All
-- Persists in component state (no URL persistence needed for now)
-
-**Mode column on the table** between Income Type and Taxable, editable via a small badge dropdown — same pattern as the existing Income Type cell. Personal renders muted, Business renders primary-tinted so it's instantly scannable.
-
-**Summary cards**: when filtered to "All", split the existing "Total Inflows" card into two: **Personal Income** + **Business Income**. When filtered to Personal or Business, keep the current 6 cards (Total / Taxable / Non-Taxable / Revenue / Payroll / Other) but scoped to the active mode.
-
-**CSV import**: add a small Mode selector inline in the CSV uploader area (Personal / Business). Whatever's selected gets stamped on every row in the import. Default = whatever the page filter is currently set to (or Personal if "All"). The classifier already detects `business_revenue` from descriptions like "stripe", "invoice", etc., so even Personal-mode imports will still surface a "this looks like business revenue — re-tag?" review state.
-
-**Manual entry dialog**: add a Mode select alongside Income Type. Default = current page filter (or Personal).
-
-**Bulk actions**: add "Set Mode → Personal/Business" to the existing bulk action bar (right next to "Set Type"), so the user can re-classify in batch after the backfill.
-
-**Filter logic**: extend the existing `summaryCards` and `filtered` useMemo to apply the mode filter alongside date/type/status/search.
-
-### 3. Insights page (`src/pages/Insights.tsx`)
-
-The page already has a Personal/Business mode toggle that scopes expenses correctly. Update `loadIncome()` to also filter by `mode`:
+`src/lib/method-detector.ts` — add the regex so any uploaded CSV with "BoA 5373" / "BoA_5373" / "BoA-5373" in its filename auto-tags every row's method column as **BoA 5373**:
 
 ```ts
-.from('income_transactions')
-.select('date, amount, income_type, taxable_status, status, mode')
-.eq('owner_id', user!.id)
-.eq('mode', mode)   // NEW — tie to the page's existing mode state
+[/bo?a[\s_-]*5373/i, 'BoA 5373'],
 ```
 
-This single line fixes the mismatch in:
-- Cash Flow Money In card
-- Savings Rate calculation
-- Income vs Expenses chart
-- YoY Income comparison
-- "Where to Save" tax reserve gap suggestion (which is already business-only)
+This sits alongside the existing 5563 / 5573 / 5592 entries. No DB or category changes — it's purely filename → method label. Apply this BoA 5373 card as a personal account (it gets registered in the method column of expense uploads automatically).
 
-### 4. Income classifier nudge (`src/lib/income-classifier.ts`)
+### 2. Income summary cards must respect Personal / Business toggle
 
-Extend the return type to also suggest a default mode based on the matched rule:
-- `business_revenue`, `owner_contribution`, `loan_proceeds` → suggest `'business'`
-- `payroll`, `refund`, `interest`, `tax_refund`, `transfer`, `reimbursement`, `other` → suggest `'personal'`
+On the Income page right now, the **Personal Income** and **Business Income** cards always show both totals regardless of the toggle, which is confusing.
 
-This way CSV imports auto-tag mode intelligently when the user picks "All" mode at upload time, and the user only has to fix outliers.
+Fix in `src/pages/Income.tsx`:
+
+- When toggle = **All** → show both Personal Income + Business Income cards (current behavior).
+- When toggle = **Personal** → hide Business Income card; show only Personal Income + the personal-scoped detail cards.
+- When toggle = **Business** → hide Personal Income card; show only Business Income + the business-scoped detail cards.
+
+Implementation: change the `cards` array to conditionally include the Personal/Business cards based on `filterMode`, and also scope the totals to the active mode (right now `personalIncome`/`businessIncome` ignore the mode filter — make them respect it).
+
+### 3. Income on the Income page must segment cleanly by view
+
+The table already filters by `filterMode`, but combined with the issue in #2 the segmentation feels broken. After fix #2, verify:
+
+- **Personal view**: table only shows rows where `mode = 'personal'`; all summary cards reflect only personal totals; CSV import default = Personal; manual entry default = Personal.
+- **Business view**: same but for business.
+- **All view**: shows everything plus the side-by-side Personal vs Business card pair.
+
+Also: the "Total Inflows" card label was already mode-aware ("Personal Total" / "Business Total" when filtered). Keep that, just make sure it sits next to the right single-mode card and not next to the cross-mode one.
 
 ### Files
 
-- **DB migration** (new) — add `mode` column + backfill + index
-- `src/pages/Income.tsx` — mode toggle, mode column, mode-aware summary cards, CSV/manual mode capture, bulk mode action
-- `src/pages/Insights.tsx` — `.eq('mode', mode)` in `loadIncome()`
-- `src/lib/income-classifier.ts` — return suggested mode alongside type
+- `src/lib/method-detector.ts` — add BoA 5373 pattern
+- `src/pages/Income.tsx` — make summary cards respect the mode toggle (conditional card list + mode-scoped totals)
 
-### Out of scope (for later)
+### Out of scope
 
-- The Settings → Historical Income Seed flow already passes mode to merchant_memory; we won't touch that path. (It doesn't write to `income_transactions` anyway.)
-- Tax page reads income aggregately for reserve math — leave as-is for now since it only cares about taxable totals; can revisit if user wants strict separation there too.
+- No DB changes. The `mode` column already exists on income, and method is detected on expense CSV import (existing behavior).
+- Not touching Insights — its Personal/Business toggle already filters income correctly per the previous fix.
