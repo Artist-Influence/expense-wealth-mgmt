@@ -420,7 +420,7 @@ export default function Income() {
             <Button variant="outline" size="sm" onClick={() => setShowUploader(!showUploader)}>
               <Upload className="h-4 w-4 mr-1" /> Import CSV
             </Button>
-            <Button variant="outline" size="sm" onClick={() => setShowManualEntry(true)}>
+            <Button variant="outline" size="sm" onClick={() => { setManualMode(filterMode === 'business' ? 'business' : 'personal'); setShowManualEntry(true); }}>
               <Plus className="h-4 w-4 mr-1" /> Add Entry
             </Button>
             <Button variant="outline" size="sm" onClick={exportCsv}>
