@@ -14,6 +14,7 @@ import { Badge } from '@/components/ui/badge';
 import { Plus, Pencil, TrendingUp, Wallet, Target, DollarSign, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
+import { ModeScopeToggle, readPersistedScope, type ModeScope } from '@/components/ModeScopeToggle';
 
 const ACCOUNT_TYPES = [
   { value: 'roth_ira', label: 'Roth IRA' },
