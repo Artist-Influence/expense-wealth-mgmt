@@ -760,6 +760,12 @@ export default function Expenses() {
 
       // Insert income rows directly into income_transactions and skip the
       // expenses pipeline for them entirely.
+      // The income table's `mode` must mirror the upload's mode — a Business
+      // expense file's auto-routed inflows belong to business income, not
+      // personal. (reimbursable_work uploads are personal-owned at the cash
+      // level, so their inflows stay personal.)
+      const incomeMode: 'personal' | 'business' =
+        categoryMode === 'business' ? 'business' : 'personal';
       let incomeInsertedCount = 0;
       if (incomeRows.length > 0) {
         const incomePayload = incomeRows.map(tx => {
@@ -772,6 +778,7 @@ export default function Expenses() {
             description_normalized: tx.description_normalized,
             income_type: cls.income_type,
             taxable_status: cls.taxable_status,
+            mode: incomeMode,
             source_account_name: method || null,
             source_file_name: file.name,
             status: 'needs_review',
