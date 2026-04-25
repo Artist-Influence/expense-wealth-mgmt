@@ -464,6 +464,257 @@ export default function Insights() {
     return { total, needsReview, uncategorized, approved, approvalRate };
   }, [transactions, dateFrom, dateTo]);
 
+  // ─── CASH FLOW (Money In vs Out) ───
+  // Respects active date filter. Falls back to "all dates" if no filter is active.
+  const cashFlow = useMemo(() => {
+    const moneyIn = earnedIncome.reduce((s, t) => s + Math.abs(t.amount || 0), 0);
+    const moneyOut = expenses.reduce((s, t) => s + Math.abs(t.amount || 0), 0);
+    const net = moneyIn - moneyOut;
+    const savingsPct = moneyIn > 0 ? (net / moneyIn) * 100 : 0;
+
+    // Compute prior equal-length window for comparison
+    let priorMoneyIn = 0, priorMoneyOut = 0;
+    if (dateActive && dateFrom && dateTo) {
+      const fromD = new Date(dateFrom);
+      const toD = new Date(dateTo);
+      const days = Math.max(1, Math.round((toD.getTime() - fromD.getTime()) / 86400000) + 1);
+      const priorTo = new Date(fromD); priorTo.setDate(priorTo.getDate() - 1);
+      const priorFrom = new Date(priorTo); priorFrom.setDate(priorFrom.getDate() - (days - 1));
+      const pf = priorFrom.toISOString().slice(0, 10);
+      const pt = priorTo.toISOString().slice(0, 10);
+      earnedIncomeAll.forEach(t => { if (t.date && t.date >= pf && t.date <= pt) priorMoneyIn += Math.abs(t.amount || 0); });
+      allExpenses.forEach(t => { if (t.date && t.date >= pf && t.date <= pt) priorMoneyOut += Math.abs(t.amount || 0); });
+    }
+    const inChange = priorMoneyIn > 0 ? ((moneyIn - priorMoneyIn) / priorMoneyIn) * 100 : null;
+    const outChange = priorMoneyOut > 0 ? ((moneyOut - priorMoneyOut) / priorMoneyOut) * 100 : null;
+
+    // Months covered (for monthly averaging in suggestions)
+    const monthSet = new Set<string>();
+    [...expenses, ...earnedIncome].forEach(t => { if (t.date) monthSet.add(t.date.slice(0, 7)); });
+    const monthsCovered = Math.max(1, monthSet.size);
+
+    return { moneyIn, moneyOut, net, savingsPct, priorMoneyIn, priorMoneyOut, inChange, outChange, monthsCovered };
+  }, [expenses, earnedIncome, earnedIncomeAll, allExpenses, dateActive, dateFrom, dateTo]);
+
+  // Filter-aware Income vs Expenses chart (separate from the 12-month one in Income tab)
+  const incomeVsExpensesScoped = useMemo(() => {
+    const monthMap = new Map<string, { income: number; expenses: number }>();
+    expenses.forEach(t => {
+      if (!t.date) return;
+      const m = t.date.substring(0, 7);
+      const e = monthMap.get(m) || { income: 0, expenses: 0 };
+      e.expenses += Math.abs(t.amount || 0);
+      monthMap.set(m, e);
+    });
+    earnedIncome.forEach(t => {
+      if (!t.date) return;
+      const m = t.date.substring(0, 7);
+      const e = monthMap.get(m) || { income: 0, expenses: 0 };
+      e.income += Math.abs(t.amount || 0);
+      monthMap.set(m, e);
+    });
+    return [...monthMap.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([month, d]) => ({
+        month,
+        income: Math.round(d.income * 100) / 100,
+        expenses: Math.round(d.expenses * 100) / 100,
+        net: Math.round((d.income - d.expenses) * 100) / 100,
+      }));
+  }, [expenses, earnedIncome]);
+
+  // ─── WHERE TO SAVE (Suggestions) ───
+  type Suggestion = {
+    id: string;
+    title: string;
+    impactMonthly: number; // estimated $/mo savings (used for ranking)
+    why: string;
+    cta?: { label: string; href: string };
+    tone?: 'opportunity' | 'warning' | 'positive';
+  };
+
+  const suggestions = useMemo<Suggestion[]>(() => {
+    const out: Suggestion[] = [];
+    const months = cashFlow.monthsCovered;
+
+    // Discretionary categories we care about for "trim back" suggestions
+    const DISCRETIONARY = new Set([
+      'Dining', 'Restaurants', 'Food & Drink', 'Coffee', 'Entertainment',
+      'Shopping', 'Substances', 'Rideshare', 'Travel', 'Bars', 'Alcohol',
+      'Streaming', 'Hobbies', 'Personal Care',
+    ]);
+
+    // 1. Subscription audit (sum of recurring subscription monthly load + unused flags)
+    const subs = recurringCharges.filter(rc => (rc.category || '').toLowerCase() === 'subscriptions');
+    if (subs.length > 0) {
+      const monthlyLoad = subs.reduce((s, rc) => s + rc.monthlyEstimate, 0);
+      const today = new Date();
+      const stale = subs.filter(rc => {
+        if (!rc.lastCharged) return false;
+        const last = new Date(rc.lastCharged);
+        const daysSince = (today.getTime() - last.getTime()) / 86400000;
+        return daysSince > 60;
+      });
+      if (stale.length > 0) {
+        const staleMonthly = stale.reduce((s, rc) => s + rc.monthlyEstimate, 0);
+        out.push({
+          id: 'stale-subs',
+          tone: 'warning',
+          title: `${stale.length} subscription${stale.length > 1 ? 's' : ''} look unused — review & cancel`,
+          impactMonthly: staleMonthly,
+          why: `${stale.map(s => s.name).slice(0, 3).join(', ')}${stale.length > 3 ? '…' : ''} — no charge in 60+ days. Cancelling could save ~${fmt(staleMonthly)}/mo.`,
+          cta: { label: 'Open Recurring', href: '/insights' },
+        });
+      }
+      if (monthlyLoad > 0) {
+        out.push({
+          id: 'sub-load',
+          tone: 'opportunity',
+          title: `Your subscription load is ${fmt(monthlyLoad)}/mo`,
+          impactMonthly: monthlyLoad * 0.2, // assume 20% trimmable
+          why: `${subs.length} active subscriptions across ${[...new Set(subs.map(s => s.name))].length} merchants. Trimming the bottom 20% could save ~${fmt(monthlyLoad * 0.2)}/mo.`,
+        });
+      }
+    }
+
+    // 2. Discretionary overspend (top 3 categories above 6mo baseline)
+    const catCurrentMonthly = new Map<string, number>();
+    approvedExpenses.forEach(t => {
+      const cat = t.final_category || 'Uncategorized';
+      if (!DISCRETIONARY.has(cat)) return;
+      catCurrentMonthly.set(cat, (catCurrentMonthly.get(cat) || 0) + Math.abs(t.amount || 0));
+    });
+    // 6-month baseline from ALL data (not just date-scoped)
+    const sixMonthsAgo = new Date();
+    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+    const baselineCutoff = sixMonthsAgo.toISOString().slice(0, 10);
+    const catBaselineTotals = new Map<string, number>();
+    const baselineMonthSet = new Set<string>();
+    allExpenses
+      .filter(t => ['approved', 'auto_categorized', 'edited'].includes(t.review_status))
+      .filter(t => t.date && t.date >= baselineCutoff)
+      .forEach(t => {
+        const cat = t.final_category || 'Uncategorized';
+        if (!DISCRETIONARY.has(cat)) return;
+        catBaselineTotals.set(cat, (catBaselineTotals.get(cat) || 0) + Math.abs(t.amount || 0));
+        if (t.date) baselineMonthSet.add(t.date.slice(0, 7));
+      });
+    const baselineMonths = Math.max(1, baselineMonthSet.size);
+    const overspendCandidates: { cat: string; current: number; baseline: number; over: number }[] = [];
+    catCurrentMonthly.forEach((total, cat) => {
+      const currentMonthly = total / months;
+      const baselineMonthly = (catBaselineTotals.get(cat) || 0) / baselineMonths;
+      if (baselineMonthly > 0 && currentMonthly > baselineMonthly * 1.2) {
+        overspendCandidates.push({
+          cat,
+          current: currentMonthly,
+          baseline: baselineMonthly,
+          over: currentMonthly - baselineMonthly,
+        });
+      }
+    });
+    overspendCandidates
+      .sort((a, b) => b.over - a.over)
+      .slice(0, 3)
+      .forEach(c => {
+        const pct = ((c.current - c.baseline) / c.baseline) * 100;
+        out.push({
+          id: `overspend-${c.cat}`,
+          tone: 'warning',
+          title: `${c.cat} is ${pct.toFixed(0)}% above your baseline`,
+          impactMonthly: c.over,
+          why: `Currently ~${fmt(c.current)}/mo vs 6-mo baseline of ${fmt(c.baseline)}/mo. Trim back to baseline → save ~${fmt(c.over)}/mo.`,
+        });
+      });
+
+    // 3. Duplicate-service detection (2+ recurring in same category)
+    const recByCat = new Map<string, typeof recurringCharges>();
+    recurringCharges.forEach(rc => {
+      const cat = rc.category || 'Uncategorized';
+      if (!recByCat.has(cat)) recByCat.set(cat, []);
+      recByCat.get(cat)!.push(rc);
+    });
+    recByCat.forEach((list, cat) => {
+      if (list.length < 2 || cat === 'Uncategorized') return;
+      // Don't flag categories where multiple charges are normal (Utilities, Insurance, etc.)
+      if (['Utilities', 'Insurance', 'Rent', 'Mortgage', 'Tax', 'Loans'].includes(cat)) return;
+      const sorted = [...list].sort((a, b) => a.monthlyEstimate - b.monthlyEstimate);
+      const cheaper = sorted[0];
+      out.push({
+        id: `duplicate-${cat}`,
+        tone: 'opportunity',
+        title: `${list.length} ${cat} subscriptions — consider consolidating`,
+        impactMonthly: cheaper.monthlyEstimate,
+        why: `${list.map(l => l.name).slice(0, 3).join(', ')}. Cancelling the cheapest (${cheaper.name}) saves ~${fmt(cheaper.monthlyEstimate)}/mo.`,
+      });
+    });
+
+    // 4. High-frequency small charges (8+ txns, avg <$15)
+    const merchAgg = new Map<string, { count: number; total: number }>();
+    approvedExpenses.forEach(t => {
+      const desc = (t.description_normalized || t.description_raw || 'Unknown').substring(0, 40);
+      const e = merchAgg.get(desc) || { count: 0, total: 0 };
+      e.count++; e.total += Math.abs(t.amount || 0);
+      merchAgg.set(desc, e);
+    });
+    const smallCharges = [...merchAgg.entries()]
+      .filter(([, d]) => d.count >= 8 && (d.total / d.count) < 15)
+      .map(([name, d]) => ({ name, count: d.count, total: d.total, monthly: d.total / months }))
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 2);
+    smallCharges.forEach(s => {
+      out.push({
+        id: `small-${s.name}`,
+        tone: 'opportunity',
+        title: `Small charges at ${s.name} add up`,
+        impactMonthly: s.monthly * 0.5,
+        why: `${s.count} visits totaling ${fmt(s.total)} (~${fmt(s.monthly)}/mo). Halving the frequency saves ~${fmt(s.monthly * 0.5)}/mo.`,
+      });
+    });
+
+    // 5. Savings headroom — positive net but low savings rate
+    if (cashFlow.net > 0 && cashFlow.savingsPct < 20 && cashFlow.moneyIn > 0) {
+      const headroom = cashFlow.net / months;
+      out.push({
+        id: 'headroom',
+        tone: 'positive',
+        title: `You have ~${fmt(headroom)}/mo of unused headroom`,
+        impactMonthly: headroom,
+        why: `Net savings rate is ${cashFlow.savingsPct.toFixed(1)}% (target 20%+). Route surplus to investments via Allocations.`,
+        cta: { label: 'Open Allocations', href: '/allocations' },
+      });
+    }
+
+    // 5b. Negative net warning
+    if (cashFlow.net < 0 && cashFlow.moneyIn > 0) {
+      out.push({
+        id: 'negative-net',
+        tone: 'warning',
+        title: `Spending exceeded income by ${fmt(Math.abs(cashFlow.net))}`,
+        impactMonthly: Math.abs(cashFlow.net) / months,
+        why: `Money out (${fmt(cashFlow.moneyOut)}) > money in (${fmt(cashFlow.moneyIn)}) over the selected period. Trim discretionary categories first.`,
+      });
+    }
+
+    // 6. Tax reserve gap (business mode only)
+    if (mode === 'business' && taxReservePct > 0 && cashFlow.net > 0) {
+      const recommendedReserve = cashFlow.net * (taxReservePct / 100);
+      if (recommendedReserve > 100) {
+        out.push({
+          id: 'tax-reserve',
+          tone: 'warning',
+          title: `Set aside ~${fmt(recommendedReserve)} for taxes`,
+          impactMonthly: recommendedReserve / months,
+          why: `Net business income ${fmt(cashFlow.net)} × ${taxReservePct.toFixed(1)}% combined reserve rate. Move to tax-reserve account.`,
+          cta: { label: 'Open Tax', href: '/tax' },
+        });
+      }
+    }
+
+    return out.sort((a, b) => b.impactMonthly - a.impactMonthly).slice(0, 6);
+  }, [cashFlow, recurringCharges, approvedExpenses, allExpenses, mode, taxReservePct]);
+
+
   const tooltipStyle = {
     background: 'hsl(var(--card))',
     border: '1px solid hsl(var(--border))',
