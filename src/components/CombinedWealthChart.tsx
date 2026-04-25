@@ -125,7 +125,7 @@ export function CombinedWealthChart({
     rows.push(todayRow);
 
     return rows;
-  }, [accounts, snapshots, hidden]);
+  }, [accounts, snapshots, hidden, startDate]);
 
   const toggle = (id: string) => {
     setHidden(prev => {
