@@ -414,6 +414,19 @@ export default function Wealth() {
           </Card>
         </div>
 
+        {/* Combined wealth-over-time chart (scope-aware) */}
+        {scopedAccounts.length > 0 && (
+          <CombinedWealthChart
+            accounts={scopedAccounts.map(a => ({
+              id: a.id,
+              account_name: a.account_name,
+              mode: a.mode,
+              current_balance: Number(a.current_balance),
+            }))}
+            snapshots={snapshots.filter(s => scopedAccounts.some(a => a.id === s.account_id))}
+          />
+        )}
+
         {isLoading && <p className="text-muted-foreground text-xs">Loading…</p>}
         {!isLoading && accounts.length === 0 && (
           <Card className="p-6 text-center">
