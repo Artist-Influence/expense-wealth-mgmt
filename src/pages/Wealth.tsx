@@ -481,31 +481,47 @@ export default function Wealth() {
                         <p className="text-[10px] text-muted-foreground">{fmt(Number(a.contributions_ytd))} contributed YTD</p>
                       )}
 
-                      {/* Growth chart: Jan 1 baseline → Today current_balance */}
+                      {/* Snapshot-driven growth chart + inline editor */}
                       {(() => {
-                        const baseline = Number(a.starting_balance_year || 0) > 0
-                          ? Number(a.starting_balance_year)
-                          : Math.max(0, Number(a.current_balance) - Number(a.contributions_ytd));
+                        const accSnaps = snapshots
+                          .filter(s => s.account_id === a.id)
+                          .sort((x, y) => x.as_of_date.localeCompare(y.as_of_date));
                         const current = Number(a.current_balance);
-                        if (baseline <= 0 && current <= 0) return null;
-                        const contributed = Number(a.contributions_ytd || 0);
-                        const growth = current - baseline - contributed; // appreciation only
-                        const data = [
-                          { label: 'Jan 1', value: baseline },
-                          { label: '+ contrib', value: baseline + contributed },
-                          { label: 'Today', value: current },
-                        ];
-                        const delta = current - baseline;
+                        const today = new Date().toISOString().slice(0, 10);
+
+                        // Build chart data: snapshots + today (if not already a snapshot)
+                        const data = accSnaps.map(s => ({
+                          label: new Date(s.as_of_date).toLocaleString('en-US', { month: 'short', year: '2-digit' }),
+                          value: Number(s.balance),
+                          date: s.as_of_date,
+                        }));
+                        if (data.length === 0 || data[data.length - 1].date !== today) {
+                          data.push({ label: 'Today', value: current, date: today });
+                        }
+                        if (data.length === 0) return null;
+
+                        const baseline = data[0].value;
+                        const latest = data[data.length - 1].value;
+                        const delta = latest - baseline;
                         const deltaPct = baseline > 0 ? (delta / baseline) * 100 : 0;
+
                         return (
                           <div className="pt-1 border-t border-border/50">
                             <div className="flex items-center justify-between text-[10px] mb-0.5">
                               <span className="text-muted-foreground">Growth YTD</span>
-                              <span className={delta >= 0 ? 'text-[hsl(var(--success))]' : 'text-destructive'}>
-                                {delta >= 0 ? '+' : ''}{fmt(delta)}{baseline > 0 ? ` (${deltaPct.toFixed(1)}%)` : ''}
-                              </span>
+                              <div className="flex items-center gap-2">
+                                <span className={delta >= 0 ? 'text-[hsl(var(--success))]' : 'text-destructive'}>
+                                  {delta >= 0 ? '+' : ''}{fmt(delta)}{baseline > 0 ? ` (${deltaPct.toFixed(1)}%)` : ''}
+                                </span>
+                                <SnapshotEditor
+                                  account={a}
+                                  snapshots={accSnaps}
+                                  onSave={(date, balance) => upsertSnapshot.mutate({ account_id: a.id, as_of_date: date, balance })}
+                                  onDelete={(date) => deleteSnapshot.mutate({ account_id: a.id, as_of_date: date })}
+                                />
+                              </div>
                             </div>
-                            <div className="h-12 -mx-1">
+                            <div className="h-16 -mx-1">
                               <ResponsiveContainer width="100%" height="100%">
                                 <LineChart data={data} margin={{ top: 2, right: 4, left: 4, bottom: 2 }}>
                                   <Line
@@ -515,7 +531,7 @@ export default function Wealth() {
                                     strokeWidth={1.5}
                                     dot={{ r: 2 }}
                                   />
-                                  <XAxis dataKey="label" hide />
+                                  <XAxis dataKey="label" tick={{ fontSize: 9, fill: 'hsl(var(--muted-foreground))' }} />
                                   <YAxis hide domain={['dataMin', 'dataMax']} />
                                   <Tooltip
                                     contentStyle={{ background: 'hsl(var(--popover))', border: '1px solid hsl(var(--border))', fontSize: 11, padding: '4px 8px' }}
@@ -526,8 +542,7 @@ export default function Wealth() {
                             </div>
                             <div className="flex justify-between text-[9px] text-muted-foreground">
                               <span>Start {fmt(baseline)}</span>
-                              <span>Contrib {fmt(contributed)}</span>
-                              <span>Apprec {growth >= 0 ? '+' : ''}{fmt(growth)}</span>
+                              <span>Today {fmt(latest)}</span>
                             </div>
                           </div>
                         );
