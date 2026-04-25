@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
 import { AppNav } from '@/components/AppNav';
@@ -217,7 +218,9 @@ export default function Expenses() {
   // Filtering and sorting
   const filtered = useMemo(() => {
     let result = transactions.filter(tx => {
-      if (statusFilter !== 'all' && tx.review_status !== statusFilter) return false;
+      if (statusFilter === 'unreviewed') {
+        if (!['needs_review', 'suggested', 'ai_suggested'].includes(tx.review_status)) return false;
+      } else if (statusFilter !== 'all' && tx.review_status !== statusFilter) return false;
       if (extraFilter === 'transfers' && !tx.is_transfer && tx.transfer_type !== 'possible_transfer') return false;
       if (extraFilter === 'possible_transfers' && tx.transfer_type !== 'possible_transfer') return false;
       if (extraFilter === 'possible_duplicates' && tx.duplicate_status !== 'possible_duplicate') return false;
@@ -1251,6 +1254,7 @@ export default function Expenses() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Status</SelectItem>
+              <SelectItem value="unreviewed">Unreviewed (any)</SelectItem>
               <SelectItem value="needs_review">Needs Review</SelectItem>
               <SelectItem value="suggested">Suggested</SelectItem>
               <SelectItem value="ai_suggested">AI Suggested</SelectItem>
