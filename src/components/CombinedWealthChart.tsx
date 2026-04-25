@@ -109,21 +109,29 @@ export function CombinedWealthChart({
       return row;
     });
 
-    // Add today row (current_balance values)
-    const todayRow: any = { label: 'Today', _date: todayKey };
-    let totalToday = 0;
-    let anyToday = false;
-    for (const a of accounts) {
-      const v = Number(a.current_balance) || balanceAt(a.id, todayKey) || 0;
-      todayRow[a.id] = v;
-      if (!hidden.has(a.id)) {
-        totalToday += v;
-        anyToday = true;
+    // Append a "Today" anchor only if today is on/after the chart start date.
+    // Otherwise we'd plant a phantom point in Nov/Dec 2025 left of Jan-26 data.
+    if (todayKey >= effectiveStart) {
+      const todayRow: any = { label: 'Today', _date: todayKey };
+      let totalToday = 0;
+      let anyToday = false;
+      for (const a of accounts) {
+        const v = Number(a.current_balance) || balanceAt(a.id, todayKey) || 0;
+        todayRow[a.id] = v;
+        if (!hidden.has(a.id)) {
+          totalToday += v;
+          anyToday = true;
+        }
       }
+      todayRow.total = anyToday ? totalToday : null;
+      // Only add the Today anchor if it's strictly after the last monthly snapshot
+      // so it doesn't collide with that month's bar.
+      const lastMonthKey = months[months.length - 1];
+      if (todayKey > lastMonthKey) rows.push(todayRow);
     }
-    todayRow.total = anyToday ? totalToday : null;
-    rows.push(todayRow);
 
+    // Defensive: chronological order regardless of how anchors were added.
+    rows.sort((a, b) => a._date.localeCompare(b._date));
     return rows;
   }, [accounts, snapshots, hidden, startDate]);
 

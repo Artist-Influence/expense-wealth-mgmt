@@ -1,91 +1,69 @@
-## Goal
+## Three fixes for /wealth
 
-Two upgrades to the Wealth page:
-1. **Trim the historical chart** so the time axis starts at **Jan 2026** (not the older Nov-25 anchor that's currently leaking in from a stray snapshot).
-2. **Add a long-term Projection chart** beneath it that shows every investment + the combined total compounded out to **age 65** (Wealthfront-style), with editable per-account growth rates and a clickable legend.
+### 1. Wealth Over Time — kill the Nov/Dec ghost points
 
----
+Today the chart appends a hard-coded **"Today"** anchor (Nov 25, 2025) using `current_balance`. Because today's date is *before* Jan 2026, the Today point lands to the **left** of the Jan-26 snapshot, dragging the line back into Nov/Dec 2025.
 
-## Part 1 — Fix history start date (Jan 2026)
+**Fix in `src/components/CombinedWealthChart.tsx`:**
+- Only append the Today anchor when `today >= startDate`. Otherwise, the chart ends at the most recent monthly snapshot (Apr 2026 for now).
+- Sort the final rows by `_date` defensively so any future anchor is always chronological.
+- Result: chart cleanly spans **Jan 26 → Apr 26** with no Nov/Dec ghost.
 
-In `src/components/CombinedWealthChart.tsx`, the month series is built from `allDates[0]` (the earliest snapshot of any account). Because there's likely a Today auto-snapshot from when accounts were created on Nov 25, 2025, the X-axis begins there.
+### 2. Move S&P 500 (Wealthfront) into the Brokerage group
 
-Change:
-- Add an optional `startDate?: string` prop (defaulting to `'2026-01-01'`).
-- Build months from `max(startDate, earliestSnapshot)` instead of unconditionally using the earliest snapshot.
-- For each account on the start month, fall back to its earliest known snapshot value if there is no exact Jan-2026 snapshot, so each line still has a valid first point.
-- Pass `startDate="2026-01-01"` from `Wealth.tsx`.
+Currently the **S&P 500** account has `account_type = 'savings'`, which is why it renders under the "Other" section. Brokerage index funds are stocks — move it.
 
-Result: history chart begins at **Jan 26** and ends at the **Today** anchor.
+**Fix:**
+- Run a one-line UPDATE: set `account_type = 'brokerage'` (and platform to `'Wealthfront'` if blank) for the existing `S&P 500` row.
+- No code changes needed — the existing `TYPE_GROUPS.brokerage` already includes `brokerage`, and the projection chart already uses `brokerage → 8% S&P-style default`.
 
----
+### 3. Live market-rate calculation for the projection
 
-## Part 2 — New "Projection to Age 65" chart
+Today the projection uses static heuristic rates (S&P 8%, crypto 12%, etc.). Make these **live and historical** by adding a small calculator component.
 
-### New component: `src/components/WealthProjectionChart.tsx`
+**New edge function: `market-rates`**
+- Pulls free, no-key public data:
+  - **S&P 500 (^GSPC)** — Yahoo Finance `query1.finance.yahoo.com/v8/finance/chart/^GSPC?range=20y&interval=1mo` → compute 1y, 5y, 10y, 20y CAGR.
+  - **BTC-USD** — same Yahoo endpoint with `BTC-USD`. (Default crypto basket; user can swap to ETH-USD or a custom mix from a dropdown.)
+  - **Pokémon TCG index** — no clean free feed; use a configurable static "PSA Card Index" 5y CAGR (~12%) the user can override per-account, with a citation link.
+  - **Dub** — no public quote feed. Best we can do: let the user paste their **Dub yearly performance** (or we infer it from their actual snapshot history → see below).
+- Returns `{ symbol, cagr_1y, cagr_5y, cagr_10y, cagr_20y, as_of }`.
+- Cached client-side via React Query (`staleTime: 6h`) so we don't hammer Yahoo.
 
-A separate card placed directly under `CombinedWealthChart`. Features:
+**New component: `LiveRateCalculator` (modal/popover on each assumption row)**
+- Click the "rate %" cell → popover opens showing:
+  - **Live benchmarks** for the relevant symbol: 1y / 5y / 10y / 20y CAGR with sparkline.
+  - **Your actual realized rate** computed from this account's `account_balance_snapshots` history (annualized, contributions-adjusted via Modified Dietz). Falls back to "Need 2+ snapshots" if too sparse.
+  - Buttons: "Use 10y avg", "Use 20y avg", "Use my realized rate", or type a custom value.
+- Symbol mapping per account (editable, persisted to localStorage with the existing assumptions):
+  - `brokerage` + Wealthfront/S&P → `^GSPC`
+  - `crypto` + Gemini → `BTC-USD` by default; dropdown for `ETH-USD`, `SOL-USD`, or weighted mix
+  - `collectibles` → no live symbol; show static PSA index + manual override
+  - `brokerage` + Dub → realized-rate only (no public symbol)
 
-- **X-axis**: years from current year through the year the user turns 65.
-- **Y-axis**: USD (k/M formatting).
-- **Lines**: one per active account + bold **Total** line.
-- **Clickable legend**: same toggle UX as the history chart (reuses styling).
-- **Tooltip**: shows year, age, each account value, and total.
-- **Per-account assumptions panel** (collapsible row above the chart):
-  - Annual growth rate (%)
-  - Monthly contribution ($) — pre-filled from `contribution_target_monthly`, falling back to `contributions_ytd / months_elapsed` if target is 0.
-  - "Stop contributing at age" (default 65)
-  - Stored in `localStorage` under `wealth_projection_assumptions_v1` keyed by `account_id`. No DB changes needed.
+**New "Realized vs Assumed" badge on each legend chip**
+- Small caret showing how the user's actual snapshot CAGR compares to their assumed rate (e.g. `assumed 8% · realized 14%`). Helps spot stale assumptions.
 
-### Default growth-rate heuristics (editable)
-
-Sensible starting values inferred from `account_type` and `platform`:
-
-| Account type / platform | Default annual rate |
-|---|---|
-| Wealthfront S&P 500 / brokerage index | 8% |
-| Crypto (Gemini) | 12% (high-vol caveat shown in tooltip) |
-| Dub (social trading brokerage) | 10% |
-| Collectibles (Pokémon) | 7% |
-| Roth/Traditional IRA | 8% |
-| Savings | 4% |
-| Other | 6% |
-
-These are seeded once into the per-account assumptions store; users can edit any value inline.
-
-### Compounding math
-
-For each account, simulate **monthly** then sample at year-end:
-
-```text
-balance_{m+1} = balance_m * (1 + annual_rate/12) + monthly_contribution
-```
-
-Stops contributions once `current_age + months/12 >= stop_age`. Continues compounding until age 65.
-
-### Age input
-
-There's no birthday field today. Add a single **"Your current age"** input at the top of the projection card, persisted to `localStorage` (`wealth_user_age`). Default 30 if unset; show inline hint "Used to project to age 65". (Avoids adding a DB column for one number.)
-
-### Educated-prediction badge
-
-A small "Methodology" popover next to the title explains:
-- Rates are historical-average heuristics, editable per account.
-- Crypto and collectibles use wider bands; consider toggling them off to see baseline.
-- A dotted **conservative band** (rate − 3%) and **optimistic band** (rate + 3%) is drawn around the Total line as faint area shading so the user sees a range, not a single number.
+**Optional inputs from you (nice but not required to ship):**
+- Specific crypto holdings split (e.g. 60% BTC / 30% ETH / 10% SOL) → I'll wire a weighted-CAGR mix.
+- Dub historical monthly P&L statements → I'll backfill snapshots so the realized-rate calc works there too.
 
 ---
 
 ## Files touched
 
-- **Edit** `src/components/CombinedWealthChart.tsx` — add `startDate` prop, clamp series start.
-- **New** `src/components/WealthProjectionChart.tsx` — projection card with assumptions panel, compounding sim, range bands, clickable legend.
-- **Edit** `src/pages/Wealth.tsx` — pass `startDate="2026-01-01"` to history chart; render `<WealthProjectionChart accounts={scopedAccounts} />` directly underneath.
+- **Edit** `src/components/CombinedWealthChart.tsx` — guard the Today anchor with `today >= startDate`, sort rows.
+- **Data update** — `UPDATE investment_accounts SET account_type='brokerage', platform=COALESCE(platform,'Wealthfront') WHERE account_name='S&P 500'`.
+- **New** `supabase/functions/market-rates/index.ts` — fetches Yahoo Finance monthly history, returns CAGRs (no API key needed).
+- **New** `src/components/LiveRateCalculator.tsx` — popover with live benchmarks + realized-rate calc + apply buttons.
+- **Edit** `src/components/WealthProjectionChart.tsx` — pass snapshots in, render `<LiveRateCalculator>` next to each rate input, show realized-vs-assumed delta on legend chips, add per-account symbol mapping to the assumptions store.
+- **Edit** `src/pages/Wealth.tsx` — pass `snapshots` to `WealthProjectionChart`.
 
-No DB migration. No new tables. No edge functions.
+No DB migration. No new tables. No new secrets (Yahoo Finance v8 chart endpoint is free and key-less).
 
 ---
 
-## Out of scope (call out for future)
+## Out of scope unless you ask
 
-- Pulling **real-time** market quotes for individualized predictions (would need a market-data API key + edge function). Today's "real-time metric" is the user's own current balance + their editable expected return. Happy to add a live-quote integration in a follow-up if you want.
+- Pulling Dub-specific or Collectr-specific live quotes (no public APIs). Realized-rate from your snapshots is the substitute.
+- Tax-adjusted / inflation-adjusted projections.
