@@ -1,68 +1,76 @@
-## Delete bank-to-bank transfers from personal expenses
+## Pay stubs landing in expenses instead of income
 
-### The problem
+### What's wrong
 
-Personal view currently shows 18 transactions ($41,550 total) like:
-
-> `Online Banking transfer to CHK 5563 Confirmation# XXXXX69389` — $200
-> `Online Banking transfer to CHK 5592 Confirmation# XXXXX79343` — $7,100
-
-These are BoA moving money between your own checking accounts (5373 → 5563 / 5592). Not expenses.
-
-The transfer detector already has a pattern for this kind of thing:
+5 Deel salary deposits totaling **$27,860.86** got stored in `transactions_uploaded` as personal expenses instead of being routed to the `income_transactions` table. They show up in the personal expenses list mixed with real spend.
 
 ```
-TRANSFER\s*(?:TO|FROM)\s*(?:SAVINGS|CHECKING|XXXX####)
+Deel PEOUAWFD2ZP DES:PAYMENTS ... NTE*ZZZ*0426-SALARY-Clout Kitchen   $6,335.67
+Deel PEOP3WZTNTS DES:PAYMENTS ... NTE*ZZZ*0326-SALARY-Clout Kitchen   $7,111.62
+Deel PEOCM24DPSO DES:PAYMENTS ... NTE*ZZZ*0326-SALARY-Clout Kitchen   $4,185.62
+Deel PEOVYPZIQTS DES:PAYMENTS ... NTE*ZZZ*0226-SALARY-Clout Kitchen   $6,114.39
+Deel PEOTLNGN6ZN DES:PAYMENTS ... NTE*ZZZ*0226-SALARY-Clout Kitchen   $4,113.56
 ```
 
-…but it requires the literal word **CHECKING** or an `X####` mask. BoA abbreviates it as `CHK 5563`, which doesn't match — so these rows fall through to the medium-confidence "possible_transfer" bucket and stay counted as expenses.
+### Why it slipped through
 
-There are 8 CC payment rows (Amex "MOBILE PAYMENT - THANK YOU" → $23,183) that *are* already correctly excluded — we don't touch those.
+The CSV importer already has a sign-aware router (`src/lib/transaction-router.ts`) that's supposed to send positive inflows to income. Two failures combined:
+
+1. **BoA's CSV has no `Details` column** (no CREDIT/DEBIT signal), so the router falls back to its description heuristic (`INCOME_DESCRIPTION_HINTS`).
+2. The heuristic regex doesn't include `salary`, `deel`, `payroll-` patterns, or the literal `PAYMENTS ID:` ACH stub Deel uses. It only matches generic words like "deposit", "direct deposit", "payroll" (with word boundaries that don't catch `NTE*ZZZ*0226-SALARY-...`).
+
+So a positive-amount row with description `"Deel ... PAYMENTS ID: ... NTE*ZZZ*0226-SALARY-Clout Kitchen"` failed every check and defaulted to `route: 'expense'`.
 
 ### Fix
 
-**1. `src/lib/transfer-detector.ts`** — broaden the high-confidence pattern to recognize BoA's `CHK ####` shorthand and the generic `Online Banking transfer to …` phrasing:
+**1. Broaden `INCOME_DESCRIPTION_HINTS` in `src/lib/transaction-router.ts`** so any positive-amount row matching paystub/payroll-provider patterns routes to income:
 
 ```ts
-[/ONLINE\s*BANKING\s*TRANSFER\s*(?:TO|FROM)/i, 'account_transfer'],
-[/TRANSFER\s*(?:TO|FROM)\s*(?:SAVINGS|CHECKING|CHK|SAV|(?:X|XXXX?\d{4}))/i, 'account_transfer'],
+const INCOME_DESCRIPTION_HINTS =
+  /\b(deposit|payroll|direct\s*deposit|salary|wages|paycheck|payment\s*from|received\s*from|zelle\s*from|venmo\s*from|paypal\s*from|refund|return|reimburs|interest|dividend|cashback|cash\s*back|stripe\s*payout|square\s*deposit|tax\s*refund|deel|gusto|adp|paychex|justworks|rippling|trinet|oasis|onpay|bamboohr)\b|SALARY[-\s]|PAYMENTS\s*ID:/i;
 ```
 
-This makes future imports auto-flag these as `is_transfer = true` + `exclude_from_expense_totals = true`, so they never pollute personal expense totals again.
+This catches:
+- Generic words: `salary`, `wages`, `paycheck` (added)
+- Payroll providers: `deel`, `gusto`, `adp`, `paychex`, `justworks`, `rippling`, `trinet`, `oasis`, `onpay`, `bamboohr`
+- ACH stub patterns: `SALARY-` (matches `NTE*ZZZ*0226-SALARY-Clout Kitchen`) and `PAYMENTS ID:` (Deel's ACH descriptor)
 
-**2. Backfill existing rows** — one SQL update against `transactions_uploaded`:
+**2. Update `classifyIncome` in `src/lib/income-classifier.ts`** so the `payroll` rule recognizes the same providers (so once routed, they get `income_type: 'payroll'`, `taxable_status: 'taxable'`):
+
+```ts
+{ patterns: /\b(payroll|salary|direct\s*deposit|wages|pay\s?check|adp|gusto|paychex|deel|justworks|rippling|trinet|onpay)\b|SALARY[-\s]/i,
+  income_type: 'payroll', taxable_status: 'taxable', confidence: 90 },
+```
+
+**3. Move the 5 misrouted Deel rows** from `transactions_uploaded` to `income_transactions` via a one-shot data migration:
 
 ```sql
-UPDATE transactions_uploaded
-SET is_transfer = true,
-    transfer_type = 'account_transfer',
-    exclude_from_expense_totals = true,
-    is_non_expense_cash_movement = true,
-    treatment_type = 'transfer',
-    counts_toward_true_personal_spend = false,
-    counts_toward_true_business_spend = false,
-    final_category = COALESCE(final_category, 'Internal Transfer'),
-    review_status = 'auto_categorized'
-WHERE description_raw ~* '(online banking transfer (to|from)|transfer (to|from) (chk|sav)\s*\d+)'
-  AND is_transfer = false;
+-- Insert into income_transactions
+INSERT INTO income_transactions (owner_id, date, amount, description_raw, description_normalized,
+  income_type, taxable_status, source_account_name, source_file_name, status, mode)
+SELECT owner_id, date, ABS(amount), description_raw, description_normalized,
+  'payroll', 'taxable', 'BoA 5373', source_file_name, 'needs_review', 'personal'
+FROM transactions_uploaded
+WHERE description_raw ~* '(SALARY[-\s]|deel.*payments\s*id)'
+  AND treatment_type = 'expense'
+  AND amount > 0;
+
+-- Delete the misplaced expense rows
+DELETE FROM transactions_uploaded
+WHERE description_raw ~* '(SALARY[-\s]|deel.*payments\s*id)'
+  AND treatment_type = 'expense'
+  AND amount > 0;
 ```
 
-That hits all 18 personal rows (and any matching business rows with the same phrasing) in one shot. They stay in the database for audit but stop counting as spend.
-
-**3. Fix pre-existing TypeScript build errors** blocking compile (these are from the previous Income/Expenses edits, not from this work, but the build is currently broken so I'll repair them as part of this turn):
-
-- `src/pages/Expenses.tsx` lines 380, 457, 546 — Supabase `.update(payload as Record<string, any>)` is being rejected by the typed client. Cast the payload to the row type or pass it directly typed instead of `Record<string, any>`.
-- `src/pages/Income.tsx` lines 348, 357 — same pattern, same fix.
+That's 5 rows out of personal expenses, 5 rows into personal income, properly classified as payroll/taxable.
 
 ### Files touched
 
-- `src/lib/transfer-detector.ts` — add the two regex patterns to the high-confidence list
-- `src/pages/Expenses.tsx` — fix the 3 type errors on `.update()` calls
-- `src/pages/Income.tsx` — fix the 2 type errors on `.update()` calls
-- One data UPDATE migration (via the data tool) to backfill the 18 personal rows
+- `src/lib/transaction-router.ts` — broaden `INCOME_DESCRIPTION_HINTS`
+- `src/lib/income-classifier.ts` — broaden the `payroll` rule
+- One data migration to move the 5 existing Deel rows + delete originals
 
 ### Out of scope
 
-- CC payments (already correctly excluded — leaving alone)
-- The 50 business "ONLINE DOMESTIC WIRE FEE" rows currently flagged `possible_transfer` — these are wire **fees**, which *are* real expenses, so they correctly stay as expenses
-- No schema changes, no new tables
+- The penny test row (`Penny-test-for-method` $0.02) — it has no SALARY/payroll signal, so it's correctly staying where it is. If you want it moved too, say the word.
+- No schema changes. No UI changes. Income page already segments cleanly by mode after the previous fix.
