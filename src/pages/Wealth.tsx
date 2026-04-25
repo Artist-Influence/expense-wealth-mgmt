@@ -519,6 +519,19 @@ export default function Wealth() {
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div className="space-y-1">
+                <Label className="text-xs">Starting Balance (Jan 1)</Label>
+                <Input className="h-8 text-sm" type="number" value={form.starting_balance_year} onChange={e => setForm(f => ({ ...f, starting_balance_year: Number(e.target.value) }))} placeholder="0 (auto)" />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Auto-Track Pattern</Label>
+                <Input className="h-8 text-sm" value={form.auto_track_pattern} onChange={e => setForm(f => ({ ...f, auto_track_pattern: e.target.value }))} placeholder="gemini|wealthfront" />
+              </div>
+            </div>
+            <p className="text-[10px] text-muted-foreground -mt-1">
+              Auto-track scans personal expenses for keywords (pipe-separated). Use Sync from Expenses to update.
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1">
                 <Label className="text-xs">Priority</Label>
                 <Input className="h-8 text-sm" type="number" value={form.priority} onChange={e => setForm(f => ({ ...f, priority: Number(e.target.value) }))} />
               </div>
