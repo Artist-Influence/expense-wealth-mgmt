@@ -309,16 +309,26 @@ export default function Wealth() {
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div className="space-y-1">
+                <Label className="text-xs">Scope</Label>
+                <Select value={form.mode} onValueChange={v => setForm(f => ({ ...f, mode: v as 'personal' | 'business' }))}>
+                  <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="personal">Personal</SelectItem>
+                    <SelectItem value="business">Business</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
                 <Label className="text-xs">Type</Label>
                 <Select value={form.account_type} onValueChange={v => setForm(f => ({ ...f, account_type: v }))}>
                   <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
                   <SelectContent>{ACCOUNT_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Platform</Label>
-                <Input className="h-8 text-sm" value={form.platform} onChange={e => setForm(f => ({ ...f, platform: e.target.value }))} placeholder="Fidelity, Wealthfront…" />
-              </div>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Platform</Label>
+              <Input className="h-8 text-sm" value={form.platform} onChange={e => setForm(f => ({ ...f, platform: e.target.value }))} placeholder="Fidelity, Wealthfront…" />
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div className="space-y-1">
