@@ -123,8 +123,9 @@ export default function Insights() {
     while (hasMore) {
       const { data } = await supabase
         .from('income_transactions')
-        .select('date, amount, income_type, taxable_status, status')
+        .select('date, amount, income_type, taxable_status, status, mode')
         .eq('owner_id', user!.id)
+        .eq('mode', mode)
         .range(from, from + pageSize - 1);
       if (data) allData = [...allData, ...(data as IncomeTransaction[])];
       hasMore = (data?.length ?? 0) === pageSize;
