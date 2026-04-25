@@ -19,6 +19,7 @@ import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceL
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { CombinedWealthChart, type Snapshot } from '@/components/CombinedWealthChart';
 import { WealthProjectionChart } from '@/components/WealthProjectionChart';
+import { SetWealthTargetDialog } from '@/components/SetWealthTargetDialog';
 
 const ACCOUNT_TYPES = [
   { value: 'roth_ira', label: 'Roth IRA' },
