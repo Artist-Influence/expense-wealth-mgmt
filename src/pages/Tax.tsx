@@ -72,18 +72,29 @@ export default function Tax() {
   const [deductionRows, setDeductionRows] = useState<DeductionRow[]>([]);
   const [taxPayments, setTaxPayments] = useState<TaxPaymentRow[]>([]);
   const [unreviewedDeductionCount, setUnreviewedDeductionCount] = useState(0);
+  // Projection split: per-mode taxable income & deductions, regardless of active scope.
+  const [projection, setProjection] = useState<{
+    personal: { taxable: number; deductions: number };
+    business: { taxable: number; deductions: number };
+  }>({ personal: { taxable: 0, deductions: 0 }, business: { taxable: 0, deductions: 0 } });
   // Personal vs Business scope. Persisted across sessions.
   const [scope, setScope] = useState<'personal' | 'business' | 'all'>(() => {
     if (typeof window === 'undefined') return 'personal';
     return (localStorage.getItem('tax_scope') as 'personal' | 'business' | 'all') || 'personal';
   });
+  // Year selector (default current year). Allow viewing past + projecting next year.
+  const nowYear = new Date().getFullYear();
+  const [selectedYear, setSelectedYear] = useState<number>(nowYear);
+  const YEAR_OPTIONS = useMemo(() => {
+    const set = new Set<number>([2025, 2026, nowYear, nowYear + 1]);
+    return Array.from(set).sort((a, b) => a - b);
+  }, [nowYear]);
 
   // Draft for setup/edit form
   const [draft, setDraft] = useState<Partial<TaxProfile>>({});
 
-  const currentYear = new Date().getFullYear();
-  const yearStart = `${currentYear}-01-01`;
-  const yearEnd = `${currentYear}-12-31`;
+  const yearStart = `${selectedYear}-01-01`;
+  const yearEnd = `${selectedYear}-12-31`;
 
   useEffect(() => {
     if (!user) return;
