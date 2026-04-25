@@ -264,7 +264,7 @@ export default function Insights() {
     const momChange = lastMonthSpend > 0 ? ((thisMonthSpend - lastMonthSpend) / lastMonthSpend) * 100 : 0;
 
     // Top Cat / Top Merchant respect the active date range
-    const approvedScoped = expenses.filter(t => ['approved', 'auto_categorized', 'edited'].includes(t.review_status));
+    const approvedScoped = expenses.filter(t => isCounted(t.review_status));
     const catMap = new Map<string, number>();
     approvedScoped.forEach(t => {
       const cat = t.final_category || 'Uncategorized';
