@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { AppNav } from '@/components/AppNav';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Link } from 'react-router-dom';
+import { NON_EARNING_TYPES } from '@/lib/income-classifier';
 import {
   AlertTriangle, Landmark, Target, FileSpreadsheet,
   CheckCircle2, ChevronRight, ExternalLink
@@ -49,6 +50,14 @@ export default function CloseMonth() {
   });
   const [activeStep, setActiveStep] = useState(1);
   const [completedSteps, setCompletedSteps] = useState<Set<number>>(new Set());
+  // Personal vs Business scope. Persisted across sessions.
+  const [scope, setScope] = useState<'personal' | 'business'>(() => {
+    if (typeof window === 'undefined') return 'personal';
+    return (localStorage.getItem('close_scope') as 'personal' | 'business') || 'personal';
+  });
+  useEffect(() => {
+    if (typeof window !== 'undefined') localStorage.setItem('close_scope', scope);
+  }, [scope]);
 
   const monthOptions = useMemo(getMonthOptions, []);
   const dateRange = useMemo(() => getDateRange(selectedMonth), [selectedMonth]);
