@@ -82,6 +82,95 @@ const DEFAULT_AUTO_ACCOUNTS: Array<{
   { name: 'Pokémon',     account_type: 'collectibles', platform: 'TCGPlayer / Zelle', pattern: 'tcgplayer|pokemon' },
 ];
 
+// ---------------------------------------------------------------
+// Inline editor popover for an account's monthly balance snapshots.
+// Lets you add/edit/delete YYYY-MM-01 balance points without leaving the card.
+// ---------------------------------------------------------------
+function SnapshotEditor({
+  account,
+  snapshots,
+  onSave,
+  onDelete,
+}: {
+  account: { id: string; account_name: string };
+  snapshots: Array<{ as_of_date: string; balance: number }>;
+  onSave: (date: string, balance: number) => void;
+  onDelete: (date: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const today = new Date();
+  const defaultMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+  const [month, setMonth] = useState(defaultMonth);
+  const [amount, setAmount] = useState<string>('');
+  const fmtUsd = (n: number) => '$' + Math.round(n).toLocaleString();
+
+  const handleAdd = () => {
+    const num = Number(amount);
+    if (!Number.isFinite(num) || num <= 0) {
+      toast.error('Enter a valid balance');
+      return;
+    }
+    onSave(`${month}-01`, num);
+    setAmount('');
+  };
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button variant="ghost" size="icon" className="h-5 w-5" title="Edit monthly balances">
+          <CalendarPlus className="h-3 w-3" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-72 p-3 space-y-2.5" align="end">
+        <div className="text-xs font-semibold text-foreground">{account.account_name} balances</div>
+        <div className="space-y-1 max-h-40 overflow-y-auto">
+          {snapshots.length === 0 && (
+            <div className="text-[10px] text-muted-foreground italic">No history yet — add a month below.</div>
+          )}
+          {snapshots.map(s => (
+            <div key={s.as_of_date} className="flex items-center justify-between gap-2 text-[11px] py-0.5">
+              <span className="text-muted-foreground tabular-nums">
+                {new Date(s.as_of_date).toLocaleString('en-US', { month: 'short', year: 'numeric' })}
+              </span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-foreground tabular-nums font-medium">{fmtUsd(Number(s.balance))}</span>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-4 w-4 text-muted-foreground hover:text-destructive"
+                  onClick={() => onDelete(s.as_of_date)}
+                  title="Remove"
+                >
+                  <X className="h-3 w-3" />
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="pt-2 border-t border-border/50 space-y-1.5">
+          <Label className="text-[10px] text-muted-foreground">Add / overwrite a month</Label>
+          <div className="flex gap-1.5">
+            <Input
+              type="month"
+              value={month}
+              onChange={e => setMonth(e.target.value)}
+              className="h-7 text-xs"
+            />
+            <Input
+              type="number"
+              placeholder="Balance"
+              value={amount}
+              onChange={e => setAmount(e.target.value)}
+              className="h-7 text-xs"
+            />
+            <Button size="sm" className="h-7 text-xs px-2" onClick={handleAdd}>Save</Button>
+          </div>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 export default function Wealth() {
   const { user } = useAuth();
   const qc = useQueryClient();
