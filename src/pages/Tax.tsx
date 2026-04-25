@@ -431,7 +431,7 @@ export default function Tax() {
         {/* Data coverage indicator */}
         {(() => {
           const monthsWithData = new Set((incomeRows as any[]).map(r => r?.date?.substring?.(0, 7)).filter(Boolean)).size;
-          const currentMonth = new Date().getMonth() + 1;
+          const currentMonth = selectedYear < nowYear ? 12 : selectedYear > nowYear ? 0 : new Date().getMonth() + 1;
           return monthsWithData < currentMonth ? (
             <div className="rounded-lg border border-border/50 bg-secondary/30 px-4 py-2 text-xs text-muted-foreground">
               ⚠️ Income data covers {monthsWithData} of {currentMonth} months in {selectedYear}. Reserve targets may be understated.
