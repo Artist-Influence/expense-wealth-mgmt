@@ -72,23 +72,34 @@ export default function Tax() {
   const [deductionRows, setDeductionRows] = useState<DeductionRow[]>([]);
   const [taxPayments, setTaxPayments] = useState<TaxPaymentRow[]>([]);
   const [unreviewedDeductionCount, setUnreviewedDeductionCount] = useState(0);
+  // Projection split: per-mode taxable income & deductions, regardless of active scope.
+  const [projection, setProjection] = useState<{
+    personal: { taxable: number; deductions: number };
+    business: { taxable: number; deductions: number };
+  }>({ personal: { taxable: 0, deductions: 0 }, business: { taxable: 0, deductions: 0 } });
   // Personal vs Business scope. Persisted across sessions.
   const [scope, setScope] = useState<'personal' | 'business' | 'all'>(() => {
     if (typeof window === 'undefined') return 'personal';
     return (localStorage.getItem('tax_scope') as 'personal' | 'business' | 'all') || 'personal';
   });
+  // Year selector (default current year). Allow viewing past + projecting next year.
+  const nowYear = new Date().getFullYear();
+  const [selectedYear, setSelectedYear] = useState<number>(nowYear);
+  const YEAR_OPTIONS = useMemo(() => {
+    const set = new Set<number>([2025, 2026, nowYear, nowYear + 1]);
+    return Array.from(set).sort((a, b) => a - b);
+  }, [nowYear]);
 
   // Draft for setup/edit form
   const [draft, setDraft] = useState<Partial<TaxProfile>>({});
 
-  const currentYear = new Date().getFullYear();
-  const yearStart = `${currentYear}-01-01`;
-  const yearEnd = `${currentYear}-12-31`;
+  const yearStart = `${selectedYear}-01-01`;
+  const yearEnd = `${selectedYear}-12-31`;
 
   useEffect(() => {
     if (!user) return;
     loadAll();
-  }, [user, scope]);
+  }, [user, scope, selectedYear]);
 
   useEffect(() => {
     if (typeof window !== 'undefined') localStorage.setItem('tax_scope', scope);
@@ -96,8 +107,25 @@ export default function Tax() {
 
   async function loadAll() {
     setLoading(true);
-    await Promise.all([loadProfile(), loadIncome(), loadDeductions(), loadTaxPayments()]);
+    await Promise.all([loadProfile(), loadIncome(), loadDeductions(), loadTaxPayments(), loadProjection()]);
     setLoading(false);
+  }
+
+  // Projection always pulls personal+business splits independent of `scope` so the
+  // "Income vs Expenses" projection card can show side-by-side personal vs business.
+  async function loadProjection() {
+    const [{ data: incPersonal }, { data: incBusiness }, { data: dedPersonal }, { data: dedBusiness }] = await Promise.all([
+      supabase.from('income_transactions').select('amount, taxable_status').eq('owner_id', user!.id).eq('mode', 'personal').gte('date', yearStart).lte('date', yearEnd),
+      supabase.from('income_transactions').select('amount, taxable_status').eq('owner_id', user!.id).eq('mode', 'business').gte('date', yearStart).lte('date', yearEnd),
+      supabase.from('transactions_uploaded').select('amount').eq('owner_id', user!.id).eq('transaction_mode', 'personal').eq('counts_as_tax_deduction', true).eq('is_split_parent', false).in('review_status', ['approved', 'auto_categorized', 'edited']).gte('date', yearStart).lte('date', yearEnd),
+      supabase.from('transactions_uploaded').select('amount').eq('owner_id', user!.id).eq('transaction_mode', 'business').eq('counts_as_tax_deduction', true).eq('is_split_parent', false).in('review_status', ['approved', 'auto_categorized', 'edited']).gte('date', yearStart).lte('date', yearEnd),
+    ]);
+    const sumTaxable = (rows: any[] | null) => (rows || []).filter(r => r.taxable_status === 'taxable').reduce((s, r) => s + Number(r.amount || 0), 0);
+    const sumDed = (rows: any[] | null) => (rows || []).reduce((s, r) => s + Math.abs(Number(r.amount || 0)), 0);
+    setProjection({
+      personal: { taxable: sumTaxable(incPersonal), deductions: sumDed(dedPersonal) },
+      business: { taxable: sumTaxable(incBusiness), deductions: sumDed(dedBusiness) },
+    });
   }
 
   async function loadProfile() {
@@ -287,12 +315,23 @@ export default function Tax() {
         {/* Header */}
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div>
-            <h1 className="text-2xl font-semibold text-foreground">Tax Reserves — {currentYear}</h1>
+            <h1 className="text-2xl font-semibold text-foreground">Tax Reserves — {selectedYear}</h1>
             <p className="text-sm text-muted-foreground">
               {profile.filing_status.replace(/_/g, ' ')} · {profile.city}, {profile.state}
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="inline-flex rounded-md border border-border/40 p-0.5 bg-secondary/40 text-xs">
+              {YEAR_OPTIONS.map(y => (
+                <button
+                  key={y}
+                  onClick={() => setSelectedYear(y)}
+                  className={`px-3 py-1 rounded-sm transition-colors ${selectedYear === y ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                >
+                  {y}
+                </button>
+              ))}
+            </div>
             <div className="inline-flex rounded-md border border-border/40 p-0.5 bg-secondary/40 text-xs">
               {(['personal', 'business', 'all'] as const).map(s => (
                 <button
@@ -309,6 +348,66 @@ export default function Tax() {
             </Button>
           </div>
         </div>
+
+        {/* Income vs Expenses Projection — actuals-driven, P/B side-by-side */}
+        {(() => {
+          const combinedRate = (federalPercent + nysPercent + (cityEnabled ? nycPercent : 0)) / 100;
+          const pNet = Math.max(0, projection.personal.taxable - projection.personal.deductions);
+          const bNet = Math.max(0, projection.business.taxable - projection.business.deductions);
+          const pTax = pNet * combinedRate;
+          const bTax = bNet * combinedRate;
+          return (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">{selectedYear} Projection — Income vs Expenses</CardTitle>
+                <CardDescription className="text-xs">
+                  Net = Taxable income − Deductible expenses. Estimated tax = Net × ({(combinedRate * 100).toFixed(1)}%) at your current Fed + NYS{cityEnabled ? ' + NYC' : ''} rates.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Scope</TableHead>
+                      <TableHead className="text-right">Taxable Income</TableHead>
+                      <TableHead className="text-right">Deductions</TableHead>
+                      <TableHead className="text-right">Net</TableHead>
+                      <TableHead className="text-right">Est. Tax</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    <TableRow>
+                      <TableCell className="font-medium">Personal</TableCell>
+                      <TableCell className="text-right">{fmt(projection.personal.taxable)}</TableCell>
+                      <TableCell className="text-right">−{fmt(projection.personal.deductions)}</TableCell>
+                      <TableCell className="text-right">{fmt(pNet)}</TableCell>
+                      <TableCell className="text-right text-warning">{fmt(pTax)}</TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell className="font-medium">Business</TableCell>
+                      <TableCell className="text-right">{fmt(projection.business.taxable)}</TableCell>
+                      <TableCell className="text-right">−{fmt(projection.business.deductions)}</TableCell>
+                      <TableCell className="text-right">{fmt(bNet)}</TableCell>
+                      <TableCell className="text-right text-warning">{fmt(bTax)}</TableCell>
+                    </TableRow>
+                    <TableRow className="font-semibold border-t-2">
+                      <TableCell>Total</TableCell>
+                      <TableCell className="text-right">{fmt(projection.personal.taxable + projection.business.taxable)}</TableCell>
+                      <TableCell className="text-right">−{fmt(projection.personal.deductions + projection.business.deductions)}</TableCell>
+                      <TableCell className="text-right">{fmt(pNet + bNet)}</TableCell>
+                      <TableCell className="text-right text-destructive">{fmt(pTax + bTax)}</TableCell>
+                    </TableRow>
+                  </TableBody>
+                </Table>
+                {selectedYear > nowYear && (
+                  <p className="text-[11px] text-muted-foreground mt-2">
+                    {selectedYear} has limited or no actuals yet — projections will populate as transactions land.
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          );
+        })()}
 
         {/* Summary Cards */}
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
@@ -332,10 +431,10 @@ export default function Tax() {
         {/* Data coverage indicator */}
         {(() => {
           const monthsWithData = new Set((incomeRows as any[]).map(r => r?.date?.substring?.(0, 7)).filter(Boolean)).size;
-          const currentMonth = new Date().getMonth() + 1;
+          const currentMonth = selectedYear < nowYear ? 12 : selectedYear > nowYear ? 0 : new Date().getMonth() + 1;
           return monthsWithData < currentMonth ? (
             <div className="rounded-lg border border-border/50 bg-secondary/30 px-4 py-2 text-xs text-muted-foreground">
-              ⚠️ Income data covers {monthsWithData} of {currentMonth} months in {currentYear}. Reserve targets may be understated.
+              ⚠️ Income data covers {monthsWithData} of {currentMonth} months in {selectedYear}. Reserve targets may be understated.
             </div>
           ) : null;
         })()}
@@ -372,7 +471,7 @@ export default function Tax() {
               <CardHeader><CardTitle className="text-base">Taxable Income by Type</CardTitle></CardHeader>
               <CardContent>
                 {incomeByType.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No income recorded for {currentYear}.</p>
+                  <p className="text-sm text-muted-foreground">No income recorded for {selectedYear}.</p>
                 ) : (
                   <Table>
                     <TableHeader>
@@ -411,7 +510,7 @@ export default function Tax() {
               <CardHeader><CardTitle className="text-base">Deductions by Category</CardTitle></CardHeader>
               <CardContent>
                 {deductionsByCategory.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No deductions recorded for {currentYear}.</p>
+                  <p className="text-sm text-muted-foreground">No deductions recorded for {selectedYear}.</p>
                 ) : (
                   <Table>
                     <TableHeader>
@@ -443,7 +542,7 @@ export default function Tax() {
               <CardHeader><CardTitle className="text-base">Tax Payments Made</CardTitle></CardHeader>
               <CardContent>
                 {taxPayments.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No tax payments recorded for {currentYear}.</p>
+                  <p className="text-sm text-muted-foreground">No tax payments recorded for {selectedYear}.</p>
                 ) : (
                   <Table>
                     <TableHeader>

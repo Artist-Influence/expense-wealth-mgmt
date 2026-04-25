@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
 import { AppNav } from '@/components/AppNav';
@@ -144,6 +145,39 @@ export default function Expenses() {
     if (user) { loadTransactions(); loadCategories(); loadCrossModeTotals(); }
   }, [user, mode]);
 
+  // Apply incoming URL params (e.g. linked from Allocations review warning).
+  // Supported: ?month=YYYY-MM, &scope=personal|business|reimbursable_work, &review=unreviewed|<status>
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const month = searchParams.get('month');
+    const scope = searchParams.get('scope') as TransactionMode | null;
+    const review = searchParams.get('review');
+    let consumed = false;
+    if (scope && ['personal', 'business', 'reimbursable_work'].includes(scope)) {
+      setMode(scope);
+      consumed = true;
+    }
+    if (month && /^\d{4}-\d{2}$/.test(month)) {
+      const [y, m] = month.split('-').map(Number);
+      const first = new Date(y, m - 1, 1);
+      const last = new Date(y, m, 0);
+      const fmtYMD = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      setDateFrom(fmtYMD(first));
+      setDateTo(fmtYMD(last));
+      setDateLabel(first.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }));
+      consumed = true;
+    }
+    if (review) {
+      setStatusFilter(review);
+      consumed = true;
+    }
+    if (consumed) {
+      // Clear params so refresh doesn't re-trigger.
+      setSearchParams({}, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Lightweight aggregate fetch — we only need the math fields, not the full row.
   // Pulls every txn (paged) once, computes all 5 aggregates client-side.
   const loadCrossModeTotals = async () => {
@@ -217,7 +251,9 @@ export default function Expenses() {
   // Filtering and sorting
   const filtered = useMemo(() => {
     let result = transactions.filter(tx => {
-      if (statusFilter !== 'all' && tx.review_status !== statusFilter) return false;
+      if (statusFilter === 'unreviewed') {
+        if (!['needs_review', 'suggested', 'ai_suggested'].includes(tx.review_status)) return false;
+      } else if (statusFilter !== 'all' && tx.review_status !== statusFilter) return false;
       if (extraFilter === 'transfers' && !tx.is_transfer && tx.transfer_type !== 'possible_transfer') return false;
       if (extraFilter === 'possible_transfers' && tx.transfer_type !== 'possible_transfer') return false;
       if (extraFilter === 'possible_duplicates' && tx.duplicate_status !== 'possible_duplicate') return false;
@@ -1251,6 +1287,7 @@ export default function Expenses() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Status</SelectItem>
+              <SelectItem value="unreviewed">Unreviewed (any)</SelectItem>
               <SelectItem value="needs_review">Needs Review</SelectItem>
               <SelectItem value="suggested">Suggested</SelectItem>
               <SelectItem value="ai_suggested">AI Suggested</SelectItem>

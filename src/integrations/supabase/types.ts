@@ -306,6 +306,7 @@ export type Database = {
         Row: {
           account_name: string
           account_type: string
+          auto_track_pattern: string | null
           contribution_target_monthly: number
           contribution_target_yearly: number
           contributions_ytd: number
@@ -318,11 +319,13 @@ export type Database = {
           owner_id: string
           platform: string | null
           priority: number
+          starting_balance_year: number
           updated_at: string
         }
         Insert: {
           account_name: string
           account_type?: string
+          auto_track_pattern?: string | null
           contribution_target_monthly?: number
           contribution_target_yearly?: number
           contributions_ytd?: number
@@ -335,11 +338,13 @@ export type Database = {
           owner_id: string
           platform?: string | null
           priority?: number
+          starting_balance_year?: number
           updated_at?: string
         }
         Update: {
           account_name?: string
           account_type?: string
+          auto_track_pattern?: string | null
           contribution_target_monthly?: number
           contribution_target_yearly?: number
           contributions_ytd?: number
@@ -352,6 +357,7 @@ export type Database = {
           owner_id?: string
           platform?: string | null
           priority?: number
+          starting_balance_year?: number
           updated_at?: string
         }
         Relationships: []

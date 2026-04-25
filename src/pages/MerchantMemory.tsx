@@ -1,11 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
 import { AppNav } from '@/components/AppNav';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Search, Edit3, Trash2, Save } from 'lucide-react';
+import { Search, Edit3, Trash2, Save, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
 
 interface MerchantRecord {
   id: string;
@@ -19,12 +19,16 @@ interface MerchantRecord {
   last_seen: string;
 }
 
+type SortKey = 'merchant_key' | 'mode' | 'most_common_category' | 'most_common_method' | 'default_note_template' | 'times_seen';
+
 export default function MerchantMemory() {
   const { user } = useAuth();
   const [merchants, setMerchants] = useState<MerchantRecord[]>([]);
   const [search, setSearch] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValues, setEditValues] = useState({ category: '', method: '', notes: '' });
+  const [sortKey, setSortKey] = useState<SortKey>('times_seen');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 
   useEffect(() => {
     if (user) loadMerchants();
@@ -40,13 +44,37 @@ export default function MerchantMemory() {
     setMerchants((data || []) as MerchantRecord[]);
   };
 
-  const filtered = merchants.filter(m => {
-    if (!search) return true;
-    const s = search.toLowerCase();
-    return m.merchant_key.toLowerCase().includes(s) ||
-      (m.raw_example || '').toLowerCase().includes(s) ||
-      (m.most_common_category || '').toLowerCase().includes(s);
-  });
+  const toggleSort = (key: SortKey) => {
+    if (sortKey === key) {
+      setSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      // Numeric defaults desc, text defaults asc.
+      setSortDir(key === 'times_seen' ? 'desc' : 'asc');
+    }
+  };
+
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase();
+    const base = !q
+      ? merchants
+      : merchants.filter(m =>
+          m.merchant_key.toLowerCase().includes(q) ||
+          (m.raw_example || '').toLowerCase().includes(q) ||
+          (m.most_common_category || '').toLowerCase().includes(q),
+        );
+
+    const sorted = [...base].sort((a, b) => {
+      const av = a[sortKey];
+      const bv = b[sortKey];
+      if (sortKey === 'times_seen') {
+        return ((av as number) ?? 0) - ((bv as number) ?? 0);
+      }
+      return String(av ?? '').localeCompare(String(bv ?? ''), undefined, { sensitivity: 'base' });
+    });
+    if (sortDir === 'desc') sorted.reverse();
+    return sorted;
+  }, [merchants, search, sortKey, sortDir]);
 
   const startEdit = (m: MerchantRecord) => {
     setEditingId(m.id);
@@ -73,6 +101,22 @@ export default function MerchantMemory() {
     await supabase.from('merchant_memory').delete().eq('id', id);
     await loadMerchants();
     toast.success('Memory record deleted');
+  };
+
+  const SortHeader = ({ label, k, align = 'left' }: { label: string; k: SortKey; align?: 'left' | 'right' }) => {
+    const active = sortKey === k;
+    const Icon = !active ? ArrowUpDown : sortDir === 'asc' ? ArrowUp : ArrowDown;
+    return (
+      <th className={`px-3 py-3 text-${align} text-xs font-medium text-muted-foreground`}>
+        <button
+          onClick={() => toggleSort(k)}
+          className={`inline-flex items-center gap-1 hover:text-foreground transition-colors ${active ? 'text-foreground' : ''}`}
+        >
+          {label}
+          <Icon className="h-3 w-3" />
+        </button>
+      </th>
+    );
   };
 
   return (
@@ -105,12 +149,12 @@ export default function MerchantMemory() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border/40">
-                  <th className="px-3 py-3 text-left text-xs font-medium text-muted-foreground">Merchant Key</th>
-                  <th className="px-3 py-3 text-left text-xs font-medium text-muted-foreground">Mode</th>
-                  <th className="px-3 py-3 text-left text-xs font-medium text-muted-foreground">Category</th>
-                  <th className="px-3 py-3 text-left text-xs font-medium text-muted-foreground">Method</th>
-                  <th className="px-3 py-3 text-left text-xs font-medium text-muted-foreground">Notes</th>
-                  <th className="px-3 py-3 text-right text-xs font-medium text-muted-foreground">Seen</th>
+                  <SortHeader label="Merchant Key" k="merchant_key" />
+                  <SortHeader label="Mode" k="mode" />
+                  <SortHeader label="Category" k="most_common_category" />
+                  <SortHeader label="Method" k="most_common_method" />
+                  <SortHeader label="Notes" k="default_note_template" />
+                  <SortHeader label="Seen" k="times_seen" align="right" />
                   <th className="px-3 py-3 text-right text-xs font-medium text-muted-foreground">Actions</th>
                 </tr>
               </thead>

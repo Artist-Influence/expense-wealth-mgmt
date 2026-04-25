@@ -365,9 +365,12 @@ export default function Allocations() {
               </div>
             )}
             {unreviewedCount > 0 && (
-              <div className="rounded border border-warning/30 bg-warning/5 px-3 py-2 text-[11px] text-warning">
-                ⚠️ {unreviewedCount} transaction{unreviewedCount > 1 ? 's' : ''} need{unreviewedCount === 1 ? 's' : ''} review this month — free cash estimate may change.
-              </div>
+              <a
+                href={`/expenses?month=${selectedMonth}&scope=${scope}&review=unreviewed`}
+                className="block rounded border border-warning/30 bg-warning/5 px-3 py-2 text-[11px] text-warning hover:bg-warning/10 transition-colors cursor-pointer"
+              >
+                ⚠️ {unreviewedCount} transaction{unreviewedCount > 1 ? 's' : ''} need{unreviewedCount === 1 ? 's' : ''} review this month — free cash estimate may change. <span className="underline">Review now →</span>
+              </a>
             )}
             <div className="border-t border-border pt-3 flex items-center justify-between">
               <div>

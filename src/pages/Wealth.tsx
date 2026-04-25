@@ -11,10 +11,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import { Plus, Pencil, TrendingUp, Wallet, Target, DollarSign, Trash2 } from 'lucide-react';
+import { Plus, Pencil, TrendingUp, Wallet, Target, DollarSign, Trash2, RefreshCw, Sparkles } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
 import { ModeScopeToggle, readPersistedScope, type ModeScope } from '@/components/ModeScopeToggle';
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
 
 const ACCOUNT_TYPES = [
   { value: 'roth_ira', label: 'Roth IRA' },
@@ -48,6 +49,8 @@ type Account = {
   notes: string | null;
   updated_at: string;
   mode: 'personal' | 'business';
+  starting_balance_year: number;
+  auto_track_pattern: string | null;
 };
 
 const emptyForm = {
@@ -62,7 +65,20 @@ const emptyForm = {
   is_active: true,
   notes: '',
   mode: 'personal' as 'personal' | 'business',
+  starting_balance_year: 0,
+  auto_track_pattern: '',
 };
+
+// Default auto-track patterns the "Sync from expenses" button seeds for missing accounts.
+// Matches description_normalized OR description_raw via case-insensitive ILIKE in Supabase.
+const DEFAULT_AUTO_ACCOUNTS: Array<{
+  name: string; account_type: string; platform: string; pattern: string;
+}> = [
+  { name: 'Gemini',      account_type: 'crypto',       platform: 'Gemini',      pattern: 'gemini' },
+  { name: 'Dub',         account_type: 'brokerage',    platform: 'Dub',         pattern: 'dub (ecfi)' },
+  { name: 'Wealthfront', account_type: 'brokerage',    platform: 'Wealthfront', pattern: 'wealthfront' },
+  { name: 'Pokémon',     account_type: 'collectibles', platform: 'TCGPlayer / Zelle', pattern: 'tcgplayer|pokemon' },
+];
 
 export default function Wealth() {
   const { user } = useAuth();
@@ -93,9 +109,11 @@ export default function Wealth() {
         contribution_target_monthly: Number(values.contribution_target_monthly),
         contribution_target_yearly: Number(values.contribution_target_yearly),
         contributions_ytd: Number(values.contributions_ytd),
+        starting_balance_year: Number(values.starting_balance_year || 0),
         priority: Number(values.priority),
         platform: values.platform || null,
         notes: values.notes || null,
+        auto_track_pattern: values.auto_track_pattern || null,
       };
       if (editingId) {
         const { error } = await supabase.from('investment_accounts').update(payload).eq('id', editingId);
@@ -130,6 +148,86 @@ export default function Wealth() {
     onError: (e: any) => toast.error(e.message),
   });
 
+  // ---------------------------------------------------------------
+  // Auto-Sync Contributions: scans Personal expenses YTD for each
+  // account's auto_track_pattern, sums them, writes contributions_ytd.
+  // Creates the 4 default auto-track accounts on first run if missing.
+  // ---------------------------------------------------------------
+  const sync = useMutation({
+    mutationFn: async () => {
+      const yearStart = `${new Date().getFullYear()}-01-01`;
+      const yearEnd = `${new Date().getFullYear()}-12-31`;
+
+      // 1. Seed default auto-track accounts that don't exist yet.
+      const existingNames = new Set(accounts.map(a => a.account_name.toLowerCase()));
+      const seeds: any[] = [];
+      for (const def of DEFAULT_AUTO_ACCOUNTS) {
+        if (!existingNames.has(def.name.toLowerCase())) {
+          seeds.push({
+            owner_id: user!.id,
+            account_name: def.name,
+            account_type: def.account_type,
+            platform: def.platform,
+            auto_track_pattern: def.pattern,
+            mode: 'personal',
+            current_balance: 0,
+            contributions_ytd: 0,
+            starting_balance_year: 0,
+          });
+        }
+      }
+      if (seeds.length) {
+        const { error } = await supabase.from('investment_accounts').insert(seeds);
+        if (error) throw error;
+      }
+
+      // 2. Re-fetch (we may have added rows above).
+      const { data: latest } = await supabase.from('investment_accounts').select('*').eq('owner_id', user!.id);
+      const all = (latest || []) as Account[];
+
+      // 3. For each account with a pattern, sum matching personal expenses YTD.
+      let updated = 0;
+      for (const acc of all) {
+        const pattern = acc.auto_track_pattern?.trim();
+        if (!pattern) continue;
+        const tokens = pattern.split('|').map(t => t.trim()).filter(Boolean);
+        if (tokens.length === 0) continue;
+
+        // Build OR filter for description_normalized + description_raw across all tokens.
+        const orParts: string[] = [];
+        for (const t of tokens) {
+          const safe = t.replace(/[%,]/g, ' ');
+          orParts.push(`description_normalized.ilike.%${safe}%`);
+          orParts.push(`description_raw.ilike.%${safe}%`);
+        }
+
+        const { data: matches } = await supabase
+          .from('transactions_uploaded')
+          .select('amount')
+          .eq('owner_id', user!.id)
+          .eq('mode', 'personal')
+          .gte('date', yearStart)
+          .lte('date', yearEnd)
+          .or(orParts.join(','));
+
+        const total = (matches || []).reduce((s, r) => s + Math.abs(Number(r.amount || 0)), 0);
+        if (Math.abs(Number(acc.contributions_ytd) - total) > 0.01) {
+          const { error } = await supabase
+            .from('investment_accounts')
+            .update({ contributions_ytd: total })
+            .eq('id', acc.id);
+          if (!error) updated++;
+        }
+      }
+      return { updated, seeded: seeds.length };
+    },
+    onSuccess: ({ updated, seeded }) => {
+      qc.invalidateQueries({ queryKey: ['investment_accounts'] });
+      toast.success(`Synced from expenses · ${updated} updated${seeded ? `, ${seeded} new account${seeded > 1 ? 's' : ''} added` : ''}`);
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+
   const openEdit = (a: Account) => {
     setEditingId(a.id);
     setForm({
@@ -144,6 +242,8 @@ export default function Wealth() {
       is_active: a.is_active,
       notes: a.notes || '',
       mode: (a.mode as 'personal' | 'business') || 'personal',
+      starting_balance_year: Number(a.starting_balance_year || 0),
+      auto_track_pattern: a.auto_track_pattern || '',
     });
     setDialogOpen(true);
   };
@@ -199,7 +299,20 @@ export default function Wealth() {
               Showing: <span className="text-foreground/80 font-medium">{scope === 'all' ? 'All' : scope === 'business' ? 'Business' : 'Personal'}</span>
             </span>
           </div>
-          <Button size="sm" className="h-8" onClick={openAdd}><Plus className="h-3.5 w-3.5 mr-1" />Add Account</Button>
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8"
+              onClick={() => sync.mutate()}
+              disabled={sync.isPending}
+              title="Scan personal expenses YTD and update contributions for any account with an auto-track pattern"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 mr-1 ${sync.isPending ? 'animate-spin' : ''}`} />
+              {sync.isPending ? 'Syncing…' : 'Sync from Expenses'}
+            </Button>
+            <Button size="sm" className="h-8" onClick={openAdd}><Plus className="h-3.5 w-3.5 mr-1" />Add Account</Button>
+          </div>
         </div>
 
         {/* Summary cards (scope-filtered) */}
@@ -284,9 +397,63 @@ export default function Wealth() {
                           </div>
                           <Progress value={pct} className="h-1.5" />
                         </div>
-                      ) : a.contribution_target_monthly > 0 && (
+                      ) : a.contribution_target_monthly > 0 ? (
                         <p className="text-[10px] text-muted-foreground">Monthly target: {fmt(Number(a.contribution_target_monthly))}</p>
+                      ) : Number(a.contributions_ytd) > 0 && (
+                        <p className="text-[10px] text-muted-foreground">{fmt(Number(a.contributions_ytd))} contributed YTD</p>
                       )}
+
+                      {/* Growth chart: Jan 1 baseline → Today current_balance */}
+                      {(() => {
+                        const baseline = Number(a.starting_balance_year || 0) > 0
+                          ? Number(a.starting_balance_year)
+                          : Math.max(0, Number(a.current_balance) - Number(a.contributions_ytd));
+                        const current = Number(a.current_balance);
+                        if (baseline <= 0 && current <= 0) return null;
+                        const contributed = Number(a.contributions_ytd || 0);
+                        const growth = current - baseline - contributed; // appreciation only
+                        const data = [
+                          { label: 'Jan 1', value: baseline },
+                          { label: '+ contrib', value: baseline + contributed },
+                          { label: 'Today', value: current },
+                        ];
+                        const delta = current - baseline;
+                        const deltaPct = baseline > 0 ? (delta / baseline) * 100 : 0;
+                        return (
+                          <div className="pt-1 border-t border-border/50">
+                            <div className="flex items-center justify-between text-[10px] mb-0.5">
+                              <span className="text-muted-foreground">Growth YTD</span>
+                              <span className={delta >= 0 ? 'text-[hsl(var(--success))]' : 'text-destructive'}>
+                                {delta >= 0 ? '+' : ''}{fmt(delta)}{baseline > 0 ? ` (${deltaPct.toFixed(1)}%)` : ''}
+                              </span>
+                            </div>
+                            <div className="h-12 -mx-1">
+                              <ResponsiveContainer width="100%" height="100%">
+                                <LineChart data={data} margin={{ top: 2, right: 4, left: 4, bottom: 2 }}>
+                                  <Line
+                                    type="monotone"
+                                    dataKey="value"
+                                    stroke={delta >= 0 ? 'hsl(var(--primary))' : 'hsl(var(--destructive))'}
+                                    strokeWidth={1.5}
+                                    dot={{ r: 2 }}
+                                  />
+                                  <XAxis dataKey="label" hide />
+                                  <YAxis hide domain={['dataMin', 'dataMax']} />
+                                  <Tooltip
+                                    contentStyle={{ background: 'hsl(var(--popover))', border: '1px solid hsl(var(--border))', fontSize: 11, padding: '4px 8px' }}
+                                    formatter={(v: any) => fmt(Number(v))}
+                                  />
+                                </LineChart>
+                              </ResponsiveContainer>
+                            </div>
+                            <div className="flex justify-between text-[9px] text-muted-foreground">
+                              <span>Start {fmt(baseline)}</span>
+                              <span>Contrib {fmt(contributed)}</span>
+                              <span>Apprec {growth >= 0 ? '+' : ''}{fmt(growth)}</span>
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </CardContent>
                   </Card>
                 );
@@ -350,6 +517,19 @@ export default function Wealth() {
                 <Input className="h-8 text-sm" type="number" value={form.contribution_target_yearly} onChange={e => setForm(f => ({ ...f, contribution_target_yearly: Number(e.target.value) }))} />
               </div>
             </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1">
+                <Label className="text-xs">Starting Balance (Jan 1)</Label>
+                <Input className="h-8 text-sm" type="number" value={form.starting_balance_year} onChange={e => setForm(f => ({ ...f, starting_balance_year: Number(e.target.value) }))} placeholder="0 (auto)" />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Auto-Track Pattern</Label>
+                <Input className="h-8 text-sm" value={form.auto_track_pattern} onChange={e => setForm(f => ({ ...f, auto_track_pattern: e.target.value }))} placeholder="gemini|wealthfront" />
+              </div>
+            </div>
+            <p className="text-[10px] text-muted-foreground -mt-1">
+              Auto-track scans personal expenses for keywords (pipe-separated). Use Sync from Expenses to update.
+            </p>
             <div className="grid grid-cols-2 gap-2">
               <div className="space-y-1">
                 <Label className="text-xs">Priority</Label>
