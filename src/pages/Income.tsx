@@ -114,23 +114,36 @@ export default function Income() {
   const summaryCards = useMemo(() => {
     const dateActive = !!(dateFrom || dateTo);
     const inRange = transactions.filter(t => {
-      if (!dateActive) return true; // default: ALL dates
+      if (dateActive) {
+        if (dateFrom && (!t.date || t.date < dateFrom)) return false;
+        if (dateTo && (!t.date || t.date > dateTo)) return false;
+      }
+      if (filterMode !== 'all' && t.mode !== filterMode) return false;
+      return true;
+    });
+    // Always compute personal/business splits from the date-filtered set (ignore mode filter so the cards still show both)
+    const dateRangeAll = transactions.filter(t => {
+      if (!dateActive) return true;
       if (dateFrom && (!t.date || t.date < dateFrom)) return false;
       if (dateTo && (!t.date || t.date > dateTo)) return false;
       return true;
     });
+    const personalIncome = dateRangeAll.filter(t => t.mode === 'personal').reduce((s, t) => s + (t.amount || 0), 0);
+    const businessIncome = dateRangeAll.filter(t => t.mode === 'business').reduce((s, t) => s + (t.amount || 0), 0);
+
     const totalInflows = inRange.reduce((s, t) => s + (t.amount || 0), 0);
     const taxable = inRange.filter(t => t.taxable_status === 'taxable').reduce((s, t) => s + (t.amount || 0), 0);
     const nonTaxable = inRange.filter(t => t.taxable_status === 'non_taxable').reduce((s, t) => s + (t.amount || 0), 0);
     const revenue = inRange.filter(t => t.income_type === 'business_revenue').reduce((s, t) => s + (t.amount || 0), 0);
     const payroll = inRange.filter(t => t.income_type === 'payroll').reduce((s, t) => s + (t.amount || 0), 0);
     const other = inRange.filter(t => !['business_revenue', 'payroll'].includes(t.income_type)).reduce((s, t) => s + (t.amount || 0), 0);
-    return { totalInflows, taxable, nonTaxable, revenue, payroll, other };
-  }, [transactions, dateFrom, dateTo]);
+    return { totalInflows, taxable, nonTaxable, revenue, payroll, other, personalIncome, businessIncome };
+  }, [transactions, dateFrom, dateTo, filterMode]);
 
   // Filtering
   const filtered = useMemo(() => {
     return transactions.filter(t => {
+      if (filterMode !== 'all' && t.mode !== filterMode) return false;
       if (filterType !== 'all' && t.income_type !== filterType) return false;
       if (filterStatus !== 'all' && t.status !== filterStatus) return false;
       if (dateFrom && (!t.date || t.date < dateFrom)) return false;
@@ -144,7 +157,7 @@ export default function Income() {
       }
       return true;
     });
-  }, [transactions, filterType, filterStatus, dateFrom, dateTo, searchQuery]);
+  }, [transactions, filterMode, filterType, filterStatus, dateFrom, dateTo, searchQuery]);
 
   // Months derived from transactions for the date filter
   const availableMonths = useMemo(() => {
