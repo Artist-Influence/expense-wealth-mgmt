@@ -86,12 +86,20 @@ export default function Insights() {
 
   const loadData = async () => {
     setLoading(true);
-    const [expenseResult, incomeResult] = await Promise.all([
+    const [expenseResult, incomeResult, taxResult] = await Promise.all([
       loadExpenses(),
       loadIncome(),
+      supabase.from('tax_profiles').select('default_federal_reserve_percent, default_nys_reserve_percent, default_nyc_reserve_percent').eq('owner_id', user!.id).maybeSingle(),
     ]);
     setTransactions(expenseResult);
     setIncomeData(incomeResult);
+    if (taxResult.data) {
+      setTaxReservePct(
+        (Number(taxResult.data.default_federal_reserve_percent) || 0) +
+        (Number(taxResult.data.default_nys_reserve_percent) || 0) +
+        (Number(taxResult.data.default_nyc_reserve_percent) || 0)
+      );
+    }
     setLoading(false);
   };
 
