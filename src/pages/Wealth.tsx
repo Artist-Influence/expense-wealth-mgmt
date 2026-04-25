@@ -189,6 +189,7 @@ export default function Wealth() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['investment_accounts'] });
+      qc.invalidateQueries({ queryKey: ['account_balance_snapshots', user?.id] });
       setDialogOpen(false);
       setEditingId(null);
       setForm(emptyForm);
