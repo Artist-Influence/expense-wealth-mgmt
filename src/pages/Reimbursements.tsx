@@ -97,6 +97,7 @@ export default function Reimbursements() {
   const [groups, setGroups] = useState<ReimbursementGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<TabFilter>('pending');
+  const [scope, setScope] = useState<ModeScope>(() => readPersistedScope('reimbursements_scope', 'all'));
   const [search, setSearch] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [detailTx, setDetailTx] = useState<ReimbursableTransaction | null>(null);
