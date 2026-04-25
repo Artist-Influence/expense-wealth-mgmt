@@ -64,7 +64,11 @@ export function CombinedWealthChart({
       return [row];
     }
 
-    const startD = new Date(allDates[0]);
+    // Clamp the chart's start to max(startDate, earliest snapshot) so old stray
+    // auto-snapshots from account-creation day don't shift the x-axis backwards.
+    const earliest = allDates[0];
+    const effectiveStart = startDate > earliest ? startDate : earliest;
+    const startD = new Date(effectiveStart);
     const now = new Date();
     const months: string[] = [];
     const cur = new Date(startD.getFullYear(), startD.getMonth(), 1);
