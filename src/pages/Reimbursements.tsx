@@ -171,30 +171,30 @@ export default function Reimbursements() {
     return result;
   }, [scopedTxs, tab, search]);
 
-  // Stats
+  // Stats — scope-aware so the cards match the current Personal/Business/All view.
   const stats = useMemo(() => {
     const now = new Date();
     const thisMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
-    const pendingTotal = transactions
+    const pendingTotal = scopedTxs
       .filter(t => ['none', 'pending'].includes(t.reimbursement_status))
       .reduce((s, t) => s + Math.abs(t.amount || 0), 0);
 
-    const submittedTotal = transactions
+    const submittedTotal = scopedTxs
       .filter(t => ['submitted', 'approved'].includes(t.reimbursement_status))
       .reduce((s, t) => s + Math.abs(t.amount || 0), 0);
 
-    const reimbursedThisMonth = transactions
+    const reimbursedThisMonth = scopedTxs
       .filter(t => t.reimbursement_status === 'reimbursed' && t.date && t.date.startsWith(thisMonth))
       .reduce((s, t) => s + Math.abs(t.amount || 0), 0);
 
     const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-    const overdueTotal = transactions
+    const overdueTotal = scopedTxs
       .filter(t => t.reimbursement_status === 'submitted' && t.date && t.date < thirtyDaysAgo)
       .reduce((s, t) => s + Math.abs(t.amount || 0), 0);
 
     return { pendingTotal, submittedTotal, reimbursedThisMonth, overdueTotal };
-  }, [transactions]);
+  }, [scopedTxs]);
 
   const toggleSelect = (id: string) => {
     setSelectedIds(prev => {
