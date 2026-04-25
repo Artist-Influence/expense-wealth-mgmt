@@ -18,6 +18,7 @@ import {
   Receipt, Search, Download, Clock, CheckCheck, Send, AlertTriangle,
   Plus, FolderOpen, ChevronDown
 } from 'lucide-react';
+import { ModeScopeToggle, readPersistedScope, type ModeScope } from '@/components/ModeScopeToggle';
 
 interface ReimbursableTransaction {
   id: string;
