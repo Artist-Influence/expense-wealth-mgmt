@@ -17,7 +17,8 @@ const HIGH_CONFIDENCE_PATTERNS: [RegExp, string][] = [
   [/INTERNAL\s*TRANSFER/i, 'account_transfer'],
   [/SAVE\s*AS\s*YOU\s*GO/i, 'account_transfer'],
   [/SAVINGS\s*TRANSFER/i, 'account_transfer'],
-  [/TRANSFER\s*(?:TO|FROM)\s*(?:SAVINGS|CHECKING|(?:X|XXXX?\d{4}))/i, 'account_transfer'],
+  [/ONLINE\s*BANKING\s*TRANSFER\s*(?:TO|FROM)/i, 'account_transfer'],
+  [/TRANSFER\s*(?:TO|FROM)\s*(?:SAVINGS|CHECKING|CHK|SAV|(?:X|XXXX?\d{4}))/i, 'account_transfer'],
 ];
 
 const MEDIUM_CONFIDENCE_PATTERNS: [RegExp, string][] = [
