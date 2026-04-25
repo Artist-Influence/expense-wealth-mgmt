@@ -22,9 +22,12 @@ const fmt = (n: number) => '$' + Math.round(n).toLocaleString();
 export function CombinedWealthChart({
   accounts,
   snapshots,
+  startDate = '2026-01-01',
 }: {
   accounts: AccountLite[];
   snapshots: Snapshot[];
+  /** Earliest month to render on the x-axis (YYYY-MM-DD). Defaults to Jan 2026. */
+  startDate?: string;
 }) {
   const [hidden, setHidden] = useState<Set<string>>(new Set());
 
