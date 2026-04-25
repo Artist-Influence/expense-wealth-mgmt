@@ -313,6 +313,7 @@ export type Database = {
           current_balance: number
           id: string
           is_active: boolean
+          mode: string
           notes: string | null
           owner_id: string
           platform: string | null
@@ -329,6 +330,7 @@ export type Database = {
           current_balance?: number
           id?: string
           is_active?: boolean
+          mode?: string
           notes?: string | null
           owner_id: string
           platform?: string | null
@@ -345,6 +347,7 @@ export type Database = {
           current_balance?: number
           id?: string
           is_active?: boolean
+          mode?: string
           notes?: string | null
           owner_id?: string
           platform?: string | null
