@@ -143,25 +143,35 @@ export default function Wealth() {
       priority: a.priority,
       is_active: a.is_active,
       notes: a.notes || '',
+      mode: (a.mode as 'personal' | 'business') || 'personal',
     });
     setDialogOpen(true);
   };
 
   const openAdd = () => {
     setEditingId(null);
-    setForm(emptyForm);
+    setForm({ ...emptyForm, mode: scope === 'business' ? 'business' : 'personal' });
     setDialogOpen(true);
   };
 
-  const totalBalance = accounts.reduce((s, a) => s + Number(a.current_balance), 0);
-  const totalYtd = accounts.reduce((s, a) => s + Number(a.contributions_ytd), 0);
-  const totalYearlyTarget = accounts.reduce((s, a) => s + Number(a.contribution_target_yearly), 0);
+  // Scope-filtered set powers all summary cards and grouped sections.
+  const scopedAccounts = scope === 'all'
+    ? accounts
+    : accounts.filter(a => (a.mode || 'personal') === scope);
+
+  const totalBalance = scopedAccounts.reduce((s, a) => s + Number(a.current_balance), 0);
+  const totalYtd = scopedAccounts.reduce((s, a) => s + Number(a.contributions_ytd), 0);
+  const totalYearlyTarget = scopedAccounts.reduce((s, a) => s + Number(a.contribution_target_yearly), 0);
+
+  // Side-by-side personal vs business splits when "All" is active.
+  const personalBalance = accounts.filter(a => (a.mode || 'personal') === 'personal').reduce((s, a) => s + Number(a.current_balance), 0);
+  const businessBalance = accounts.filter(a => a.mode === 'business').reduce((s, a) => s + Number(a.current_balance), 0);
 
   const grouped = Object.entries(TYPE_GROUPS)
     .map(([key, g]) => ({
       key,
       label: g.label,
-      accounts: accounts.filter(a => g.types.includes(a.account_type)),
+      accounts: scopedAccounts.filter(a => g.types.includes(a.account_type)),
     }))
     .filter(g => g.accounts.length > 0);
 
