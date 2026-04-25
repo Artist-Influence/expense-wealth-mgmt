@@ -299,7 +299,20 @@ export default function Wealth() {
               Showing: <span className="text-foreground/80 font-medium">{scope === 'all' ? 'All' : scope === 'business' ? 'Business' : 'Personal'}</span>
             </span>
           </div>
-          <Button size="sm" className="h-8" onClick={openAdd}><Plus className="h-3.5 w-3.5 mr-1" />Add Account</Button>
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8"
+              onClick={() => sync.mutate()}
+              disabled={sync.isPending}
+              title="Scan personal expenses YTD and update contributions for any account with an auto-track pattern"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 mr-1 ${sync.isPending ? 'animate-spin' : ''}`} />
+              {sync.isPending ? 'Syncing…' : 'Sync from Expenses'}
+            </Button>
+            <Button size="sm" className="h-8" onClick={openAdd}><Plus className="h-3.5 w-3.5 mr-1" />Add Account</Button>
+          </div>
         </div>
 
         {/* Summary cards (scope-filtered) */}
