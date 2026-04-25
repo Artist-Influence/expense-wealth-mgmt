@@ -14,7 +14,7 @@ const RULES: { patterns: RegExp; income_type: string; taxable_status: string; co
   { patterns: /\b(transfer|xfer|zelle|venmo|paypal|wire)\b/i, income_type: 'transfer', taxable_status: 'non_taxable', confidence: 75 },
   { patterns: /\b(interest|dividend|apy|yield)\b/i, income_type: 'interest', taxable_status: 'taxable', confidence: 85 },
   { patterns: /\b(tax refund|irs|state tax|federal tax)\b/i, income_type: 'tax_refund', taxable_status: 'non_taxable', confidence: 90 },
-  { patterns: /\b(invoice|client|consulting|freelance|contract|revenue|stripe|square)\b/i, income_type: 'business_revenue', taxable_status: 'taxable', confidence: 80 },
+  { patterns: /\b(intuit|quickbooks|currency\s*cloud|audiomack|vydia|dim\s*mak|empire\s*distribut|wenzday|thirty\s*knots|dark\s*roast|space\s*laces|kompany\s*music|invoice|client|consulting|freelance|contract|revenue|stripe|square|fedwire\s*credit|chips\s*credit)\b|ARTIST\s*INFLUENCE\s*LLC/i, income_type: 'business_revenue', taxable_status: 'taxable', confidence: 85 },
   { patterns: /\b(loan|draw|line of credit|loc proceed)\b/i, income_type: 'loan_proceeds', taxable_status: 'non_taxable', confidence: 75 },
   { patterns: /\b(owner contrib|capital contrib|equity inject)\b/i, income_type: 'owner_contribution', taxable_status: 'non_taxable', confidence: 75 },
 ];

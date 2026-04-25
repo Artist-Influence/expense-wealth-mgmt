@@ -1,76 +1,75 @@
-## Pay stubs landing in expenses instead of income
+## Stop personal/business income from getting mixed up at import
 
-### What's wrong
+### Root cause
 
-5 Deel salary deposits totaling **$27,860.86** got stored in `transactions_uploaded` as personal expenses instead of being routed to the `income_transactions` table. They show up in the personal expenses list mixed with real spend.
+When the **Expenses** CSV importer auto-routes positive inflows over to the `income_transactions` table (the path that catches Deel paystubs, Zelle deposits, INTUIT/QuickBooks deposits, etc.), it never passes a `mode` field. The table defaults to `mode='personal'` for every row.
 
-```
-Deel PEOUAWFD2ZP DES:PAYMENTS ... NTE*ZZZ*0426-SALARY-Clout Kitchen   $6,335.67
-Deel PEOP3WZTNTS DES:PAYMENTS ... NTE*ZZZ*0326-SALARY-Clout Kitchen   $7,111.62
-Deel PEOCM24DPSO DES:PAYMENTS ... NTE*ZZZ*0326-SALARY-Clout Kitchen   $4,185.62
-Deel PEOVYPZIQTS DES:PAYMENTS ... NTE*ZZZ*0226-SALARY-Clout Kitchen   $6,114.39
-Deel PEOTLNGN6ZN DES:PAYMENTS ... NTE*ZZZ*0226-SALARY-Clout Kitchen   $4,113.56
-```
+So when you uploaded `Chase8886_Activity_20260424.CSV` as a **Business** expense file, the 41 income-shaped rows inside it (INTUIT/QuickBooks payouts, Currency Cloud, FEDWIRE→ARTIST INFLUENCE LLC, Audiomack, Vydia, DIM MAK, EMPIRE, Zelle from RULE FITNESS LLC, Stripe payouts, Wenzday Music, etc.) all got auto-routed to income — and silently stamped as **personal** instead of **business**. Meanwhile the 82 INTUIT deposits *did* get tagged business, but only because `classifyIncome` returns `business_revenue` for the word "INTUIT"-pattern matches… actually they were tagged business because the suggested_mode hint flowed through somewhere else. Either way, the gap is real: the import path doesn't honor the file's mode for non-payroll/non-revenue keywords (`other`, `transfer`, `reimbursement`).
 
-### Why it slipped through
+Same bug works the other way: a personal CSV with a stray business-looking word could land in business income.
 
-The CSV importer already has a sign-aware router (`src/lib/transaction-router.ts`) that's supposed to send positive inflows to income. Two failures combined:
+### The four-part fix
 
-1. **BoA's CSV has no `Details` column** (no CREDIT/DEBIT signal), so the router falls back to its description heuristic (`INCOME_DESCRIPTION_HINTS`).
-2. The heuristic regex doesn't include `salary`, `deel`, `payroll-` patterns, or the literal `PAYMENTS ID:` ACH stub Deel uses. It only matches generic words like "deposit", "direct deposit", "payroll" (with word boundaries that don't catch `NTE*ZZZ*0226-SALARY-...`).
+**1. Pass the upload's mode through the Expenses → Income auto-router** (`src/pages/Expenses.tsx` ~line 765).
 
-So a positive-amount row with description `"Deel ... PAYMENTS ID: ... NTE*ZZZ*0226-SALARY-Clout Kitchen"` failed every check and defaulted to `route: 'expense'`.
-
-### Fix
-
-**1. Broaden `INCOME_DESCRIPTION_HINTS` in `src/lib/transaction-router.ts`** so any positive-amount row matching paystub/payroll-provider patterns routes to income:
+Add `mode: mode` to the `incomePayload` object so when you upload a Business expense file, every income row routed out of it lands as `mode='business'`, and a Personal expense upload lands rows as `mode='personal'`. The classifier's `suggested_mode` becomes a fallback only when there's no file-level hint (which there always is from this path, so it's a tie-breaker for ambiguous cases).
 
 ```ts
-const INCOME_DESCRIPTION_HINTS =
-  /\b(deposit|payroll|direct\s*deposit|salary|wages|paycheck|payment\s*from|received\s*from|zelle\s*from|venmo\s*from|paypal\s*from|refund|return|reimburs|interest|dividend|cashback|cash\s*back|stripe\s*payout|square\s*deposit|tax\s*refund|deel|gusto|adp|paychex|justworks|rippling|trinet|oasis|onpay|bamboohr)\b|SALARY[-\s]|PAYMENTS\s*ID:/i;
+const fileMode = mode === 'business' ? 'business' : 'personal'; // reimbursable_work → personal owner
+return {
+  // ...existing fields...
+  mode: fileMode,
+};
 ```
 
-This catches:
-- Generic words: `salary`, `wages`, `paycheck` (added)
-- Payroll providers: `deel`, `gusto`, `adp`, `paychex`, `justworks`, `rippling`, `trinet`, `oasis`, `onpay`, `bamboohr`
-- ACH stub patterns: `SALARY-` (matches `NTE*ZZZ*0226-SALARY-Clout Kitchen`) and `PAYMENTS ID:` (Deel's ACH descriptor)
-
-**2. Update `classifyIncome` in `src/lib/income-classifier.ts`** so the `payroll` rule recognizes the same providers (so once routed, they get `income_type: 'payroll'`, `taxable_status: 'taxable'`):
-
-```ts
-{ patterns: /\b(payroll|salary|direct\s*deposit|wages|pay\s?check|adp|gusto|paychex|deel|justworks|rippling|trinet|onpay)\b|SALARY[-\s]/i,
-  income_type: 'payroll', taxable_status: 'taxable', confidence: 90 },
-```
-
-**3. Move the 5 misrouted Deel rows** from `transactions_uploaded` to `income_transactions` via a one-shot data migration:
+**2. Backfill the 41 mis-tagged Chase 8886 rows** — they're all from a business-account file and every one is Artist Influence income:
 
 ```sql
--- Insert into income_transactions
-INSERT INTO income_transactions (owner_id, date, amount, description_raw, description_normalized,
-  income_type, taxable_status, source_account_name, source_file_name, status, mode)
-SELECT owner_id, date, ABS(amount), description_raw, description_normalized,
-  'payroll', 'taxable', 'BoA 5373', source_file_name, 'needs_review', 'personal'
-FROM transactions_uploaded
-WHERE description_raw ~* '(SALARY[-\s]|deel.*payments\s*id)'
-  AND treatment_type = 'expense'
-  AND amount > 0;
-
--- Delete the misplaced expense rows
-DELETE FROM transactions_uploaded
-WHERE description_raw ~* '(SALARY[-\s]|deel.*payments\s*id)'
-  AND treatment_type = 'expense'
-  AND amount > 0;
+UPDATE income_transactions
+SET mode = 'business'
+WHERE source_file_name = 'Chase8886_Activity_20260424.CSV'
+  AND mode = 'personal';
 ```
 
-That's 5 rows out of personal expenses, 5 rows into personal income, properly classified as payroll/taxable.
+That moves $69,223.21 of business income out of the personal column where it belongs.
+
+**3. Re-tag the BoA 5373 "Zelle from ARTIST INFLUENCE LLC" rows as Payroll** (your call: keep them personal, mark as taxable payroll income to you):
+
+```sql
+UPDATE income_transactions
+SET income_type = 'payroll',
+    taxable_status = 'taxable',
+    status = 'needs_review'
+WHERE source_file_name = 'BoA 5373.csv'
+  AND mode = 'personal'
+  AND description_raw ILIKE '%Zelle payment from ARTIST INFLUENCE LLC%';
+```
+
+5 rows, ~$28,964 — stays personal, now correctly labeled as Payroll/Taxable instead of "transfer".
+
+**4. Add a guardrail to the auto-router** for unambiguous business-account signals so even if the file mode is wrong, the row isn't mis-filed. In `src/lib/income-classifier.ts`, expand the `business_revenue` rule to catch the obvious B2B ACH descriptors that showed up in your Chase data:
+
+```ts
+{ patterns: /\b(intuit|quickbooks|currency\s*cloud|audiomack|vydia|dim\s*mak|empire\s*distribut|wenzday|thirty\s*knots|dark\s*roast|space\s*laces|kompany\s*music|invoice|client|consulting|freelance|contract|revenue|stripe|square|fedwire\s*credit|chips\s*credit)\b|ARTIST\s*INFLUENCE\s*LLC/i,
+  income_type: 'business_revenue', taxable_status: 'taxable', confidence: 85 },
+```
+
+The "ARTIST INFLUENCE LLC" piece is the key — anything mentioning that entity in the description, on a business-mode row, gets bumped to `business_revenue` confidently.
 
 ### Files touched
 
-- `src/lib/transaction-router.ts` — broaden `INCOME_DESCRIPTION_HINTS`
-- `src/lib/income-classifier.ts` — broaden the `payroll` rule
-- One data migration to move the 5 existing Deel rows + delete originals
+- `src/pages/Expenses.tsx` — pass file mode into the income auto-router payload
+- `src/lib/income-classifier.ts` — broaden `business_revenue` rule to recognize Artist Influence's recurring counterparties
+- Two data updates: backfill the 41 Chase rows + re-tag the 5 AI→personal Zelle rows
 
 ### Out of scope
 
-- The penny test row (`Penny-test-for-method` $0.02) — it has no SALARY/payroll signal, so it's correctly staying where it is. If you want it moved too, say the word.
-- No schema changes. No UI changes. Income page already segments cleanly by mode after the previous fix.
+- No schema changes. No UI changes (Income page already filters cleanly by mode).
+- Not changing how Chase 8886 INTUIT rows are handled — those are already correctly tagged business.
+- Not deleting any rows. Everything stays auditable.
+
+### Sanity check after the fix
+
+You should see:
+- Personal income page: BoA 5373 only (Deel paystubs + AI payroll Zelle + small Zelle reimbursements). ~$57K Deel + $29K AI payroll + small misc.
+- Business income page: all of Chase 8886 (~$298K combined: $229K already-tagged business + $69K being reclassified now).
