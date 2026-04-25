@@ -907,6 +907,17 @@ export default function Wealth() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <SetWealthTargetDialog
+        open={targetDialogOpen}
+        onOpenChange={setTargetDialogOpen}
+        currentAmount={eoyTargetAmount}
+        currentYear={eoyTargetYear}
+        ytdContributed={totalYtd}
+        currentBalance={totalBalance}
+        onSave={(amount, year) => saveTarget.mutate({ amount, year })}
+        saving={saveTarget.isPending}
+      />
     </div>
   );
 }
