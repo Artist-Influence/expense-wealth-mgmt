@@ -329,6 +329,7 @@ export default function Income() {
       amount: amt,
       income_type: manualType,
       taxable_status: manualTaxable,
+      mode: manualMode,
       source_account_name: manualAccount || null,
       notes: manualNotes || null,
       status: 'approved',
@@ -338,7 +339,7 @@ export default function Income() {
       toast.success('Income entry added');
       setShowManualEntry(false);
       setManualDate(''); setManualDesc(''); setManualAmount(''); setManualType('other');
-      setManualTaxable('unknown'); setManualAccount(''); setManualNotes('');
+      setManualTaxable('unknown'); setManualMode('personal'); setManualAccount(''); setManualNotes('');
       fetchTransactions();
     }
   };
