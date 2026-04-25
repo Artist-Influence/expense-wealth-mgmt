@@ -614,6 +614,7 @@ export default function Income() {
                 <TableHead>Date</TableHead>
                 <TableHead>Description</TableHead>
                 <TableHead className="text-right">Amount</TableHead>
+                <TableHead>Mode</TableHead>
                 <TableHead>Income Type</TableHead>
                 <TableHead>Taxable</TableHead>
                 <TableHead>Source</TableHead>
@@ -623,7 +624,7 @@ export default function Income() {
             </TableHeader>
             <TableBody>
               {loading ? (
-                <TableRow><TableCell colSpan={9} className="text-center text-muted-foreground py-12">Loading...</TableCell></TableRow>
+                <TableRow><TableCell colSpan={10} className="text-center text-muted-foreground py-12">Loading...</TableCell></TableRow>
               ) : filtered.length === 0 ? (
                 <TableRow><TableCell colSpan={9} className="text-center text-muted-foreground py-12">
                   No income transactions yet. Import a CSV or add an entry manually.
