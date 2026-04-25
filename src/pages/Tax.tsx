@@ -298,7 +298,7 @@ export default function Tax() {
         {/* Header */}
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div>
-            <h1 className="text-2xl font-semibold text-foreground">Tax Reserves — {currentYear}</h1>
+            <h1 className="text-2xl font-semibold text-foreground">Tax Reserves — {selectedYear}</h1>
             <p className="text-sm text-muted-foreground">
               {profile.filing_status.replace(/_/g, ' ')} · {profile.city}, {profile.state}
             </p>
@@ -346,7 +346,7 @@ export default function Tax() {
           const currentMonth = new Date().getMonth() + 1;
           return monthsWithData < currentMonth ? (
             <div className="rounded-lg border border-border/50 bg-secondary/30 px-4 py-2 text-xs text-muted-foreground">
-              ⚠️ Income data covers {monthsWithData} of {currentMonth} months in {currentYear}. Reserve targets may be understated.
+              ⚠️ Income data covers {monthsWithData} of {currentMonth} months in {selectedYear}. Reserve targets may be understated.
             </div>
           ) : null;
         })()}
@@ -383,7 +383,7 @@ export default function Tax() {
               <CardHeader><CardTitle className="text-base">Taxable Income by Type</CardTitle></CardHeader>
               <CardContent>
                 {incomeByType.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No income recorded for {currentYear}.</p>
+                  <p className="text-sm text-muted-foreground">No income recorded for {selectedYear}.</p>
                 ) : (
                   <Table>
                     <TableHeader>
@@ -422,7 +422,7 @@ export default function Tax() {
               <CardHeader><CardTitle className="text-base">Deductions by Category</CardTitle></CardHeader>
               <CardContent>
                 {deductionsByCategory.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No deductions recorded for {currentYear}.</p>
+                  <p className="text-sm text-muted-foreground">No deductions recorded for {selectedYear}.</p>
                 ) : (
                   <Table>
                     <TableHeader>
@@ -454,7 +454,7 @@ export default function Tax() {
               <CardHeader><CardTitle className="text-base">Tax Payments Made</CardTitle></CardHeader>
               <CardContent>
                 {taxPayments.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No tax payments recorded for {currentYear}.</p>
+                  <p className="text-sm text-muted-foreground">No tax payments recorded for {selectedYear}.</p>
                 ) : (
                   <Table>
                     <TableHeader>
