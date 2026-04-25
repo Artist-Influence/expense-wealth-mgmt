@@ -1,69 +1,50 @@
-## Three fixes for /wealth
+## Goal
+Make wealth projections to age 65 use real-time, per-account live market data — auto-seeded from each account's actual holdings basket, compounding monthly, with a realized-vs-benchmark callout.
 
-### 1. Wealth Over Time — kill the Nov/Dec ghost points
+## Holdings captured
 
-Today the chart appends a hard-coded **"Today"** anchor (Nov 25, 2025) using `current_balance`. Because today's date is *before* Jan 2026, the Today point lands to the **left** of the Jan-26 snapshot, dragging the line back into Nov/Dec 2025.
+**Gemini ($11,877.62 total):** BTC 40%, XRP 36%, ETH 12%, SOL 12% (liquid + staked combined).
 
-**Fix in `src/components/CombinedWealthChart.tsx`:**
-- Only append the Today anchor when `today >= startDate`. Otherwise, the chart ends at the most recent monthly snapshot (Apr 2026 for now).
-- Sort the final rows by `_date` defensively so any future anchor is always chronological.
-- Result: chart cleanly spans **Jan 26 → Apr 26** with no Nov/Dec ghost.
+**Dub ($20,121.51 total, 4 portfolios):**
+- Stargate $15,725.69 (78%) — AI/semi infra, 92% Tech (MU/NVDA/AMD/TSM/AVGO/ASML/MSFT)
+- Pelosi $3,258.52 (16%) — congressional, 64% Tech / 26% Utilities
+- Infinity $843.38 (4%) — space economy, very speculative
+- Trump $293.92 (1.5%) — Trump-linked, very speculative
 
-### 2. Move S&P 500 (Wealthfront) into the Brokerage group
+**Collectr (Pokémon):** awaiting category split → defaults to 10%/yr static.
 
-Currently the **S&P 500** account has `account_type = 'savings'`, which is why it renders under the "Other" section. Brokerage index funds are stocks — move it.
+## Changes
 
-**Fix:**
-- Run a one-line UPDATE: set `account_type = 'brokerage'` (and platform to `'Wealthfront'` if blank) for the existing `S&P 500` row.
-- No code changes needed — the existing `TYPE_GROUPS.brokerage` already includes `brokerage`, and the projection chart already uses `brokerage → 8% S&P-style default`.
+### 1. New `src/lib/account-baskets.ts`
+Centralized map of account-name/platform → benchmark basket string + per-asset-class static rates.
 
-### 3. Live market-rate calculation for the projection
+- `gemini` → `basket:BTC-USD:0.40,XRP-USD:0.36,ETH-USD:0.12,SOL-USD:0.12`
+- `dub` → weighted Dub blend: `basket:SMH:0.55,QQQ:0.32,XLU:0.08,ARKX:0.05` (Stargate-dominant semis + Pelosi tech/utilities + Infinity space, Trump folded into QQQ weight)
+- `wealthfront` / `s&p` → `^GSPC`
+- `collectr` → static 10%/yr (no live feed)
+- Resolution: case-insensitive substring match on `account_name` then `platform`
 
-Today the projection uses static heuristic rates (S&P 8%, crypto 12%, etc.). Make these **live and historical** by adding a small calculator component.
+### 2. Expand `LiveRateCalculator.tsx` symbol presets
+Add `XRP-USD`, `SMH` (semis ETF), `ARKX` (space ETF), `XLU` (utilities ETF), plus pre-built "Gemini basket (your mix)" and "Dub basket (your mix)" entries.
 
-**New edge function: `market-rates`**
-- Pulls free, no-key public data:
-  - **S&P 500 (^GSPC)** — Yahoo Finance `query1.finance.yahoo.com/v8/finance/chart/^GSPC?range=20y&interval=1mo` → compute 1y, 5y, 10y, 20y CAGR.
-  - **BTC-USD** — same Yahoo endpoint with `BTC-USD`. (Default crypto basket; user can swap to ETH-USD or a custom mix from a dropdown.)
-  - **Pokémon TCG index** — no clean free feed; use a configurable static "PSA Card Index" 5y CAGR (~12%) the user can override per-account, with a citation link.
-  - **Dub** — no public quote feed. Best we can do: let the user paste their **Dub yearly performance** (or we infer it from their actual snapshot history → see below).
-- Returns `{ symbol, cagr_1y, cagr_5y, cagr_10y, cagr_20y, as_of }`.
-- Cached client-side via React Query (`staleTime: 6h`) so we don't hammer Yahoo.
+### 3. Auto-apply live 10y CAGR in `WealthProjectionChart.tsx`
+- On account first-render: look up basket → fetch via existing `market-rates` edge function → seed projection rate to **10y CAGR**
+- Track `userOverrode` flag per account in local state; once user edits, never auto-overwrite
+- Badge in assumptions row:
+  - `auto · 14.2% (SMH 10y)` (live-seeded)
+  - `manual · 12.0%` (user-locked)
+- Realized-vs-benchmark delta row: `realized +47.2%/yr · benchmark +38.1% · +9.1pp ahead` (color-coded)
 
-**New component: `LiveRateCalculator` (modal/popover on each assumption row)**
-- Click the "rate %" cell → popover opens showing:
-  - **Live benchmarks** for the relevant symbol: 1y / 5y / 10y / 20y CAGR with sparkline.
-  - **Your actual realized rate** computed from this account's `account_balance_snapshots` history (annualized, contributions-adjusted via Modified Dietz). Falls back to "Need 2+ snapshots" if too sparse.
-  - Buttons: "Use 10y avg", "Use 20y avg", "Use my realized rate", or type a custom value.
-- Symbol mapping per account (editable, persisted to localStorage with the existing assumptions):
-  - `brokerage` + Wealthfront/S&P → `^GSPC`
-  - `crypto` + Gemini → `BTC-USD` by default; dropdown for `ETH-USD`, `SOL-USD`, or weighted mix
-  - `collectibles` → no live symbol; show static PSA index + manual override
-  - `brokerage` + Dub → realized-rate only (no public symbol)
+### 4. Verify allocation + projection use live monthly data (read-only audit)
+Confirm `Allocations.tsx` and `WealthProjectionChart.tsx` source current balances from `account_balance_snapshots` (latest per account) and compound monthly to age 65. Fix only if broken. No new DB writes.
 
-**New "Realized vs Assumed" badge on each legend chip**
-- Small caret showing how the user's actual snapshot CAGR compares to their assumed rate (e.g. `assumed 8% · realized 14%`). Helps spot stale assumptions.
+## Out of scope (this pass)
+- Persisting per-account basket overrides to DB (lives in code map for now; trivial to migrate to a `projection_settings` table later if you want UI-editable baskets)
+- Pokémon category-weighted rate (need your sealed/vintage/graded split first)
+- Real-time per-symbol holdings tracking inside Dub portfolios (Dub doesn't expose a public API; basket is a defensible proxy)
 
-**Optional inputs from you (nice but not required to ship):**
-- Specific crypto holdings split (e.g. 60% BTC / 30% ETH / 10% SOL) → I'll wire a weighted-CAGR mix.
-- Dub historical monthly P&L statements → I'll backfill snapshots so the realized-rate calc works there too.
-
----
-
-## Files touched
-
-- **Edit** `src/components/CombinedWealthChart.tsx` — guard the Today anchor with `today >= startDate`, sort rows.
-- **Data update** — `UPDATE investment_accounts SET account_type='brokerage', platform=COALESCE(platform,'Wealthfront') WHERE account_name='S&P 500'`.
-- **New** `supabase/functions/market-rates/index.ts` — fetches Yahoo Finance monthly history, returns CAGRs (no API key needed).
-- **New** `src/components/LiveRateCalculator.tsx` — popover with live benchmarks + realized-rate calc + apply buttons.
-- **Edit** `src/components/WealthProjectionChart.tsx` — pass snapshots in, render `<LiveRateCalculator>` next to each rate input, show realized-vs-assumed delta on legend chips, add per-account symbol mapping to the assumptions store.
-- **Edit** `src/pages/Wealth.tsx` — pass `snapshots` to `WealthProjectionChart`.
-
-No DB migration. No new tables. No new secrets (Yahoo Finance v8 chart endpoint is free and key-less).
-
----
-
-## Out of scope unless you ask
-
-- Pulling Dub-specific or Collectr-specific live quotes (no public APIs). Realized-rate from your snapshots is the substitute.
-- Tax-adjusted / inflation-adjusted projections.
+## Files
+- `src/lib/account-baskets.ts` (new)
+- `src/components/LiveRateCalculator.tsx`
+- `src/components/WealthProjectionChart.tsx`
+- `src/pages/Allocations.tsx` (read-only verify; edit only if needed)

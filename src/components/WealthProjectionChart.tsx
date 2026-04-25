@@ -7,8 +7,10 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Telescope, Settings2, Info, ChevronDown, ChevronUp } from 'lucide-react';
-import { LiveRateCalculator, defaultSymbolFor, type Snapshot as RateSnap } from '@/components/LiveRateCalculator';
+import { Telescope, Settings2, Info, ChevronDown, ChevronUp, Lock, Zap } from 'lucide-react';
+import { LiveRateCalculator, defaultSymbolFor, type Snapshot as RateSnap, realizedCagr } from '@/components/LiveRateCalculator';
+import { resolveBasket } from '@/lib/account-baskets';
+import { useQueries } from '@tanstack/react-query';
 
 // ---------------------------------------------------------------
 // Long-horizon compounding projection ("to age 65"). Lives next to the
@@ -40,6 +42,7 @@ const PALETTE = [
 
 const AGE_KEY = 'wealth_user_age';
 const ASSUMP_KEY = 'wealth_projection_assumptions_v1';
+const OVERRIDE_KEY = 'wealth_projection_user_overrides_v1';
 const TARGET_AGE = 65;
 
 type Assumption = {
@@ -52,6 +55,10 @@ type AssumptionMap = Record<string, Assumption>;
 
 // ---- Heuristic defaults --------------------------------------------------
 function defaultRateFor(acc: ProjAccount): number {
+  // Prefer the static rate from the basket resolver when it's a no-live-feed asset.
+  const basket = resolveBasket(acc);
+  if (basket.source === 'static' && basket.static_rate != null) return basket.static_rate;
+
   const name = (acc.account_name + ' ' + (acc.platform || '')).toLowerCase();
   if (acc.account_type === 'crypto' || name.includes('gemini')) return 12;
   if (acc.account_type === 'collectibles' || name.includes('pokemon') || name.includes('pokémon')) return 7;
@@ -83,6 +90,36 @@ function saveAssumptions(map: AssumptionMap) {
   try { localStorage.setItem(ASSUMP_KEY, JSON.stringify(map)); } catch { /* ignore */ }
 }
 
+function loadOverrides(): Set<string> {
+  try {
+    const raw = localStorage.getItem(OVERRIDE_KEY);
+    return raw ? new Set<string>(JSON.parse(raw)) : new Set();
+  } catch {
+    return new Set();
+  }
+}
+function saveOverrides(s: Set<string>) {
+  try { localStorage.setItem(OVERRIDE_KEY, JSON.stringify([...s])); } catch { /* ignore */ }
+}
+
+// Direct call to the market-rates edge function (mirrors LiveRateCalculator's fetcher).
+async function fetchLiveRate(symbolOrBasket: string): Promise<{ cagr_10y: number | null; cagr_5y: number | null } | null> {
+  if (!symbolOrBasket || symbolOrBasket === '__none__') return null;
+  const params: Record<string, string> = symbolOrBasket.startsWith('basket:')
+    ? { basket: symbolOrBasket.slice('basket:'.length) }
+    : { symbol: symbolOrBasket };
+  const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID;
+  const url = `https://${projectId}.functions.supabase.co/market-rates?${new URLSearchParams(params)}`;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return { cagr_10y: data.cagr_10y, cagr_5y: data.cagr_5y };
+  } catch {
+    return null;
+  }
+}
+
 const fmtUsd = (n: number) => {
   const abs = Math.abs(n);
   if (abs >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`;
@@ -103,25 +140,28 @@ export function WealthProjectionChart({
     return Number.isFinite(v) && v > 0 ? v : 30;
   });
   const [assumptions, setAssumptions] = useState<AssumptionMap>(() => loadAssumptions());
+  const [overrides, setOverrides] = useState<Set<string>>(() => loadOverrides());
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [showSettings, setShowSettings] = useState(false);
 
   // Seed defaults for any account that's missing assumptions.
+  // Use the basket resolver so Gemini/Dub/etc start on the right symbol.
   useEffect(() => {
     let changed = false;
     const next = { ...assumptions };
     for (const a of accounts) {
+      const basket = resolveBasket(a);
+      const seedSymbol = basket.source === 'live' ? basket.symbol : defaultSymbolFor(a);
       if (!next[a.id]) {
         next[a.id] = {
           annual_rate_pct: defaultRateFor(a),
           monthly_contribution: defaultMonthlyContribution(a),
           stop_age: TARGET_AGE,
-          benchmark_symbol: defaultSymbolFor(a),
+          benchmark_symbol: seedSymbol,
         };
         changed = true;
       } else if (!next[a.id].benchmark_symbol) {
-        // Backfill the symbol field for users who already had assumptions saved.
-        next[a.id] = { ...next[a.id], benchmark_symbol: defaultSymbolFor(a) };
+        next[a.id] = { ...next[a.id], benchmark_symbol: seedSymbol };
         changed = true;
       }
     }
@@ -132,6 +172,60 @@ export function WealthProjectionChart({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accounts]);
 
+  // Auto-apply: fetch live 10y CAGR per account.
+  // If the user has marked this account as overridden, we still fetch (to show
+  // the badge / realized-vs-benchmark delta) but won't overwrite the rate.
+  const liveQueries = useQueries({
+    queries: accounts.map((a) => {
+      const basket = resolveBasket(a);
+      const symbol = assumptions[a.id]?.benchmark_symbol || basket.symbol;
+      const enabled = basket.source === 'live' && symbol !== '__none__';
+      return {
+        queryKey: ['proj-live-rate', a.id, symbol],
+        queryFn: () => fetchLiveRate(symbol),
+        enabled,
+        staleTime: 6 * 60 * 60 * 1000,
+        retry: 1,
+      };
+    }),
+  });
+
+  const liveCagrFingerprint = liveQueries.map((q) => q.data?.cagr_10y ?? 'x').join('|');
+  const liveRateByAccount = useMemo(() => {
+    const m: Record<string, { rate: number | null; label: string }> = {};
+    accounts.forEach((a, i) => {
+      const basket = resolveBasket(a);
+      const data = liveQueries[i]?.data ?? null;
+      m[a.id] = { rate: data?.cagr_10y ?? null, label: basket.label };
+    });
+    return m;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accounts, liveCagrFingerprint]);
+
+  // Seed the projection rate from live data when it arrives,
+  // unless the user has marked this account as manually overridden.
+  useEffect(() => {
+    let changed = false;
+    const next = { ...assumptions };
+    for (const a of accounts) {
+      if (overrides.has(a.id)) continue;
+      const live = liveRateByAccount[a.id];
+      if (live?.rate == null) continue;
+      const cur = next[a.id];
+      if (!cur) continue;
+      const newRate = Number(live.rate.toFixed(2));
+      if (Math.abs(cur.annual_rate_pct - newRate) > 0.01) {
+        next[a.id] = { ...cur, annual_rate_pct: newRate };
+        changed = true;
+      }
+    }
+    if (changed) {
+      setAssumptions(next);
+      saveAssumptions(next);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveRateByAccount]);
+
   useEffect(() => {
     localStorage.setItem(AGE_KEY, String(age));
   }, [age]);
@@ -141,10 +235,22 @@ export function WealthProjectionChart({
     return PALETTE[idx % PALETTE.length];
   };
 
-  const updateAssumption = (id: string, patch: Partial<Assumption>) => {
+  const markOverride = (id: string) => {
+    if (overrides.has(id)) return;
+    const n = new Set(overrides); n.add(id);
+    setOverrides(n); saveOverrides(n);
+  };
+  const clearOverride = (id: string) => {
+    if (!overrides.has(id)) return;
+    const n = new Set(overrides); n.delete(id);
+    setOverrides(n); saveOverrides(n);
+  };
+
+  const updateAssumption = (id: string, patch: Partial<Assumption>, opts?: { manual?: boolean }) => {
     const next = { ...assumptions, [id]: { ...assumptions[id], ...patch } };
     setAssumptions(next);
     saveAssumptions(next);
+    if (opts?.manual) markOverride(id);
   };
 
   // ---- Simulation -------------------------------------------------------
@@ -295,7 +401,7 @@ export function WealthProjectionChart({
 
         {/* Assumptions panel */}
         {showSettings && (
-          <div className="mb-3 rounded-md border border-border/60 bg-muted/20 p-2 space-y-1.5 max-h-56 overflow-y-auto">
+          <div className="mb-3 rounded-md border border-border/60 bg-muted/20 p-2 space-y-0.5 max-h-96 overflow-y-auto">
             <div className="grid grid-cols-12 gap-2 text-[10px] font-medium text-muted-foreground px-1">
               <div className="col-span-4">Account</div>
               <div className="col-span-3">Annual rate %</div>
@@ -305,49 +411,106 @@ export function WealthProjectionChart({
             {accounts.map(a => {
               const ass = assumptions[a.id];
               if (!ass) return null;
+              const live = liveRateByAccount[a.id];
+              const isOverride = overrides.has(a.id);
+              const realized = realizedCagr(
+                snapshotsByAccount[a.id] || [],
+                a.contributions_ytd > 0
+                  ? a.contributions_ytd
+                  : a.contribution_target_monthly * Math.max(
+                      1,
+                      (snapshotsByAccount[a.id]?.length || 1) - 1,
+                    ),
+              );
+              const liveRate = live?.rate;
+              const realizedDelta =
+                realized.cagr_pct != null && liveRate != null
+                  ? realized.cagr_pct - liveRate
+                  : null;
               return (
-                <div key={a.id} className="grid grid-cols-12 gap-2 items-center text-[11px] px-1">
-                  <div className="col-span-4 flex items-center gap-1.5 truncate">
-                    <span className="h-2 w-2 rounded-full shrink-0" style={{ background: colorFor(a.id) }} />
-                    <span className="truncate">{a.account_name}</span>
+                <div key={a.id} className="px-1 py-1 border-b border-border/30 last:border-b-0">
+                  <div className="grid grid-cols-12 gap-2 items-center text-[11px]">
+                    <div className="col-span-4 flex items-center gap-1.5 truncate">
+                      <span className="h-2 w-2 rounded-full shrink-0" style={{ background: colorFor(a.id) }} />
+                      <span className="truncate">{a.account_name}</span>
+                    </div>
+                    <div className="col-span-3 flex items-center gap-1">
+                      <Input
+                        type="number"
+                        step="0.5"
+                        value={ass.annual_rate_pct}
+                        onChange={e => updateAssumption(a.id, { annual_rate_pct: Number(e.target.value) || 0 }, { manual: true })}
+                        className="h-6 text-[11px] px-1.5"
+                      />
+                      <LiveRateCalculator
+                        accountName={a.account_name}
+                        symbol={ass.benchmark_symbol || defaultSymbolFor(a)}
+                        onSymbolChange={(sym) => updateAssumption(a.id, { benchmark_symbol: sym })}
+                        currentRate={ass.annual_rate_pct}
+                        onApply={(r) => updateAssumption(a.id, { annual_rate_pct: r }, { manual: true })}
+                        snapshots={snapshotsByAccount[a.id] || []}
+                        contributionsYtd={a.contributions_ytd}
+                        contributionTargetMonthly={a.contribution_target_monthly}
+                      />
+                    </div>
+                    <div className="col-span-3">
+                      <Input
+                        type="number"
+                        step="50"
+                        value={ass.monthly_contribution}
+                        onChange={e => updateAssumption(a.id, { monthly_contribution: Number(e.target.value) || 0 }, { manual: true })}
+                        className="h-6 text-[11px] px-1.5"
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <Input
+                        type="number"
+                        min={age}
+                        max={TARGET_AGE}
+                        value={ass.stop_age}
+                        onChange={e => updateAssumption(a.id, { stop_age: Math.max(age, Math.min(TARGET_AGE, Number(e.target.value) || TARGET_AGE)) }, { manual: true })}
+                        className="h-6 text-[11px] px-1.5"
+                      />
+                    </div>
                   </div>
-                  <div className="col-span-3 flex items-center gap-1">
-                    <Input
-                      type="number"
-                      step="0.5"
-                      value={ass.annual_rate_pct}
-                      onChange={e => updateAssumption(a.id, { annual_rate_pct: Number(e.target.value) || 0 })}
-                      className="h-6 text-[11px] px-1.5"
-                    />
-                    <LiveRateCalculator
-                      accountName={a.account_name}
-                      symbol={ass.benchmark_symbol || defaultSymbolFor(a)}
-                      onSymbolChange={(sym) => updateAssumption(a.id, { benchmark_symbol: sym })}
-                      currentRate={ass.annual_rate_pct}
-                      onApply={(r) => updateAssumption(a.id, { annual_rate_pct: r })}
-                      snapshots={snapshotsByAccount[a.id] || []}
-                      contributionsYtd={a.contributions_ytd}
-                      contributionTargetMonthly={a.contribution_target_monthly}
-                    />
-                  </div>
-                  <div className="col-span-3">
-                    <Input
-                      type="number"
-                      step="50"
-                      value={ass.monthly_contribution}
-                      onChange={e => updateAssumption(a.id, { monthly_contribution: Number(e.target.value) || 0 })}
-                      className="h-6 text-[11px] px-1.5"
-                    />
-                  </div>
-                  <div className="col-span-2">
-                    <Input
-                      type="number"
-                      min={age}
-                      max={TARGET_AGE}
-                      value={ass.stop_age}
-                      onChange={e => updateAssumption(a.id, { stop_age: Math.max(age, Math.min(TARGET_AGE, Number(e.target.value) || TARGET_AGE)) })}
-                      className="h-6 text-[11px] px-1.5"
-                    />
+                  {/* Status row: live/manual badge + realized-vs-benchmark delta */}
+                  <div className="flex items-center gap-2 flex-wrap mt-1 pl-3.5 text-[9.5px] text-muted-foreground">
+                    {isOverride ? (
+                      <button
+                        type="button"
+                        onClick={() => clearOverride(a.id)}
+                        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-border/60 hover:border-primary/60 hover:text-foreground transition-colors"
+                        title="Click to unlock — live data will overwrite this rate"
+                      >
+                        <Lock className="h-2.5 w-2.5" />
+                        manual · {ass.annual_rate_pct.toFixed(1)}%
+                      </button>
+                    ) : liveRate != null ? (
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-emerald-500/30 bg-emerald-500/5 text-emerald-500/90">
+                        <Zap className="h-2.5 w-2.5" />
+                        auto · {liveRate.toFixed(1)}% ({live.label} 10y)
+                      </span>
+                    ) : live?.label ? (
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-border/40">
+                        {live.label} (no live data)
+                      </span>
+                    ) : null}
+                    {realized.cagr_pct != null && (
+                      <span className="inline-flex items-center gap-1">
+                        realized
+                        <span className={realized.cagr_pct >= 0 ? 'text-emerald-500' : 'text-rose-500'}>
+                          {realized.cagr_pct >= 0 ? '+' : ''}{realized.cagr_pct.toFixed(1)}%
+                        </span>
+                        {realizedDelta != null && (
+                          <>
+                            ·
+                            <span className={realizedDelta >= 0 ? 'text-emerald-500' : 'text-rose-500'}>
+                              {realizedDelta >= 0 ? '+' : ''}{realizedDelta.toFixed(1)}pp vs benchmark
+                            </span>
+                          </>
+                        )}
+                      </span>
+                    )}
                   </div>
                 </div>
               );
