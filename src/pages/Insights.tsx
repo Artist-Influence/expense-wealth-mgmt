@@ -291,7 +291,7 @@ export default function Insights() {
   }, [expenses, allExpenses, transactions, dateFrom, dateTo]);
 
   // Only approved/edited data in charts
-  const approvedExpenses = useMemo(() => expenses.filter(t => ['approved', 'auto_categorized', 'edited'].includes(t.review_status)), [expenses]);
+  const approvedExpenses = useMemo(() => expenses.filter(t => isCounted(t.review_status)), [expenses, COUNTED_STATUSES]);
 
   const categoryData = useMemo(() => {
     const catMap = new Map<string, number>();
