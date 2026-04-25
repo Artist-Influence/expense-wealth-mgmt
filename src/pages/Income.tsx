@@ -583,6 +583,10 @@ export default function Income() {
 
           {selectedIds.size > 0 && (
             <div className="flex gap-2 ml-auto">
+              <Select onValueChange={v => bulkUpdate('mode', v)}>
+                <SelectTrigger className="w-[130px] bg-card border-border"><SelectValue placeholder="Set Mode" /></SelectTrigger>
+                <SelectContent>{MODE_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
+              </Select>
               <Select onValueChange={v => bulkUpdate('income_type', v)}>
                 <SelectTrigger className="w-[140px] bg-card border-border"><SelectValue placeholder="Set Type" /></SelectTrigger>
                 <SelectContent>{INCOME_TYPE_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
