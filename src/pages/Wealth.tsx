@@ -211,7 +211,89 @@ export default function Wealth() {
     enabled: !!user,
   });
 
-  const upsertSnapshot = useMutation({
+  // ---------------------------------------------------------------
+  // Live YTD contributions per account — recalculated every load by
+  // scanning matching personal expenses against each account's
+  // auto_track_pattern. No button click required.
+  // ---------------------------------------------------------------
+  const currentYear = new Date().getFullYear();
+  const { data: liveYtdMap = new Map<string, number>() } = useQuery({
+    queryKey: ['contributions_ytd_live', user?.id, currentYear, accounts.map(a => a.id).join(',')],
+    queryFn: async () => {
+      const yearStart = `${currentYear}-01-01`;
+      const yearEnd = `${currentYear}-12-31`;
+      const map = new Map<string, number>();
+      for (const acc of accounts) {
+        const pattern = acc.auto_track_pattern?.trim();
+        if (!pattern) {
+          // Fall back to stored value (manual entry)
+          map.set(acc.id, Number(acc.contributions_ytd) || 0);
+          continue;
+        }
+        const tokens = pattern.split('|').map(t => t.trim()).filter(Boolean);
+        if (tokens.length === 0) {
+          map.set(acc.id, Number(acc.contributions_ytd) || 0);
+          continue;
+        }
+        const orParts: string[] = [];
+        for (const t of tokens) {
+          const safe = t.replace(/[%,]/g, ' ');
+          orParts.push(`description_normalized.ilike.%${safe}%`);
+          orParts.push(`description_raw.ilike.%${safe}%`);
+        }
+        const { data: matches } = await supabase
+          .from('transactions_uploaded')
+          .select('amount')
+          .eq('owner_id', user!.id)
+          .eq('mode', 'personal')
+          .gte('date', yearStart)
+          .lte('date', yearEnd)
+          .or(orParts.join(','));
+        const total = (matches || []).reduce((s, r) => s + Math.abs(Number(r.amount || 0)), 0);
+        map.set(acc.id, total);
+      }
+      return map;
+    },
+    enabled: !!user && accounts.length > 0,
+  });
+
+  // App settings — holds portfolio-wide end-of-year wealth target.
+  const { data: appSettings } = useQuery({
+    queryKey: ['app_settings', user?.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('app_settings')
+        .select('id, wealth_target_amount, wealth_target_year')
+        .eq('owner_id', user!.id)
+        .maybeSingle();
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!user,
+  });
+
+  const saveTarget = useMutation({
+    mutationFn: async ({ amount, year }: { amount: number; year: number }) => {
+      if (appSettings?.id) {
+        const { error } = await supabase
+          .from('app_settings')
+          .update({ wealth_target_amount: amount, wealth_target_year: year })
+          .eq('id', appSettings.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase
+          .from('app_settings')
+          .insert({ owner_id: user!.id, wealth_target_amount: amount, wealth_target_year: year });
+        if (error) throw error;
+      }
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['app_settings', user?.id] });
+      setTargetDialogOpen(false);
+      toast.success('Target saved');
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
     mutationFn: async ({ account_id, as_of_date, balance }: { account_id: string; as_of_date: string; balance: number }) => {
       const { error } = await supabase
         .from('account_balance_snapshots')
