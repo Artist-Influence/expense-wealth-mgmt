@@ -51,6 +51,29 @@ const CHART_COLORS = [
 
 const fmt = (n: number) => '$' + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+// Review-mode → which review_status values we count in totals/charts.
+//   manual    = only what's been clicked through (current legacy behavior)
+//   suggested = adds rule/AI suggested rows that haven't been clicked yet (NEW DEFAULT)
+//   all       = also include needs_review (raw cash-flow view)
+type ReviewMode = 'manual' | 'suggested' | 'all';
+const REVIEW_MODE_KEY = 'insights_review_mode';
+const STATUSES_BY_MODE: Record<ReviewMode, ReadonlyArray<string>> = {
+  manual:    ['approved', 'auto_categorized', 'edited'],
+  suggested: ['approved', 'auto_categorized', 'edited', 'suggested', 'ai_suggested'],
+  all:       ['approved', 'auto_categorized', 'edited', 'suggested', 'ai_suggested', 'needs_review'],
+};
+const REVIEW_MODE_LABEL: Record<ReviewMode, string> = {
+  manual: 'Approved only',
+  suggested: 'Approved + suggested',
+  all: 'Include needs-review',
+};
+const readReviewMode = (): ReviewMode => {
+  if (typeof window === 'undefined') return 'suggested';
+  const v = window.localStorage.getItem(REVIEW_MODE_KEY);
+  if (v === 'manual' || v === 'suggested' || v === 'all') return v;
+  return 'suggested';
+};
+
 export default function Insights() {
   const { user } = useAuth();
   const [mode, setMode] = useState<'personal' | 'business'>('personal');
