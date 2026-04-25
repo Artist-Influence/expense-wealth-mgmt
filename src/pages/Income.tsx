@@ -626,7 +626,7 @@ export default function Income() {
               {loading ? (
                 <TableRow><TableCell colSpan={10} className="text-center text-muted-foreground py-12">Loading...</TableCell></TableRow>
               ) : filtered.length === 0 ? (
-                <TableRow><TableCell colSpan={9} className="text-center text-muted-foreground py-12">
+                <TableRow><TableCell colSpan={10} className="text-center text-muted-foreground py-12">
                   No income transactions yet. Import a CSV or add an entry manually.
                 </TableCell></TableRow>
               ) : filtered.map(tx => (
