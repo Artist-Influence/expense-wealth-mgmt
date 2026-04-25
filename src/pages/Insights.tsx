@@ -624,7 +624,7 @@ export default function Insights() {
     const catBaselineTotals = new Map<string, number>();
     const baselineMonthSet = new Set<string>();
     allExpenses
-      .filter(t => ['approved', 'auto_categorized', 'edited'].includes(t.review_status))
+      .filter(t => isCounted(t.review_status))
       .filter(t => t.date && t.date >= baselineCutoff)
       .forEach(t => {
         const cat = t.final_category || 'Uncategorized';
