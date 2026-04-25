@@ -140,25 +140,28 @@ export function WealthProjectionChart({
     return Number.isFinite(v) && v > 0 ? v : 30;
   });
   const [assumptions, setAssumptions] = useState<AssumptionMap>(() => loadAssumptions());
+  const [overrides, setOverrides] = useState<Set<string>>(() => loadOverrides());
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [showSettings, setShowSettings] = useState(false);
 
   // Seed defaults for any account that's missing assumptions.
+  // Use the basket resolver so Gemini/Dub/etc start on the right symbol.
   useEffect(() => {
     let changed = false;
     const next = { ...assumptions };
     for (const a of accounts) {
+      const basket = resolveBasket(a);
+      const seedSymbol = basket.source === 'live' ? basket.symbol : defaultSymbolFor(a);
       if (!next[a.id]) {
         next[a.id] = {
           annual_rate_pct: defaultRateFor(a),
           monthly_contribution: defaultMonthlyContribution(a),
           stop_age: TARGET_AGE,
-          benchmark_symbol: defaultSymbolFor(a),
+          benchmark_symbol: seedSymbol,
         };
         changed = true;
       } else if (!next[a.id].benchmark_symbol) {
-        // Backfill the symbol field for users who already had assumptions saved.
-        next[a.id] = { ...next[a.id], benchmark_symbol: defaultSymbolFor(a) };
+        next[a.id] = { ...next[a.id], benchmark_symbol: seedSymbol };
         changed = true;
       }
     }
@@ -169,6 +172,60 @@ export function WealthProjectionChart({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accounts]);
 
+  // Auto-apply: fetch live 10y CAGR per account.
+  // If the user has marked this account as overridden, we still fetch (to show
+  // the badge / realized-vs-benchmark delta) but won't overwrite the rate.
+  const liveQueries = useQueries({
+    queries: accounts.map((a) => {
+      const basket = resolveBasket(a);
+      const symbol = assumptions[a.id]?.benchmark_symbol || basket.symbol;
+      const enabled = basket.source === 'live' && symbol !== '__none__';
+      return {
+        queryKey: ['proj-live-rate', a.id, symbol],
+        queryFn: () => fetchLiveRate(symbol),
+        enabled,
+        staleTime: 6 * 60 * 60 * 1000,
+        retry: 1,
+      };
+    }),
+  });
+
+  const liveCagrFingerprint = liveQueries.map((q) => q.data?.cagr_10y ?? 'x').join('|');
+  const liveRateByAccount = useMemo(() => {
+    const m: Record<string, { rate: number | null; label: string }> = {};
+    accounts.forEach((a, i) => {
+      const basket = resolveBasket(a);
+      const data = liveQueries[i]?.data ?? null;
+      m[a.id] = { rate: data?.cagr_10y ?? null, label: basket.label };
+    });
+    return m;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accounts, liveCagrFingerprint]);
+
+  // Seed the projection rate from live data when it arrives,
+  // unless the user has marked this account as manually overridden.
+  useEffect(() => {
+    let changed = false;
+    const next = { ...assumptions };
+    for (const a of accounts) {
+      if (overrides.has(a.id)) continue;
+      const live = liveRateByAccount[a.id];
+      if (live?.rate == null) continue;
+      const cur = next[a.id];
+      if (!cur) continue;
+      const newRate = Number(live.rate.toFixed(2));
+      if (Math.abs(cur.annual_rate_pct - newRate) > 0.01) {
+        next[a.id] = { ...cur, annual_rate_pct: newRate };
+        changed = true;
+      }
+    }
+    if (changed) {
+      setAssumptions(next);
+      saveAssumptions(next);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveRateByAccount]);
+
   useEffect(() => {
     localStorage.setItem(AGE_KEY, String(age));
   }, [age]);
@@ -178,10 +235,22 @@ export function WealthProjectionChart({
     return PALETTE[idx % PALETTE.length];
   };
 
-  const updateAssumption = (id: string, patch: Partial<Assumption>) => {
+  const markOverride = (id: string) => {
+    if (overrides.has(id)) return;
+    const n = new Set(overrides); n.add(id);
+    setOverrides(n); saveOverrides(n);
+  };
+  const clearOverride = (id: string) => {
+    if (!overrides.has(id)) return;
+    const n = new Set(overrides); n.delete(id);
+    setOverrides(n); saveOverrides(n);
+  };
+
+  const updateAssumption = (id: string, patch: Partial<Assumption>, opts?: { manual?: boolean }) => {
     const next = { ...assumptions, [id]: { ...assumptions[id], ...patch } };
     setAssumptions(next);
     saveAssumptions(next);
+    if (opts?.manual) markOverride(id);
   };
 
   // ---- Simulation -------------------------------------------------------
