@@ -8,8 +8,10 @@ import {
 } from 'recharts';
 import {
   TrendingUp, TrendingDown, DollarSign, Tag, Store, ArrowLeftRight,
-  RefreshCw, PiggyBank, AlertTriangle, CheckCircle2, CreditCard, Calendar, ChevronDown, X
+  RefreshCw, PiggyBank, AlertTriangle, CheckCircle2, CreditCard, Calendar, ChevronDown, X,
+  Lightbulb, ArrowUpRight, ArrowDownRight, Wallet, Sparkles
 } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
