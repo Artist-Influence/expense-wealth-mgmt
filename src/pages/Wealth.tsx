@@ -11,10 +11,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import { Plus, Pencil, TrendingUp, Wallet, Target, DollarSign, Trash2 } from 'lucide-react';
+import { Plus, Pencil, TrendingUp, Wallet, Target, DollarSign, Trash2, RefreshCw, Sparkles } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
 import { ModeScopeToggle, readPersistedScope, type ModeScope } from '@/components/ModeScopeToggle';
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
 
 const ACCOUNT_TYPES = [
   { value: 'roth_ira', label: 'Roth IRA' },
@@ -48,6 +49,8 @@ type Account = {
   notes: string | null;
   updated_at: string;
   mode: 'personal' | 'business';
+  starting_balance_year: number;
+  auto_track_pattern: string | null;
 };
 
 const emptyForm = {
@@ -62,7 +65,20 @@ const emptyForm = {
   is_active: true,
   notes: '',
   mode: 'personal' as 'personal' | 'business',
+  starting_balance_year: 0,
+  auto_track_pattern: '',
 };
+
+// Default auto-track patterns the "Sync from expenses" button seeds for missing accounts.
+// Matches description_normalized OR description_raw via case-insensitive ILIKE in Supabase.
+const DEFAULT_AUTO_ACCOUNTS: Array<{
+  name: string; account_type: string; platform: string; pattern: string;
+}> = [
+  { name: 'Gemini',      account_type: 'crypto',       platform: 'Gemini',      pattern: 'gemini' },
+  { name: 'Dub',         account_type: 'brokerage',    platform: 'Dub',         pattern: 'dub (ecfi)' },
+  { name: 'Wealthfront', account_type: 'brokerage',    platform: 'Wealthfront', pattern: 'wealthfront' },
+  { name: 'Pokémon',     account_type: 'collectibles', platform: 'TCGPlayer / Zelle', pattern: 'tcgplayer|pokemon' },
+];
 
 export default function Wealth() {
   const { user } = useAuth();
