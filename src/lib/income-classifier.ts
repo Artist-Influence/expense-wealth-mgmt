@@ -19,7 +19,7 @@ const RULES: { patterns: RegExp; income_type: string; taxable_status: string; co
   { patterns: /\b(owner contrib|capital contrib|equity inject)\b/i, income_type: 'owner_contribution', taxable_status: 'non_taxable', confidence: 75 },
 ];
 
-export function classifyIncome(description: string): ClassificationResult {
+export function classifyIncome(description: string): IncomeClassification {
   const desc = description || '';
   for (const rule of RULES) {
     if (rule.patterns.test(desc)) {
