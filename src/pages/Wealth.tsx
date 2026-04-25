@@ -501,8 +501,21 @@ export default function Wealth() {
     : accounts.filter(a => (a.mode || 'personal') === scope);
 
   const totalBalance = scopedAccounts.reduce((s, a) => s + Number(a.current_balance), 0);
-  const totalYtd = scopedAccounts.reduce((s, a) => s + Number(a.contributions_ytd), 0);
-  const totalYearlyTarget = scopedAccounts.reduce((s, a) => s + Number(a.contribution_target_yearly), 0);
+  // Live YTD: sum from the live map (auto-calculated from matching expenses).
+  const totalYtd = scopedAccounts.reduce((s, a) => s + (liveYtdMap.get(a.id) ?? Number(a.contributions_ytd) ?? 0), 0);
+  const perAccountTargetSum = scopedAccounts.reduce((s, a) => s + Number(a.contribution_target_yearly), 0);
+  // Portfolio-wide EOY target overrides per-account sum when set.
+  const eoyTargetAmount = Number(appSettings?.wealth_target_amount || 0);
+  const eoyTargetYear = Number(appSettings?.wealth_target_year || new Date().getFullYear());
+  const totalYearlyTarget = eoyTargetAmount > 0 ? eoyTargetAmount : perAccountTargetSum;
+  const targetProgressPct = totalYearlyTarget > 0 ? Math.min(100, (totalYtd / totalYearlyTarget) * 100) : 0;
+  const targetRemaining = Math.max(0, totalYearlyTarget - totalYtd);
+  const monthsLeftInTargetYear = (() => {
+    const now = new Date();
+    if (eoyTargetYear > now.getFullYear()) return (eoyTargetYear - now.getFullYear()) * 12 + (12 - now.getMonth());
+    if (eoyTargetYear === now.getFullYear()) return Math.max(1, 12 - now.getMonth());
+    return 0;
+  })();
 
   // Side-by-side personal vs business splits when "All" is active.
   const personalBalance = accounts.filter(a => (a.mode || 'personal') === 'personal').reduce((s, a) => s + Number(a.current_balance), 0);
