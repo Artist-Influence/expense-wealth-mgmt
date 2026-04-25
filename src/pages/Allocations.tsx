@@ -39,11 +39,19 @@ export default function Allocations() {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   });
+  // Personal vs Business scope. Persisted across sessions.
+  const [scope, setScope] = useState<'personal' | 'business'>(() => {
+    if (typeof window === 'undefined') return 'personal';
+    return (localStorage.getItem('alloc_scope') as 'personal' | 'business') || 'personal';
+  });
+  useEffect(() => {
+    if (typeof window !== 'undefined') localStorage.setItem('alloc_scope', scope);
+  }, [scope]);
 
   // Earned-income filter shared with Insights, CloseMonth, Tax, Accountant.
 
   const { data: monthIncome = 0 } = useQuery({
-    queryKey: ['alloc_income', selectedMonth],
+    queryKey: ['alloc_income', selectedMonth, scope],
     queryFn: async () => {
       const [y, m] = selectedMonth.split('-');
       const start = `${y}-${m}-01`;
@@ -52,6 +60,7 @@ export default function Allocations() {
         .from('income_transactions')
         .select('amount, income_type')
         .eq('owner_id', user!.id)
+        .eq('mode', scope)
         .gte('date', start)
         .lte('date', end);
       return (data || [])
@@ -63,7 +72,7 @@ export default function Allocations() {
 
   // Fetch expenses for month
   const { data: monthExpenses = 0 } = useQuery({
-    queryKey: ['alloc_expenses', selectedMonth],
+    queryKey: ['alloc_expenses', selectedMonth, scope],
     queryFn: async () => {
       const [y, m] = selectedMonth.split('-');
       const start = `${y}-${m}-01`;
@@ -73,6 +82,7 @@ export default function Allocations() {
         .from('transactions_uploaded')
         .select('amount')
         .eq('owner_id', user!.id)
+        .eq('transaction_mode', scope)
         .gte('date', start)
         .lte('date', end)
         .eq('exclude_from_expense_totals', false)
@@ -84,7 +94,7 @@ export default function Allocations() {
 
   // Fetch unreviewed transaction count for data quality warning
   const { data: unreviewedCount = 0 } = useQuery({
-    queryKey: ['alloc_unreviewed', selectedMonth],
+    queryKey: ['alloc_unreviewed', selectedMonth, scope],
     queryFn: async () => {
       const [y, m] = selectedMonth.split('-');
       const start = `${y}-${m}-01`;
@@ -93,6 +103,7 @@ export default function Allocations() {
         .from('transactions_uploaded')
         .select('id', { count: 'exact', head: true })
         .eq('owner_id', user!.id)
+        .eq('transaction_mode', scope)
         .gte('date', start)
         .lte('date', end)
         .in('review_status', ['needs_review', 'suggested', 'ai_suggested']);
