@@ -102,6 +102,56 @@ export default function Wealth() {
     enabled: !!user,
   });
 
+  const { data: snapshots = [] } = useQuery({
+    queryKey: ['account_balance_snapshots', user?.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('account_balance_snapshots')
+        .select('account_id, as_of_date, balance')
+        .order('as_of_date', { ascending: true });
+      if (error) throw error;
+      return (data || []).map(s => ({
+        account_id: s.account_id,
+        as_of_date: s.as_of_date,
+        balance: Number(s.balance),
+      })) as Snapshot[];
+    },
+    enabled: !!user,
+  });
+
+  const upsertSnapshot = useMutation({
+    mutationFn: async ({ account_id, as_of_date, balance }: { account_id: string; as_of_date: string; balance: number }) => {
+      const { error } = await supabase
+        .from('account_balance_snapshots')
+        .upsert(
+          { owner_id: user!.id, account_id, as_of_date, balance },
+          { onConflict: 'account_id,as_of_date' }
+        );
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['account_balance_snapshots', user?.id] });
+      toast.success('Balance saved');
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+
+  const deleteSnapshot = useMutation({
+    mutationFn: async ({ account_id, as_of_date }: { account_id: string; as_of_date: string }) => {
+      const { error } = await supabase
+        .from('account_balance_snapshots')
+        .delete()
+        .eq('account_id', account_id)
+        .eq('as_of_date', as_of_date);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['account_balance_snapshots', user?.id] });
+      toast.success('Balance removed');
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+
   const upsert = useMutation({
     mutationFn: async (values: typeof form) => {
       const payload = {
