@@ -205,7 +205,7 @@ export default function Tax() {
   // --- Calculations ---
   const taxableIncome = useMemo(() => {
     return incomeRows
-      .filter(r => r.taxable_status === 'taxable' || r.taxable_status === 'partially_taxable')
+      .filter(r => r.taxable_status === 'taxable')
       .reduce((s, r) => s + (r.amount || 0), 0);
   }, [incomeRows]);
 
@@ -238,7 +238,7 @@ export default function Tax() {
       const key = r.income_type || 'other';
       if (!map[key]) map[key] = { taxable: 0, excluded: 0 };
       const amt = r.amount || 0;
-      if (r.taxable_status === 'taxable' || r.taxable_status === 'partially_taxable') {
+      if (r.taxable_status === 'taxable') {
         map[key].taxable += amt;
       } else {
         map[key].excluded += amt;
