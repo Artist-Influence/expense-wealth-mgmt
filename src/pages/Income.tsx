@@ -429,8 +429,28 @@ export default function Income() {
           </div>
         </div>
 
+        {/* Mode toggle */}
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground uppercase tracking-wide">View:</span>
+          <div className="inline-flex rounded-md border border-border bg-card p-0.5">
+            {(['all', 'personal', 'business'] as const).map(m => (
+              <button
+                key={m}
+                onClick={() => setFilterMode(m)}
+                className={`px-3 py-1 text-xs rounded-[4px] transition-colors ${
+                  filterMode === m
+                    ? 'bg-primary text-primary-foreground'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-secondary/40'
+                }`}
+              >
+                {m === 'all' ? 'All' : m === 'personal' ? 'Personal' : 'Business'}
+              </button>
+            ))}
+          </div>
+        </div>
+
         {/* Summary Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
           {cards.map(c => (
             <Card key={c.label} className="glass-panel border-border/50">
               <CardContent className="p-4">
@@ -446,7 +466,28 @@ export default function Income() {
 
         {/* CSV Uploader */}
         {showUploader && (
-          <CsvUploader onFilesSelect={handleCsvFiles} disabled={false} />
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 text-xs">
+              <span className="text-muted-foreground uppercase tracking-wide">Import as:</span>
+              <div className="inline-flex rounded-md border border-border bg-card p-0.5">
+                {(['personal', 'business'] as const).map(m => (
+                  <button
+                    key={m}
+                    onClick={() => setCsvImportMode(m)}
+                    className={`px-3 py-1 rounded-[4px] transition-colors ${
+                      csvImportMode === m
+                        ? (m === 'business' ? 'bg-primary text-primary-foreground' : 'bg-secondary text-foreground')
+                        : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    {m === 'personal' ? 'Personal' : 'Business'}
+                  </button>
+                ))}
+              </div>
+              <span className="text-muted-foreground/70">All rows in this CSV will be tagged as {csvImportMode}.</span>
+            </div>
+            <CsvUploader onFilesSelect={handleCsvFiles} disabled={false} />
+          </div>
         )}
 
         {/* Filters & Bulk Actions */}
