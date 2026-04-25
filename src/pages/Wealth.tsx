@@ -191,19 +191,34 @@ export default function Wealth() {
     <div className="min-h-screen bg-background">
       <AppNav />
       <div className="container py-4 space-y-3">
-        <div className="flex items-center justify-between">
-          <h1 className="text-xl font-semibold text-foreground">Wealth</h1>
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-3 flex-wrap">
+            <h1 className="text-xl font-semibold text-foreground">Wealth</h1>
+            <ModeScopeToggle value={scope} onChange={setScope} storageKey="wealth_scope" />
+            <span className="text-[10px] text-muted-foreground">
+              Showing: <span className="text-foreground/80 font-medium">{scope === 'all' ? 'All' : scope === 'business' ? 'Business' : 'Personal'}</span>
+            </span>
+          </div>
           <Button size="sm" className="h-8" onClick={openAdd}><Plus className="h-3.5 w-3.5 mr-1" />Add Account</Button>
         </div>
 
-        {/* Summary cards */}
+        {/* Summary cards (scope-filtered) */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
           <Card>
             <CardHeader className="p-3 pb-1 flex flex-row items-center gap-2 space-y-0">
               <Wallet className="h-3.5 w-3.5 text-primary" />
-              <CardTitle className="text-[11px] font-medium text-muted-foreground">Total Balance</CardTitle>
+              <CardTitle className="text-[11px] font-medium text-muted-foreground">
+                {scope === 'all' ? 'Total Balance' : scope === 'business' ? 'Business Balance' : 'Personal Balance'}
+              </CardTitle>
             </CardHeader>
-            <CardContent className="p-3 pt-0"><span className="text-lg font-bold text-foreground">{fmt(totalBalance)}</span></CardContent>
+            <CardContent className="p-3 pt-0">
+              <span className="text-lg font-bold text-foreground">{fmt(totalBalance)}</span>
+              {scope === 'all' && (
+                <div className="mt-1 text-[10px] text-muted-foreground">
+                  P {fmt(personalBalance)} · B {fmt(businessBalance)}
+                </div>
+              )}
+            </CardContent>
           </Card>
           <Card>
             <CardHeader className="p-3 pb-1 flex flex-row items-center gap-2 space-y-0">
