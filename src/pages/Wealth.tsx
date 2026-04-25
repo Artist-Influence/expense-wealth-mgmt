@@ -148,6 +148,86 @@ export default function Wealth() {
     onError: (e: any) => toast.error(e.message),
   });
 
+  // ---------------------------------------------------------------
+  // Auto-Sync Contributions: scans Personal expenses YTD for each
+  // account's auto_track_pattern, sums them, writes contributions_ytd.
+  // Creates the 4 default auto-track accounts on first run if missing.
+  // ---------------------------------------------------------------
+  const sync = useMutation({
+    mutationFn: async () => {
+      const yearStart = `${new Date().getFullYear()}-01-01`;
+      const yearEnd = `${new Date().getFullYear()}-12-31`;
+
+      // 1. Seed default auto-track accounts that don't exist yet.
+      const existingNames = new Set(accounts.map(a => a.account_name.toLowerCase()));
+      const seeds: any[] = [];
+      for (const def of DEFAULT_AUTO_ACCOUNTS) {
+        if (!existingNames.has(def.name.toLowerCase())) {
+          seeds.push({
+            owner_id: user!.id,
+            account_name: def.name,
+            account_type: def.account_type,
+            platform: def.platform,
+            auto_track_pattern: def.pattern,
+            mode: 'personal',
+            current_balance: 0,
+            contributions_ytd: 0,
+            starting_balance_year: 0,
+          });
+        }
+      }
+      if (seeds.length) {
+        const { error } = await supabase.from('investment_accounts').insert(seeds);
+        if (error) throw error;
+      }
+
+      // 2. Re-fetch (we may have added rows above).
+      const { data: latest } = await supabase.from('investment_accounts').select('*').eq('owner_id', user!.id);
+      const all = (latest || []) as Account[];
+
+      // 3. For each account with a pattern, sum matching personal expenses YTD.
+      let updated = 0;
+      for (const acc of all) {
+        const pattern = acc.auto_track_pattern?.trim();
+        if (!pattern) continue;
+        const tokens = pattern.split('|').map(t => t.trim()).filter(Boolean);
+        if (tokens.length === 0) continue;
+
+        // Build OR filter for description_normalized + description_raw across all tokens.
+        const orParts: string[] = [];
+        for (const t of tokens) {
+          const safe = t.replace(/[%,]/g, ' ');
+          orParts.push(`description_normalized.ilike.%${safe}%`);
+          orParts.push(`description_raw.ilike.%${safe}%`);
+        }
+
+        const { data: matches } = await supabase
+          .from('transactions_uploaded')
+          .select('amount')
+          .eq('owner_id', user!.id)
+          .eq('mode', 'personal')
+          .gte('date', yearStart)
+          .lte('date', yearEnd)
+          .or(orParts.join(','));
+
+        const total = (matches || []).reduce((s, r) => s + Math.abs(Number(r.amount || 0)), 0);
+        if (Math.abs(Number(acc.contributions_ytd) - total) > 0.01) {
+          const { error } = await supabase
+            .from('investment_accounts')
+            .update({ contributions_ytd: total })
+            .eq('id', acc.id);
+          if (!error) updated++;
+        }
+      }
+      return { updated, seeded: seeds.length };
+    },
+    onSuccess: ({ updated, seeded }) => {
+      qc.invalidateQueries({ queryKey: ['investment_accounts'] });
+      toast.success(`Synced from expenses · ${updated} updated${seeded ? `, ${seeded} new account${seeded > 1 ? 's' : ''} added` : ''}`);
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+
   const openEdit = (a: Account) => {
     setEditingId(a.id);
     setForm({
