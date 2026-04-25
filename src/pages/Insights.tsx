@@ -1043,6 +1043,55 @@ export default function Insights() {
                   </div>
                 </div>
               )}
+
+              {/* ─── Where to Save (Suggestions) ─── */}
+              <div className="glass-panel overflow-hidden">
+                <div className="px-4 py-3 border-b border-border/40 flex items-center gap-2">
+                  <Lightbulb className="h-4 w-4 text-warning" />
+                  <h3 className="text-sm font-medium text-foreground">Where to Save</h3>
+                  <span className="text-[10px] text-muted-foreground ml-auto">Ranked by estimated monthly impact · {dateLabel}</span>
+                </div>
+                {suggestions.length > 0 ? (
+                  <div className="divide-y divide-border/20">
+                    {suggestions.map(s => {
+                      const toneClass =
+                        s.tone === 'warning' ? 'text-warning' :
+                        s.tone === 'positive' ? 'text-success' :
+                        'text-primary';
+                      const Icon = s.tone === 'warning' ? AlertTriangle : s.tone === 'positive' ? Sparkles : Lightbulb;
+                      return (
+                        <div key={s.id} className="px-4 py-3 hover:bg-secondary/20 transition-colors">
+                          <div className="flex items-start gap-3">
+                            <Icon className={`h-4 w-4 mt-0.5 flex-shrink-0 ${toneClass}`} />
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-baseline justify-between gap-3 flex-wrap">
+                                <p className="text-sm font-medium text-foreground">{s.title}</p>
+                                <p className={`text-sm font-mono font-semibold ${toneClass}`}>
+                                  ~{fmt(s.impactMonthly)}/mo
+                                </p>
+                              </div>
+                              <p className="text-[11px] text-muted-foreground mt-1 leading-relaxed">{s.why}</p>
+                              {s.cta && (
+                                <Link
+                                  to={s.cta.href}
+                                  className="inline-flex items-center gap-1 mt-1.5 text-[11px] text-primary hover:underline"
+                                >
+                                  {s.cta.label} →
+                                </Link>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="px-4 py-8 text-center">
+                    <p className="text-sm text-muted-foreground">Looks tight — no obvious cuts to suggest.</p>
+                    <p className="text-[11px] text-muted-foreground mt-1">Focus on growing income or routing surplus to <Link to="/allocations" className="text-primary hover:underline">Allocations</Link>.</p>
+                  </div>
+                )}
+              </div>
             </TabsContent>
 
             {/* ═══════════ INCOME & SAVINGS TAB ═══════════ */}
