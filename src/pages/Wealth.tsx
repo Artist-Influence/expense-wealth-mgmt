@@ -397,9 +397,63 @@ export default function Wealth() {
                           </div>
                           <Progress value={pct} className="h-1.5" />
                         </div>
-                      ) : a.contribution_target_monthly > 0 && (
+                      ) : a.contribution_target_monthly > 0 ? (
                         <p className="text-[10px] text-muted-foreground">Monthly target: {fmt(Number(a.contribution_target_monthly))}</p>
+                      ) : Number(a.contributions_ytd) > 0 && (
+                        <p className="text-[10px] text-muted-foreground">{fmt(Number(a.contributions_ytd))} contributed YTD</p>
                       )}
+
+                      {/* Growth chart: Jan 1 baseline → Today current_balance */}
+                      {(() => {
+                        const baseline = Number(a.starting_balance_year || 0) > 0
+                          ? Number(a.starting_balance_year)
+                          : Math.max(0, Number(a.current_balance) - Number(a.contributions_ytd));
+                        const current = Number(a.current_balance);
+                        if (baseline <= 0 && current <= 0) return null;
+                        const contributed = Number(a.contributions_ytd || 0);
+                        const growth = current - baseline - contributed; // appreciation only
+                        const data = [
+                          { label: 'Jan 1', value: baseline },
+                          { label: '+ contrib', value: baseline + contributed },
+                          { label: 'Today', value: current },
+                        ];
+                        const delta = current - baseline;
+                        const deltaPct = baseline > 0 ? (delta / baseline) * 100 : 0;
+                        return (
+                          <div className="pt-1 border-t border-border/50">
+                            <div className="flex items-center justify-between text-[10px] mb-0.5">
+                              <span className="text-muted-foreground">Growth YTD</span>
+                              <span className={delta >= 0 ? 'text-[hsl(var(--success))]' : 'text-destructive'}>
+                                {delta >= 0 ? '+' : ''}{fmt(delta)}{baseline > 0 ? ` (${deltaPct.toFixed(1)}%)` : ''}
+                              </span>
+                            </div>
+                            <div className="h-12 -mx-1">
+                              <ResponsiveContainer width="100%" height="100%">
+                                <LineChart data={data} margin={{ top: 2, right: 4, left: 4, bottom: 2 }}>
+                                  <Line
+                                    type="monotone"
+                                    dataKey="value"
+                                    stroke={delta >= 0 ? 'hsl(var(--primary))' : 'hsl(var(--destructive))'}
+                                    strokeWidth={1.5}
+                                    dot={{ r: 2 }}
+                                  />
+                                  <XAxis dataKey="label" hide />
+                                  <YAxis hide domain={['dataMin', 'dataMax']} />
+                                  <Tooltip
+                                    contentStyle={{ background: 'hsl(var(--popover))', border: '1px solid hsl(var(--border))', fontSize: 11, padding: '4px 8px' }}
+                                    formatter={(v: any) => fmt(Number(v))}
+                                  />
+                                </LineChart>
+                              </ResponsiveContainer>
+                            </div>
+                            <div className="flex justify-between text-[9px] text-muted-foreground">
+                              <span>Start {fmt(baseline)}</span>
+                              <span>Contrib {fmt(contributed)}</span>
+                              <span>Apprec {growth >= 0 ? '+' : ''}{fmt(growth)}</span>
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </CardContent>
                   </Card>
                 );
