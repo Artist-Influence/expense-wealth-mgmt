@@ -1,4 +1,4 @@
-interface ClassificationResult {
+export interface IncomeClassification {
   income_type: string;
   taxable_status: string;
   confidence: number;
