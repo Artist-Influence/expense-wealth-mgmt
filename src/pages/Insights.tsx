@@ -764,7 +764,7 @@ export default function Insights() {
           <div>
             <h1 className="text-lg font-semibold text-foreground">Insights</h1>
             <p className="text-[10px] text-muted-foreground">
-              Showing: <span className="text-foreground/80 font-medium">{dateActive ? dateLabel : 'All Dates'}</span> · {mode === 'business' ? 'Business' : 'Personal'} · Approved/edited only
+              Showing: <span className="text-foreground/80 font-medium">{dateActive ? dateLabel : 'All Dates'}</span> · {mode === 'business' ? 'Business' : 'Personal'} · <span className="text-foreground/80 font-medium">{REVIEW_MODE_LABEL[reviewMode]}</span>
             </p>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
