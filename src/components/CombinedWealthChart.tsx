@@ -22,9 +22,12 @@ const fmt = (n: number) => '$' + Math.round(n).toLocaleString();
 export function CombinedWealthChart({
   accounts,
   snapshots,
+  startDate = '2026-01-01',
 }: {
   accounts: AccountLite[];
   snapshots: Snapshot[];
+  /** Earliest month to render on the x-axis (YYYY-MM-DD). Defaults to Jan 2026. */
+  startDate?: string;
 }) {
   const [hidden, setHidden] = useState<Set<string>>(new Set());
 
@@ -61,7 +64,11 @@ export function CombinedWealthChart({
       return [row];
     }
 
-    const startD = new Date(allDates[0]);
+    // Clamp the chart's start to max(startDate, earliest snapshot) so old stray
+    // auto-snapshots from account-creation day don't shift the x-axis backwards.
+    const earliest = allDates[0];
+    const effectiveStart = startDate > earliest ? startDate : earliest;
+    const startD = new Date(effectiveStart);
     const now = new Date();
     const months: string[] = [];
     const cur = new Date(startD.getFullYear(), startD.getMonth(), 1);
@@ -118,7 +125,7 @@ export function CombinedWealthChart({
     rows.push(todayRow);
 
     return rows;
-  }, [accounts, snapshots, hidden]);
+  }, [accounts, snapshots, hidden, startDate]);
 
   const toggle = (id: string) => {
     setHidden(prev => {

@@ -1,128 +1,91 @@
-## Goals
+## Goal
 
-1. **Insights — fix the math.** Charts and modal cards are only counting `approved/auto_categorized/edited` transactions, so months that are mostly still in `suggested` review state (Jan–Apr 2026 = ~415 of 436 personal txns) look almost empty. February's "Spend by Category" only shows Dining + Travel because those are the only two categories the user has manually `edited`. We need to count `suggested` rows in the totals (with a clear visual + warning), and audit every other Insights card for the same bug.
-2. **Wealth — accurate monthly balance history + multi-line chart.** Replace the 3-point "Jan 1 → today" chart with a real monthly balance series for each account (Jan–today). Add a top-of-page combined chart showing every account stacked together with a per-account legend you can click on/off.
-
----
-
-## Diagnosis (why Insights looks wrong)
-
-A query against your data shows:
-
-```
-month     status      txns   total
-2026-01   suggested    79    $5,516
-2026-01   edited        1    $49
-2026-02   suggested   106    $10,968
-2026-02   edited        8    $415       ← only what Insights currently sees
-2026-03   suggested   140    $16,680
-2026-03   edited        4    $767
-2026-04   suggested    90    $12,484
-2026-04   edited        8    $1,070
-```
-
-`Insights.tsx` line 262 filters every chart to:
-```ts
-['approved', 'auto_categorized', 'edited'].includes(t.review_status)
-```
-So the entire `suggested` bucket — which is 95%+ of your real spend — is invisible in every chart, every modal, and every "top category / top merchant / monthly trend" card. That's the bug.
+Two upgrades to the Wealth page:
+1. **Trim the historical chart** so the time axis starts at **Jan 2026** (not the older Nov-25 anchor that's currently leaking in from a stray snapshot).
+2. **Add a long-term Projection chart** beneath it that shows every investment + the combined total compounded out to **age 65** (Wealthfront-style), with editable per-account growth rates and a clickable legend.
 
 ---
 
-## What it will look like
+## Part 1 — Fix history start date (Jan 2026)
 
-### Insights — math correctness pass
-- **New review-state filter** next to the date filter:
-  - `All approved data` (default, current behavior — but include `suggested` too)
-  - `Only manually approved` (current behavior, opt-in)
-  - `Include needs_review` (opt-in for a "raw cash flow" view)
-  - Default changes to **include `suggested`**, since that's where the categorization engine has put real spend that just hasn't been clicked through yet.
-- **"Coverage" pill** on every chart card showing `X of Y txns counted · Z still needs review` so you can see at a glance whether a chart is missing data. Clicking the pill deep-links to Expenses with the missing month + status pre-applied (same pattern as the Allocations warning).
-- **Audit + fix every card** on the Insights page so the math stays consistent across:
-  - Overview row (This Month / Last Month / MoM% / Top Category / Top Merchant / Period Total / Transfers Excluded)
-  - Spend by Category (bar)
-  - Monthly Trend (line)
-  - Top Merchants (table)
-  - Recurring Charges (table)
-  - Income vs Expenses (12-month chart) and the filter-aware version
-  - Savings Rate cards (current month, trailing 3-mo, period totals)
-  - YoY comparison
-  - Category Trends (multi-line)
-  - Method Breakdown (pie)
-  - Cash Flow (Money In / Out / Net / Savings %)
-  - Suggestions ("Where to Save")
-  - Data Quality card
-- **Single source of truth helper** (`useEffectiveExpenses`) so we don't have to touch 13 separate filters every time the rule changes.
+In `src/components/CombinedWealthChart.tsx`, the month series is built from `allDates[0]` (the earliest snapshot of any account). Because there's likely a Today auto-snapshot from when accounts were created on Nov 25, 2025, the X-axis begins there.
 
-### Wealth — real monthly balance series
-- **New table `account_balance_snapshots`** (date, account_id, balance, owner_id) so we can record month-by-month values and plot them honestly instead of inferring a 2-point line.
-- **Seed it now** with the values you provided:
-  - Dub: Jan 11,756 · Feb 14,891 · Mar 15,525 · Apr 15,118
-  - Gemini: Jan 7,000 · Feb 6,949 · Mar 8,897 · Apr 9,338
-  - Collectr: Jan 25,807 · Feb 27,527 · Mar 29,782 · Apr 35,743
-  - Wealthfront S&P 500: Jan 5,898 · Feb 6,538 · Mar 6,422 · Apr 8,066
-- **Each account card** keeps its mini-chart but pulls from the snapshot table (real shape, not 3 fake points). When current_balance changes, today's snapshot upserts automatically.
-- **New "Add monthly balance" inline editor** on each account card so you can keep updating Jan/Feb/Mar/Apr/May going forward. Edit inline → the chart refreshes.
-- **New top-of-page Combined Wealth Chart**:
-  - X axis: months (Jan → today, will keep extending each month)
-  - Y axis: $ balance
-  - One colored line per account + a thicker "Total" line on top
-  - Legend below the chart with a clickable chip per account: click to hide/show that line. Total auto-recalculates from visible accounts.
-  - Scope-aware (respects Personal / Business / All toggle).
-  - Tooltip shows each visible account's value on that month + total.
+Change:
+- Add an optional `startDate?: string` prop (defaulting to `'2026-01-01'`).
+- Build months from `max(startDate, earliestSnapshot)` instead of unconditionally using the earliest snapshot.
+- For each account on the start month, fall back to its earliest known snapshot value if there is no exact Jan-2026 snapshot, so each line still has a valid first point.
+- Pass `startDate="2026-01-01"` from `Wealth.tsx`.
+
+Result: history chart begins at **Jan 26** and ends at the **Today** anchor.
 
 ---
 
-## Technical notes
+## Part 2 — New "Projection to Age 65" chart
 
-### DB migration
-```sql
--- Stores point-in-time balances per account.
-create table public.account_balance_snapshots (
-  id uuid primary key default gen_random_uuid(),
-  owner_id uuid not null,
-  account_id uuid not null,
-  as_of_date date not null,
-  balance numeric not null,
-  created_at timestamptz not null default now(),
-  unique (account_id, as_of_date)
-);
-alter table public.account_balance_snapshots enable row level security;
-create policy "Owner access account_balance_snapshots"
-  on public.account_balance_snapshots for all
-  using (auth.uid() = owner_id) with check (auth.uid() = owner_id);
+### New component: `src/components/WealthProjectionChart.tsx`
+
+A separate card placed directly under `CombinedWealthChart`. Features:
+
+- **X-axis**: years from current year through the year the user turns 65.
+- **Y-axis**: USD (k/M formatting).
+- **Lines**: one per active account + bold **Total** line.
+- **Clickable legend**: same toggle UX as the history chart (reuses styling).
+- **Tooltip**: shows year, age, each account value, and total.
+- **Per-account assumptions panel** (collapsible row above the chart):
+  - Annual growth rate (%)
+  - Monthly contribution ($) — pre-filled from `contribution_target_monthly`, falling back to `contributions_ytd / months_elapsed` if target is 0.
+  - "Stop contributing at age" (default 65)
+  - Stored in `localStorage` under `wealth_projection_assumptions_v1` keyed by `account_id`. No DB changes needed.
+
+### Default growth-rate heuristics (editable)
+
+Sensible starting values inferred from `account_type` and `platform`:
+
+| Account type / platform | Default annual rate |
+|---|---|
+| Wealthfront S&P 500 / brokerage index | 8% |
+| Crypto (Gemini) | 12% (high-vol caveat shown in tooltip) |
+| Dub (social trading brokerage) | 10% |
+| Collectibles (Pokémon) | 7% |
+| Roth/Traditional IRA | 8% |
+| Savings | 4% |
+| Other | 6% |
+
+These are seeded once into the per-account assumptions store; users can edit any value inline.
+
+### Compounding math
+
+For each account, simulate **monthly** then sample at year-end:
+
+```text
+balance_{m+1} = balance_m * (1 + annual_rate/12) + monthly_contribution
 ```
-Then seed the rows above with INSERT (Apr value also written to `current_balance` so the existing card top-line stays accurate).
 
-### Insights (`src/pages/Insights.tsx`)
-- Replace the inline `['approved','auto_categorized','edited']` filter (line 262, plus everywhere it's reused) with a single helper:
-  ```ts
-  const COUNTED = new Set(reviewMode === 'manual'
-    ? ['approved','auto_categorized','edited']
-    : reviewMode === 'all'
-      ? ['approved','auto_categorized','edited','suggested','ai_suggested','needs_review']
-      : ['approved','auto_categorized','edited','suggested','ai_suggested']);
-  ```
-- Default `reviewMode = 'suggested'` (i.e. include `suggested` + `ai_suggested`). Persist in localStorage.
-- Apply to every `useMemo` that currently filters by review_status (categoryData, monthlyTrend, topMerchants, recurringCharges, savingsRate, yoyComparison, categoryTrends, methodBreakdown, dataQuality, overview's `approvedScoped`, suggestions' baseline filter).
-- Add `Coverage` chip component: counts `included / (included + missing)` for the active date range.
+Stops contributions once `current_age + months/12 >= stop_age`. Continues compounding until age 65.
 
-### Wealth (`src/pages/Wealth.tsx`)
-- Add a `useQuery(['balance_snapshots', user.id])` that pulls all snapshots in one call.
-- Per-account mini chart now consumes the snapshot series for that account (sorted by date, fallback to baseline + current if no snapshots exist).
-- New `<CombinedWealthChart>` component above the summary cards:
-  - Builds a `[{month, [accountId]: bal, ...}]` series merging all snapshots.
-  - Recharts `LineChart` with one `<Line>` per scoped account + a derived `total` line.
-  - Legend = chip row with `useState<Set<id>>` for visibility toggles.
-- Inline editor (popover on each card): list of monthly snapshots editable in place, "Add month" button to insert a new YYYY-MM row.
-- When a user updates `current_balance` in the existing edit dialog, also upsert today's snapshot row.
+### Age input
 
-### Files touched
-- `supabase/migrations/…_account_balance_snapshots.sql` (new table + RLS + seed)
-- `src/pages/Wealth.tsx` (combined chart, snapshot-driven mini charts, inline editor)
-- `src/components/CombinedWealthChart.tsx` (new)
-- `src/pages/Insights.tsx` (review-state filter, coverage chip, math fixes across all cards)
+There's no birthday field today. Add a single **"Your current age"** input at the top of the projection card, persisted to `localStorage` (`wealth_user_age`). Default 30 if unset; show inline hint "Used to project to age 65". (Avoids adding a DB column for one number.)
 
-### Out of scope (call out for next round)
-- Auto-pulling balances from Plaid / brokerage APIs — for now we record snapshots manually + auto-snapshot when you edit `current_balance`.
-- Reclassifying every `suggested` transaction to `approved` — that's the Allocations review queue; the Insights fix simply stops hiding them.
+### Educated-prediction badge
+
+A small "Methodology" popover next to the title explains:
+- Rates are historical-average heuristics, editable per account.
+- Crypto and collectibles use wider bands; consider toggling them off to see baseline.
+- A dotted **conservative band** (rate − 3%) and **optimistic band** (rate + 3%) is drawn around the Total line as faint area shading so the user sees a range, not a single number.
+
+---
+
+## Files touched
+
+- **Edit** `src/components/CombinedWealthChart.tsx` — add `startDate` prop, clamp series start.
+- **New** `src/components/WealthProjectionChart.tsx` — projection card with assumptions panel, compounding sim, range bands, clickable legend.
+- **Edit** `src/pages/Wealth.tsx` — pass `startDate="2026-01-01"` to history chart; render `<WealthProjectionChart accounts={scopedAccounts} />` directly underneath.
+
+No DB migration. No new tables. No edge functions.
+
+---
+
+## Out of scope (call out for future)
+
+- Pulling **real-time** market quotes for individualized predictions (would need a market-data API key + edge function). Today's "real-time metric" is the user's own current balance + their editable expected return. Happy to add a live-quote integration in a follow-up if you want.
