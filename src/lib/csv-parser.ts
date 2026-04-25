@@ -95,11 +95,65 @@ function stripBom(text: string): string {
   return text.replace(/^\uFEFF/, '');
 }
 
+/**
+ * Some bank CSVs (Bank of America, Chase, Wells Fargo, etc.) prepend a summary
+ * block (Beginning Balance, Total Credits, etc.) above the real transaction
+ * header row. PapaParse would otherwise read that summary as the header.
+ *
+ * Scans the first ~25 lines and returns the index of the first line that looks
+ * like a real transaction header — defined as a CSV row whose cells contain
+ * BOTH a date-ish token AND a description-ish token (and ideally amount).
+ * Returns 0 (no trim) if no obvious header is found.
+ */
+function findHeaderLineIndex(text: string): number {
+  const lines = text.split(/\r?\n/);
+  const scanLimit = Math.min(lines.length, 25);
+
+  const dateTokens = DATE_CANDIDATES.map(t => t.toLowerCase());
+  const descTokens = DESCRIPTION_CANDIDATES.map(t => t.toLowerCase());
+  const amountTokens = AMOUNT_CANDIDATES.map(t => t.toLowerCase());
+
+  for (let i = 0; i < scanLimit; i++) {
+    const line = lines[i];
+    if (!line || !line.trim()) continue;
+
+    // Quick CSV split (header sniffing only — full parse not needed)
+    const cells = line
+      .split(',')
+      .map(c => c.replace(/^\s*"?|"?\s*$/g, '').trim().toLowerCase())
+      .filter(c => c.length > 0);
+    if (cells.length < 2) continue;
+
+    const matchesAny = (cell: string, tokens: string[]) =>
+      tokens.some(t => cell === t || cell.startsWith(t));
+
+    const hasDate = cells.some(c => matchesAny(c, dateTokens));
+    const hasDesc = cells.some(c => matchesAny(c, descTokens));
+    const hasAmount = cells.some(c => matchesAny(c, amountTokens));
+
+    // Real transaction header: needs Date + Description + Amount
+    if (hasDate && hasDesc && hasAmount) {
+      return i;
+    }
+  }
+  return 0;
+}
+
+/**
+ * Strips any pre-header summary block (BoA-style "Beginning Balance" rows, etc.)
+ * so PapaParse sees the real transaction header as row 1.
+ */
+function trimToTransactionHeader(text: string): string {
+  const idx = findHeaderLineIndex(text);
+  if (idx === 0) return text;
+  return text.split(/\r?\n/).slice(idx).join('\n');
+}
+
 export function previewCsvFile(file: File): Promise<ParsePreview> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (e) => {
-      const text = stripBom(e.target?.result as string || '');
+      const text = trimToTransactionHeader(stripBom(e.target?.result as string || ''));
       Papa.parse<CsvRow>(text, {
         header: true,
         skipEmptyLines: true,
@@ -136,7 +190,7 @@ export function parseCsvFileWithMapping(file: File, mapping: ColumnMapping): Pro
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (e) => {
-      const text = stripBom(e.target?.result as string || '');
+      const text = trimToTransactionHeader(stripBom(e.target?.result as string || ''));
       Papa.parse<CsvRow>(text, {
         header: true,
         skipEmptyLines: true,
@@ -211,7 +265,7 @@ export function parseCsvFile(file: File): Promise<ParsedTransaction[]> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (e) => {
-      const text = stripBom(e.target?.result as string || '');
+      const text = trimToTransactionHeader(stripBom(e.target?.result as string || ''));
       Papa.parse<CsvRow>(text, {
         header: true,
         skipEmptyLines: true,
