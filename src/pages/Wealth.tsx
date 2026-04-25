@@ -109,9 +109,11 @@ export default function Wealth() {
         contribution_target_monthly: Number(values.contribution_target_monthly),
         contribution_target_yearly: Number(values.contribution_target_yearly),
         contributions_ytd: Number(values.contributions_ytd),
+        starting_balance_year: Number(values.starting_balance_year || 0),
         priority: Number(values.priority),
         platform: values.platform || null,
         notes: values.notes || null,
+        auto_track_pattern: values.auto_track_pattern || null,
       };
       if (editingId) {
         const { error } = await supabase.from('investment_accounts').update(payload).eq('id', editingId);
