@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Telescope, Settings2, Info, ChevronDown, ChevronUp } from 'lucide-react';
+import { LiveRateCalculator, defaultSymbolFor, type Snapshot as RateSnap } from '@/components/LiveRateCalculator';
 
 // ---------------------------------------------------------------
 // Long-horizon compounding projection ("to age 65"). Lives next to the
