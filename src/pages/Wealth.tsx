@@ -19,6 +19,7 @@ import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceL
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { CombinedWealthChart, type Snapshot } from '@/components/CombinedWealthChart';
 import { WealthProjectionChart } from '@/components/WealthProjectionChart';
+import { SetWealthTargetDialog } from '@/components/SetWealthTargetDialog';
 
 const ACCOUNT_TYPES = [
   { value: 'roth_ira', label: 'Roth IRA' },
@@ -179,6 +180,7 @@ export default function Wealth() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [scope, setScope] = useState<ModeScope>(() => readPersistedScope('wealth_scope', 'all'));
+  const [targetDialogOpen, setTargetDialogOpen] = useState(false);
   const { data: accounts = [], isLoading } = useQuery({
     queryKey: ['investment_accounts'],
     queryFn: async () => {
@@ -207,6 +209,90 @@ export default function Wealth() {
       })) as Snapshot[];
     },
     enabled: !!user,
+  });
+
+  // ---------------------------------------------------------------
+  // Live YTD contributions per account — recalculated every load by
+  // scanning matching personal expenses against each account's
+  // auto_track_pattern. No button click required.
+  // ---------------------------------------------------------------
+  const currentYear = new Date().getFullYear();
+  const { data: liveYtdMap = new Map<string, number>() } = useQuery({
+    queryKey: ['contributions_ytd_live', user?.id, currentYear, accounts.map(a => a.id).join(',')],
+    queryFn: async () => {
+      const yearStart = `${currentYear}-01-01`;
+      const yearEnd = `${currentYear}-12-31`;
+      const map = new Map<string, number>();
+      for (const acc of accounts) {
+        const pattern = acc.auto_track_pattern?.trim();
+        if (!pattern) {
+          // Fall back to stored value (manual entry)
+          map.set(acc.id, Number(acc.contributions_ytd) || 0);
+          continue;
+        }
+        const tokens = pattern.split('|').map(t => t.trim()).filter(Boolean);
+        if (tokens.length === 0) {
+          map.set(acc.id, Number(acc.contributions_ytd) || 0);
+          continue;
+        }
+        const orParts: string[] = [];
+        for (const t of tokens) {
+          const safe = t.replace(/[%,]/g, ' ');
+          orParts.push(`description_normalized.ilike.%${safe}%`);
+          orParts.push(`description_raw.ilike.%${safe}%`);
+        }
+        const { data: matches } = await supabase
+          .from('transactions_uploaded')
+          .select('amount')
+          .eq('owner_id', user!.id)
+          .eq('mode', 'personal')
+          .gte('date', yearStart)
+          .lte('date', yearEnd)
+          .or(orParts.join(','));
+        const total = (matches || []).reduce((s, r) => s + Math.abs(Number(r.amount || 0)), 0);
+        map.set(acc.id, total);
+      }
+      return map;
+    },
+    enabled: !!user && accounts.length > 0,
+  });
+
+  // App settings — holds portfolio-wide end-of-year wealth target.
+  const { data: appSettings } = useQuery({
+    queryKey: ['app_settings', user?.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('app_settings')
+        .select('id, wealth_target_amount, wealth_target_year')
+        .eq('owner_id', user!.id)
+        .maybeSingle();
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!user,
+  });
+
+  const saveTarget = useMutation({
+    mutationFn: async ({ amount, year }: { amount: number; year: number }) => {
+      if (appSettings?.id) {
+        const { error } = await supabase
+          .from('app_settings')
+          .update({ wealth_target_amount: amount, wealth_target_year: year })
+          .eq('id', appSettings.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase
+          .from('app_settings')
+          .insert({ owner_id: user!.id, wealth_target_amount: amount, wealth_target_year: year });
+        if (error) throw error;
+      }
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['app_settings', user?.id] });
+      setTargetDialogOpen(false);
+      toast.success('Target saved');
+    },
+    onError: (e: any) => toast.error(e.message),
   });
 
   const upsertSnapshot = useMutation({
@@ -415,8 +501,21 @@ export default function Wealth() {
     : accounts.filter(a => (a.mode || 'personal') === scope);
 
   const totalBalance = scopedAccounts.reduce((s, a) => s + Number(a.current_balance), 0);
-  const totalYtd = scopedAccounts.reduce((s, a) => s + Number(a.contributions_ytd), 0);
-  const totalYearlyTarget = scopedAccounts.reduce((s, a) => s + Number(a.contribution_target_yearly), 0);
+  // Live YTD: sum from the live map (auto-calculated from matching expenses).
+  const totalYtd = scopedAccounts.reduce((s, a) => s + (liveYtdMap.get(a.id) ?? Number(a.contributions_ytd) ?? 0), 0);
+  const perAccountTargetSum = scopedAccounts.reduce((s, a) => s + Number(a.contribution_target_yearly), 0);
+  // Portfolio-wide EOY target overrides per-account sum when set.
+  const eoyTargetAmount = Number(appSettings?.wealth_target_amount || 0);
+  const eoyTargetYear = Number(appSettings?.wealth_target_year || new Date().getFullYear());
+  const totalYearlyTarget = eoyTargetAmount > 0 ? eoyTargetAmount : perAccountTargetSum;
+  const targetProgressPct = totalYearlyTarget > 0 ? Math.min(100, (totalYtd / totalYearlyTarget) * 100) : 0;
+  const targetRemaining = Math.max(0, totalYearlyTarget - totalYtd);
+  const monthsLeftInTargetYear = (() => {
+    const now = new Date();
+    if (eoyTargetYear > now.getFullYear()) return (eoyTargetYear - now.getFullYear()) * 12 + (12 - now.getMonth());
+    if (eoyTargetYear === now.getFullYear()) return Math.max(1, 12 - now.getMonth());
+    return 0;
+  })();
 
   // Side-by-side personal vs business splits when "All" is active.
   const personalBalance = accounts.filter(a => (a.mode || 'personal') === 'personal').reduce((s, a) => s + Number(a.current_balance), 0);
@@ -493,14 +592,46 @@ export default function Wealth() {
               <TrendingUp className="h-3.5 w-3.5 text-primary" />
               <CardTitle className="text-[11px] font-medium text-muted-foreground">Contributions YTD</CardTitle>
             </CardHeader>
-            <CardContent className="p-3 pt-0"><span className="text-lg font-bold text-foreground">{fmt(totalYtd)}</span></CardContent>
+            <CardContent className="p-3 pt-0">
+              <span className="text-lg font-bold text-foreground">{fmt(totalYtd)}</span>
+              <div className="mt-1 text-[10px] text-muted-foreground">
+                Auto-calculated from {currentYear} personal expenses
+              </div>
+            </CardContent>
           </Card>
-          <Card>
-            <CardHeader className="p-3 pb-1 flex flex-row items-center gap-2 space-y-0">
-              <Target className="h-3.5 w-3.5 text-primary" />
-              <CardTitle className="text-[11px] font-medium text-muted-foreground">Yearly Target</CardTitle>
+          <Card
+            onClick={() => setTargetDialogOpen(true)}
+            className="cursor-pointer transition-all hover:ring-1 hover:ring-primary/40 hover:bg-accent/30"
+            title="Click to set or edit your end-of-year wealth target"
+          >
+            <CardHeader className="p-3 pb-1 flex flex-row items-center justify-between gap-2 space-y-0">
+              <div className="flex items-center gap-2">
+                <Target className="h-3.5 w-3.5 text-primary" />
+                <CardTitle className="text-[11px] font-medium text-muted-foreground">
+                  {eoyTargetAmount > 0 ? `EOY ${eoyTargetYear} Target` : 'Yearly Target'}
+                </CardTitle>
+              </div>
+              <Pencil className="h-3 w-3 text-muted-foreground/60" />
             </CardHeader>
-            <CardContent className="p-3 pt-0"><span className="text-lg font-bold text-foreground">{fmt(totalYearlyTarget)}</span></CardContent>
+            <CardContent className="p-3 pt-0">
+              {totalYearlyTarget > 0 ? (
+                <>
+                  <span className="text-lg font-bold text-foreground">{fmt(totalYearlyTarget)}</span>
+                  <Progress value={targetProgressPct} className="h-1 mt-1.5" />
+                  <div className="mt-1 flex items-center justify-between text-[10px] text-muted-foreground">
+                    <span>{fmt(targetRemaining)} to go</span>
+                    {monthsLeftInTargetYear > 0 && (
+                      <span>~{fmt(targetRemaining / monthsLeftInTargetYear)}/mo · {monthsLeftInTargetYear}mo left</span>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <span className="text-lg font-bold text-muted-foreground/60 italic">Set target</span>
+                  <div className="mt-1 text-[10px] text-muted-foreground">Click to set EOY {currentYear} goal</div>
+                </>
+              )}
+            </CardContent>
           </Card>
         </div>
 
@@ -551,8 +682,9 @@ export default function Wealth() {
             <h2 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">{g.label}</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
               {g.accounts.map(a => {
+                const liveYtd = liveYtdMap.get(a.id) ?? Number(a.contributions_ytd) ?? 0;
                 const pct = a.contribution_target_yearly > 0
-                  ? Math.min(100, (Number(a.contributions_ytd) / Number(a.contribution_target_yearly)) * 100)
+                  ? Math.min(100, (liveYtd / Number(a.contribution_target_yearly)) * 100)
                   : 0;
                 return (
                   <Card key={a.id} className="relative group">
@@ -580,15 +712,17 @@ export default function Wealth() {
                       {a.contribution_target_yearly > 0 ? (
                         <div className="space-y-1">
                           <div className="flex justify-between text-[10px] text-muted-foreground">
-                            <span>{fmt(Number(a.contributions_ytd))} contributed</span>
+                            <span>{fmt(liveYtd)} contributed</span>
                             <span>{fmt(Number(a.contribution_target_yearly))} target</span>
                           </div>
                           <Progress value={pct} className="h-1.5" />
                         </div>
                       ) : a.contribution_target_monthly > 0 ? (
-                        <p className="text-[10px] text-muted-foreground">Monthly target: {fmt(Number(a.contribution_target_monthly))}</p>
-                      ) : Number(a.contributions_ytd) > 0 && (
-                        <p className="text-[10px] text-muted-foreground">{fmt(Number(a.contributions_ytd))} contributed YTD</p>
+                        <p className="text-[10px] text-muted-foreground">
+                          Monthly target: {fmt(Number(a.contribution_target_monthly))}{liveYtd > 0 ? ` · ${fmt(liveYtd)} YTD` : ''}
+                        </p>
+                      ) : liveYtd > 0 && (
+                        <p className="text-[10px] text-muted-foreground">{fmt(liveYtd)} contributed YTD</p>
                       )}
 
                       {/* Snapshot-driven growth chart + inline editor */}
@@ -773,6 +907,17 @@ export default function Wealth() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <SetWealthTargetDialog
+        open={targetDialogOpen}
+        onOpenChange={setTargetDialogOpen}
+        currentAmount={eoyTargetAmount}
+        currentYear={eoyTargetYear}
+        ytdContributed={totalYtd}
+        currentBalance={totalBalance}
+        onSave={(amount, year) => saveTarget.mutate({ amount, year })}
+        saving={saveTarget.isPending}
+      />
     </div>
   );
 }

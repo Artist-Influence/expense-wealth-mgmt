@@ -158,6 +158,8 @@ export type Database = {
           personal_suggest_threshold: number
           prevent_exact_duplicates: boolean
           updated_at: string
+          wealth_target_amount: number
+          wealth_target_year: number
         }
         Insert: {
           ai_enabled?: boolean
@@ -174,6 +176,8 @@ export type Database = {
           personal_suggest_threshold?: number
           prevent_exact_duplicates?: boolean
           updated_at?: string
+          wealth_target_amount?: number
+          wealth_target_year?: number
         }
         Update: {
           ai_enabled?: boolean
@@ -190,6 +194,8 @@ export type Database = {
           personal_suggest_threshold?: number
           prevent_exact_duplicates?: boolean
           updated_at?: string
+          wealth_target_amount?: number
+          wealth_target_year?: number
         }
         Relationships: []
       }

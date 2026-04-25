@@ -1,50 +1,68 @@
-## Goal
-Make wealth projections to age 65 use real-time, per-account live market data — auto-seeded from each account's actual holdings basket, compounding monthly, with a realized-vs-benchmark callout.
+## Problem
 
-## Holdings captured
+The two summary cards show $0 even though the data is there:
 
-**Gemini ($11,877.62 total):** BTC 40%, XRP 36%, ETH 12%, SOL 12% (liquid + staked combined).
+- **Contributions YTD**: shows $0 because `contributions_ytd` in the DB is 0 for every account. The card reads stored values instead of calculating live. The "Sync from Expenses" button writes those values, but you've never clicked it (and shouldn't have to).
 
-**Dub ($20,121.51 total, 4 portfolios):**
-- Stargate $15,725.69 (78%) — AI/semi infra, 92% Tech (MU/NVDA/AMD/TSM/AVGO/ASML/MSFT)
-- Pelosi $3,258.52 (16%) — congressional, 64% Tech / 26% Utilities
-- Infinity $843.38 (4%) — space economy, very speculative
-- Trump $293.92 (1.5%) — Trump-linked, very speculative
+  Confirmed in the DB — your real 2026 contributions are sitting in `transactions_uploaded`:
+  - Gemini: **$5,600** (6 transfers)
+  - Wealthfront: **$6,600** (7 transfers)
+  - Dub: **$5,400** (3 transfers)
+  - Pokémon/TCGPlayer: **$445.60** (2 transfers)
+  - **Total YTD: ~$18,045.60**
 
-**Collectr (Pokémon):** awaiting category split → defaults to 10%/yr static.
+- **Yearly Target**: shows $0 because no per-account `contribution_target_yearly` is set, and there is no place to set a portfolio-wide end-of-year target. The number it shows today is just the sum of empty per-account fields.
 
-## Changes
+## Fix
 
-### 1. New `src/lib/account-baskets.ts`
-Centralized map of account-name/platform → benchmark basket string + per-asset-class static rates.
+### 1. Contributions YTD — make it always live, no button required
 
-- `gemini` → `basket:BTC-USD:0.40,XRP-USD:0.36,ETH-USD:0.12,SOL-USD:0.12`
-- `dub` → weighted Dub blend: `basket:SMH:0.55,QQQ:0.32,XLU:0.08,ARKX:0.05` (Stargate-dominant semis + Pelosi tech/utilities + Infinity space, Trump folded into QQQ weight)
-- `wealthfront` / `s&p` → `^GSPC`
-- `collectr` → static 10%/yr (no live feed)
-- Resolution: case-insensitive substring match on `account_name` then `platform`
+In `src/pages/Wealth.tsx`, replace the stored-field calculation with a live SQL aggregation that runs on page load:
 
-### 2. Expand `LiveRateCalculator.tsx` symbol presets
-Add `XRP-USD`, `SMH` (semis ETF), `ARKX` (space ETF), `XLU` (utilities ETF), plus pre-built "Gemini basket (your mix)" and "Dub basket (your mix)" entries.
+- New `useQuery` keyed `['contributions_ytd_live', user.id, year]` that runs the same logic as the "Sync from Expenses" button: for each account with an `auto_track_pattern`, sum `ABS(amount)` from `transactions_uploaded` where `mode='personal'`, `date BETWEEN <year>-01-01 AND <year>-12-31`, and description matches any of the `|`-split tokens.
+- Returns a `Map<account_id, number>`.
+- Card reads `Array.from(map.values()).reduce(...)` for the total, scope-filtered by which accounts are visible.
+- Per-account cards also read from this map so the "$X contributed" line under each account is live too.
+- Keep the "Sync from Expenses" button — it now just persists the live values to `contributions_ytd` (so the projection chart, which reads the stored field for monthly-pace estimation, stays accurate). Auto-call it once on load if the stored values are stale (>$1 drift) so the projection chart self-heals without a click.
 
-### 3. Auto-apply live 10y CAGR in `WealthProjectionChart.tsx`
-- On account first-render: look up basket → fetch via existing `market-rates` edge function → seed projection rate to **10y CAGR**
-- Track `userOverrode` flag per account in local state; once user edits, never auto-overwrite
-- Badge in assumptions row:
-  - `auto · 14.2% (SMH 10y)` (live-seeded)
-  - `manual · 12.0%` (user-locked)
-- Realized-vs-benchmark delta row: `realized +47.2%/yr · benchmark +38.1% · +9.1pp ahead` (color-coded)
+Tooltip on the card: "Sum of personal expenses YTD matching each account's auto-track pattern. Updates live."
 
-### 4. Verify allocation + projection use live monthly data (read-only audit)
-Confirm `Allocations.tsx` and `WealthProjectionChart.tsx` source current balances from `account_balance_snapshots` (latest per account) and compound monthly to age 65. Fix only if broken. No new DB writes.
+### 2. Yearly Target — clickable card → end-of-2026 portfolio target
 
-## Out of scope (this pass)
-- Persisting per-account basket overrides to DB (lives in code map for now; trivial to migrate to a `projection_settings` table later if you want UI-editable baskets)
-- Pokémon category-weighted rate (need your sealed/vintage/graded split first)
-- Real-time per-symbol holdings tracking inside Dub portfolios (Dub doesn't expose a public API; basket is a defensible proxy)
+The card currently sums per-account `contribution_target_yearly`. We'll keep that as a fallback, but add a portfolio-level override stored in a new lightweight settings row.
+
+- **Schema (migration)**: add two columns to `app_settings`:
+  - `wealth_target_amount NUMERIC NOT NULL DEFAULT 0`
+  - `wealth_target_year INTEGER NOT NULL DEFAULT 2026`
+  
+  (Reusing `app_settings` since it's already per-owner with RLS — no new table needed.)
+
+- **Card behavior**:
+  - Whole card becomes clickable (cursor-pointer + hover ring).
+  - Shows `$X target by EOY 2026` when set, or `Set 2026 target` ghost text when unset.
+  - Below the number, a thin progress bar: `YTD / target` with `$X to go · Y months left` caption.
+
+- **Click → modal** (`SetWealthTargetDialog`):
+  - "End-of-year target" amount input.
+  - Year selector (default 2026, allow 2027+ for forward planning).
+  - Shows live math: "You're at $X YTD. To hit $Y by Dec 2026, contribute ~$Z/month for the next N months."
+  - Save button writes to `app_settings.wealth_target_amount` + `wealth_target_year`.
+
+- **Display logic**:
+  - If `wealth_target_amount > 0`: show that number, label as "EOY {year} Target".
+  - Else: fall back to summed per-account targets, label "Yearly Target (per-account)".
+
+### 3. Per-account "Contributions YTD" field in the edit modal
+
+Becomes read-only / informational, since it's now derived. Replaces with a small caption: "Auto-calculated from expenses matching `{auto_track_pattern}`. Edit the pattern to adjust." (Keeps the field editable as a manual override only when no pattern is set.)
+
+## Out of scope
+
+- Changing the per-account `contribution_target_yearly` UX (still editable in the per-account modal for fine-grained planning).
+- Any change to projection chart logic — it still uses `contributions_ytd` from the DB, which the auto-sync keeps fresh.
 
 ## Files
-- `src/lib/account-baskets.ts` (new)
-- `src/components/LiveRateCalculator.tsx`
-- `src/components/WealthProjectionChart.tsx`
-- `src/pages/Allocations.tsx` (read-only verify; edit only if needed)
+
+- `src/pages/Wealth.tsx` — live YTD query, clickable target card, fallback logic, edit-modal copy tweak
+- `src/components/SetWealthTargetDialog.tsx` (new) — target-setting modal with monthly-pace math
+- Migration: add `wealth_target_amount` + `wealth_target_year` to `app_settings`

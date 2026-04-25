@@ -1,0 +1,3 @@
+ALTER TABLE public.app_settings
+  ADD COLUMN IF NOT EXISTS wealth_target_amount NUMERIC NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS wealth_target_year INTEGER NOT NULL DEFAULT 2026;
