@@ -42,6 +42,7 @@ const PALETTE = [
 
 const AGE_KEY = 'wealth_user_age';
 const ASSUMP_KEY = 'wealth_projection_assumptions_v1';
+const OVERRIDE_KEY = 'wealth_projection_user_overrides_v1';
 const TARGET_AGE = 65;
 
 type Assumption = {
@@ -54,6 +55,10 @@ type AssumptionMap = Record<string, Assumption>;
 
 // ---- Heuristic defaults --------------------------------------------------
 function defaultRateFor(acc: ProjAccount): number {
+  // Prefer the static rate from the basket resolver when it's a no-live-feed asset.
+  const basket = resolveBasket(acc);
+  if (basket.source === 'static' && basket.static_rate != null) return basket.static_rate;
+
   const name = (acc.account_name + ' ' + (acc.platform || '')).toLowerCase();
   if (acc.account_type === 'crypto' || name.includes('gemini')) return 12;
   if (acc.account_type === 'collectibles' || name.includes('pokemon') || name.includes('pokémon')) return 7;
