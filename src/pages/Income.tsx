@@ -297,6 +297,8 @@ export default function Income() {
           amount: normalizedAmount,
           income_type: classification.income_type,
           taxable_status: classification.taxable_status,
+          // Honor user-selected mode for the import; the classifier's suggested_mode is a fallback hint
+          mode: csvImportMode,
           status: classification.confidence >= 80 ? 'auto_classified' : 'needs_review',
           source_file_name: file.name,
         });
