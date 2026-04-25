@@ -236,6 +236,7 @@ export type Database = {
           income_type: string
           linked_expense_id: string | null
           linked_reimbursement_group_id: string | null
+          mode: string
           notes: string | null
           owner_id: string
           source_account_name: string | null
@@ -255,6 +256,7 @@ export type Database = {
           income_type?: string
           linked_expense_id?: string | null
           linked_reimbursement_group_id?: string | null
+          mode?: string
           notes?: string | null
           owner_id: string
           source_account_name?: string | null
@@ -274,6 +276,7 @@ export type Database = {
           income_type?: string
           linked_expense_id?: string | null
           linked_reimbursement_group_id?: string | null
+          mode?: string
           notes?: string | null
           owner_id?: string
           source_account_name?: string | null

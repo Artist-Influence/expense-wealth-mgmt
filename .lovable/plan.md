@@ -1,41 +1,91 @@
-## Fix: BoA CSV import fails on summary block above transaction header
+## Income — split Personal vs Business
 
-### What's broken
+### Problem
 
-Bank of America (and similar bank/credit card) CSVs include a 5-row **summary block** at the top before the actual transaction table:
+The Income page treats everything as one undifferentiated stream. There's no `mode` (Personal/Business) column on `income_transactions`, no toggle on the page, and the existing Personal/Business switch on Insights doesn't filter income at all — so business revenue and personal payroll are mixed together everywhere.
 
+Current data: 128 income rows, 79 of them tagged `income_type = business_revenue` ($225K), the rest are mixed personal payroll/refunds/transfers ($73K).
+
+### Fix overview
+
+1. **DB**: add a `mode` column to `income_transactions` and backfill existing rows from `income_type`.
+2. **Income page**: add mode toggle (All / Personal / Business), capture mode on CSV import + manual entry, and split summary cards.
+3. **Insights**: wire the existing Personal/Business toggle to also filter income.
+
+### 1. Database migration
+
+```sql
+-- Add mode column
+ALTER TABLE income_transactions
+  ADD COLUMN mode text NOT NULL DEFAULT 'personal';
+
+-- Backfill: business_revenue → business; everything else stays personal
+UPDATE income_transactions
+  SET mode = 'business'
+  WHERE income_type = 'business_revenue';
+
+-- Index for fast filtering
+CREATE INDEX idx_income_transactions_owner_mode
+  ON income_transactions(owner_id, mode);
 ```
-Description,,Summary Amt.            ← PapaParse reads THIS as headers
-Beginning balance as of 01/01/2026,,"5,062.08"
-Total credits,,"57,389.88"
-Total debits,,"-61,133.48"
-Ending balance as of 04/24/2026,,"1,318.48"
-                                     ← blank row
-Date,Description,Amount,Running Bal. ← REAL header is here on row 7
-01/01/2026,Beginning balance...
-01/02/2026,Zelle payment to...
+
+This gives a sensible starting state. The user can re-classify any row that was guessed wrong via the new dropdown.
+
+### 2. Income page (`src/pages/Income.tsx`)
+
+**Mode toggle in header** (next to the existing date filter):
+```
+[ All ] [ Personal ] [ Business ]
+```
+- Default: All
+- Persists in component state (no URL persistence needed for now)
+
+**Mode column on the table** between Income Type and Taxable, editable via a small badge dropdown — same pattern as the existing Income Type cell. Personal renders muted, Business renders primary-tinted so it's instantly scannable.
+
+**Summary cards**: when filtered to "All", split the existing "Total Inflows" card into two: **Personal Income** + **Business Income**. When filtered to Personal or Business, keep the current 6 cards (Total / Taxable / Non-Taxable / Revenue / Payroll / Other) but scoped to the active mode.
+
+**CSV import**: add a small Mode selector inline in the CSV uploader area (Personal / Business). Whatever's selected gets stamped on every row in the import. Default = whatever the page filter is currently set to (or Personal if "All"). The classifier already detects `business_revenue` from descriptions like "stripe", "invoice", etc., so even Personal-mode imports will still surface a "this looks like business revenue — re-tag?" review state.
+
+**Manual entry dialog**: add a Mode select alongside Income Type. Default = current page filter (or Personal).
+
+**Bulk actions**: add "Set Mode → Personal/Business" to the existing bulk action bar (right next to "Set Type"), so the user can re-classify in batch after the backfill.
+
+**Filter logic**: extend the existing `summaryCards` and `filtered` useMemo to apply the mode filter alongside date/type/status/search.
+
+### 3. Insights page (`src/pages/Insights.tsx`)
+
+The page already has a Personal/Business mode toggle that scopes expenses correctly. Update `loadIncome()` to also filter by `mode`:
+
+```ts
+.from('income_transactions')
+.select('date, amount, income_type, taxable_status, status, mode')
+.eq('owner_id', user!.id)
+.eq('mode', mode)   // NEW — tie to the page's existing mode state
 ```
 
-Because PapaParse takes row 1 as the header, the parser sees columns `Description`, `(blank)`, `Summary Amt.` — no Date column, so the import fails with "Cannot import: missing required columns · Missing: Date."
+This single line fixes the mismatch in:
+- Cash Flow Money In card
+- Savings Rate calculation
+- Income vs Expenses chart
+- YoY Income comparison
+- "Where to Save" tax reserve gap suggestion (which is already business-only)
 
-### The fix
+### 4. Income classifier nudge (`src/lib/income-classifier.ts`)
 
-Add a header-detection step in `src/lib/csv-parser.ts` that runs **before** PapaParse:
+Extend the return type to also suggest a default mode based on the matched rule:
+- `business_revenue`, `owner_contribution`, `loan_proceeds` → suggest `'business'`
+- `payroll`, `refund`, `interest`, `tax_refund`, `transfer`, `reimbursement`, `other` → suggest `'personal'`
 
-1. **`findHeaderLineIndex(text)`** — scan the first ~25 lines of the CSV. For each line, do a quick comma-split and check whether the cells contain header-like tokens for **Date + Description** (and ideally Amount). The first line that matches all three is the real transaction header.
-2. **`trimToTransactionHeader(text)`** — slice off everything above that line so PapaParse sees the real header as row 1.
-3. Apply this trim in all three entry points: `previewCsvFile`, `parseCsvFileWithMapping`, and `parseCsvFile`. It runs right after `stripBom`, so it's transparent to the rest of the pipeline.
-4. If no header-like line is found in the first 25 rows (i.e., the CSV is already clean), return the text unchanged. Zero impact on existing well-formed files (Amex, Apple Card, etc.).
-
-### Why this approach
-
-- **One small helper, zero new dependencies.** Reuses the existing `DATE_CANDIDATES`, `DESCRIPTION_CANDIDATES`, `AMOUNT_CANDIDATES` arrays, so when those grow, header detection auto-improves.
-- **Generic** — works for any bank that prepends a summary block (BoA, Chase, Wells Fargo all do this in slightly different shapes), not just BoA-specific.
-- **Safe fallback** — if detection fails, the file is parsed as-is (current behavior).
-- **Belt-and-suspenders** — even after trimming, the existing `isStatementArtifact()` filter still catches any "Beginning balance" rows that appear *inside* the transaction table (BoA repeats it as the first transaction row), so summary text never becomes a transaction.
+This way CSV imports auto-tag mode intelligently when the user picks "All" mode at upload time, and the user only has to fix outliers.
 
 ### Files
 
-- `src/lib/csv-parser.ts` — add `findHeaderLineIndex` + `trimToTransactionHeader` helpers; call `trimToTransactionHeader(stripBom(text))` in all three parse entry points.
+- **DB migration** (new) — add `mode` column + backfill + index
+- `src/pages/Income.tsx` — mode toggle, mode column, mode-aware summary cards, CSV/manual mode capture, bulk mode action
+- `src/pages/Insights.tsx` — `.eq('mode', mode)` in `loadIncome()`
+- `src/lib/income-classifier.ts` — return suggested mode alongside type
 
-No DB changes. No UI changes needed — once parsed correctly, the existing Batch Import Preview dialog will show all required columns mapped (`Date → Date`, `Description → Description`, `Amount → Amount`) and the import button will enable.
+### Out of scope (for later)
+
+- The Settings → Historical Income Seed flow already passes mode to merchant_memory; we won't touch that path. (It doesn't write to `income_transactions` anyway.)
+- Tax page reads income aggregately for reserve math — leave as-is for now since it only cares about taxable totals; can revisit if user wants strict separation there too.
