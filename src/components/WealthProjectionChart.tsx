@@ -311,13 +311,23 @@ export function WealthProjectionChart({
                     <span className="h-2 w-2 rounded-full shrink-0" style={{ background: colorFor(a.id) }} />
                     <span className="truncate">{a.account_name}</span>
                   </div>
-                  <div className="col-span-3">
+                  <div className="col-span-3 flex items-center gap-1">
                     <Input
                       type="number"
                       step="0.5"
                       value={ass.annual_rate_pct}
                       onChange={e => updateAssumption(a.id, { annual_rate_pct: Number(e.target.value) || 0 })}
                       className="h-6 text-[11px] px-1.5"
+                    />
+                    <LiveRateCalculator
+                      accountName={a.account_name}
+                      symbol={ass.benchmark_symbol || defaultSymbolFor(a)}
+                      onSymbolChange={(sym) => updateAssumption(a.id, { benchmark_symbol: sym })}
+                      currentRate={ass.annual_rate_pct}
+                      onApply={(r) => updateAssumption(a.id, { annual_rate_pct: r })}
+                      snapshots={snapshotsByAccount[a.id] || []}
+                      contributionsYtd={a.contributions_ytd}
+                      contributionTargetMonthly={a.contribution_target_monthly}
                     />
                   </div>
                   <div className="col-span-3">
