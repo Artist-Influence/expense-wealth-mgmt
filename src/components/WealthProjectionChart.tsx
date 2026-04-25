@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Telescope, Settings2, Info, ChevronDown, ChevronUp } from 'lucide-react';
+import { LiveRateCalculator, defaultSymbolFor, type Snapshot as RateSnap } from '@/components/LiveRateCalculator';
 
 // ---------------------------------------------------------------
 // Long-horizon compounding projection ("to age 65"). Lives next to the
@@ -45,6 +46,7 @@ type Assumption = {
   annual_rate_pct: number; // e.g. 8 = 8%
   monthly_contribution: number; // dollars
   stop_age: number;
+  benchmark_symbol?: string; // e.g. ^GSPC, BTC-USD, basket:..., or __none__
 };
 type AssumptionMap = Record<string, Assumption>;
 
@@ -88,7 +90,14 @@ const fmtUsd = (n: number) => {
   return `$${Math.round(n).toLocaleString()}`;
 };
 
-export function WealthProjectionChart({ accounts }: { accounts: ProjAccount[] }) {
+export function WealthProjectionChart({
+  accounts,
+  snapshotsByAccount = {},
+}: {
+  accounts: ProjAccount[];
+  /** Map of account id -> sorted snapshot history. Powers realized-rate calc. */
+  snapshotsByAccount?: Record<string, RateSnap[]>;
+}) {
   const [age, setAge] = useState<number>(() => {
     const v = Number(localStorage.getItem(AGE_KEY));
     return Number.isFinite(v) && v > 0 ? v : 30;
@@ -107,7 +116,12 @@ export function WealthProjectionChart({ accounts }: { accounts: ProjAccount[] })
           annual_rate_pct: defaultRateFor(a),
           monthly_contribution: defaultMonthlyContribution(a),
           stop_age: TARGET_AGE,
+          benchmark_symbol: defaultSymbolFor(a),
         };
+        changed = true;
+      } else if (!next[a.id].benchmark_symbol) {
+        // Backfill the symbol field for users who already had assumptions saved.
+        next[a.id] = { ...next[a.id], benchmark_symbol: defaultSymbolFor(a) };
         changed = true;
       }
     }
@@ -297,13 +311,23 @@ export function WealthProjectionChart({ accounts }: { accounts: ProjAccount[] })
                     <span className="h-2 w-2 rounded-full shrink-0" style={{ background: colorFor(a.id) }} />
                     <span className="truncate">{a.account_name}</span>
                   </div>
-                  <div className="col-span-3">
+                  <div className="col-span-3 flex items-center gap-1">
                     <Input
                       type="number"
                       step="0.5"
                       value={ass.annual_rate_pct}
                       onChange={e => updateAssumption(a.id, { annual_rate_pct: Number(e.target.value) || 0 })}
                       className="h-6 text-[11px] px-1.5"
+                    />
+                    <LiveRateCalculator
+                      accountName={a.account_name}
+                      symbol={ass.benchmark_symbol || defaultSymbolFor(a)}
+                      onSymbolChange={(sym) => updateAssumption(a.id, { benchmark_symbol: sym })}
+                      currentRate={ass.annual_rate_pct}
+                      onApply={(r) => updateAssumption(a.id, { annual_rate_pct: r })}
+                      snapshots={snapshotsByAccount[a.id] || []}
+                      contributionsYtd={a.contributions_ytd}
+                      contributionTargetMonthly={a.contribution_target_monthly}
                     />
                   </div>
                   <div className="col-span-3">
