@@ -72,6 +72,11 @@ export default function Tax() {
   const [deductionRows, setDeductionRows] = useState<DeductionRow[]>([]);
   const [taxPayments, setTaxPayments] = useState<TaxPaymentRow[]>([]);
   const [unreviewedDeductionCount, setUnreviewedDeductionCount] = useState(0);
+  // Personal vs Business scope. Persisted across sessions.
+  const [scope, setScope] = useState<'personal' | 'business' | 'all'>(() => {
+    if (typeof window === 'undefined') return 'personal';
+    return (localStorage.getItem('tax_scope') as 'personal' | 'business' | 'all') || 'personal';
+  });
 
   // Draft for setup/edit form
   const [draft, setDraft] = useState<Partial<TaxProfile>>({});
@@ -83,7 +88,11 @@ export default function Tax() {
   useEffect(() => {
     if (!user) return;
     loadAll();
-  }, [user]);
+  }, [user, scope]);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') localStorage.setItem('tax_scope', scope);
+  }, [scope]);
 
   async function loadAll() {
     setLoading(true);
@@ -104,12 +113,14 @@ export default function Tax() {
   }
 
   async function loadIncome() {
-    const { data } = await supabase
+    let q = supabase
       .from('income_transactions')
       .select('income_type, taxable_status, amount')
       .eq('owner_id', user!.id)
       .gte('date', yearStart)
       .lte('date', yearEnd);
+    if (scope !== 'all') q = q.eq('mode', scope);
+    const { data } = await q;
     setIncomeRows((data as IncomeRow[]) || []);
   }
 
