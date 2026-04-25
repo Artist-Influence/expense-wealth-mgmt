@@ -160,6 +160,8 @@ export default function Wealth() {
       is_active: a.is_active,
       notes: a.notes || '',
       mode: (a.mode as 'personal' | 'business') || 'personal',
+      starting_balance_year: Number(a.starting_balance_year || 0),
+      auto_track_pattern: a.auto_track_pattern || '',
     });
     setDialogOpen(true);
   };
