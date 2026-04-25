@@ -171,7 +171,7 @@ export default function Accountant() {
         return {
           headers: ['Date', 'Description', 'Amount', 'Income Type', 'Taxable', 'Source', 'Is Earning', 'Notes'],
           rows: (income || []).map(i => {
-            const isEarning = !['transfer', 'refund', 'loan_proceeds', 'owner_contribution'].includes(i.income_type);
+            const isEarning = !(NON_EARNING_TYPES as readonly string[]).includes(i.income_type);
             return [i.date, i.description_normalized || i.description_raw, String(i.amount ?? 0), i.income_type, i.taxable_status, i.source_account_name, isEarning ? 'Yes' : 'No', i.notes];
           }),
         };
