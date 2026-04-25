@@ -14,6 +14,7 @@ import { Badge } from '@/components/ui/badge';
 import { Plus, Pencil, TrendingUp, Wallet, Target, DollarSign, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
+import { ModeScopeToggle, readPersistedScope, type ModeScope } from '@/components/ModeScopeToggle';
 
 const ACCOUNT_TYPES = [
   { value: 'roth_ira', label: 'Roth IRA' },
@@ -46,6 +47,7 @@ type Account = {
   is_active: boolean;
   notes: string | null;
   updated_at: string;
+  mode: 'personal' | 'business';
 };
 
 const emptyForm = {
@@ -59,6 +61,7 @@ const emptyForm = {
   priority: 0,
   is_active: true,
   notes: '',
+  mode: 'personal' as 'personal' | 'business',
 };
 
 export default function Wealth() {
@@ -67,7 +70,7 @@ export default function Wealth() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm);
-
+  const [scope, setScope] = useState<ModeScope>(() => readPersistedScope('wealth_scope', 'all'));
   const { data: accounts = [], isLoading } = useQuery({
     queryKey: ['investment_accounts'],
     queryFn: async () => {
@@ -140,25 +143,35 @@ export default function Wealth() {
       priority: a.priority,
       is_active: a.is_active,
       notes: a.notes || '',
+      mode: (a.mode as 'personal' | 'business') || 'personal',
     });
     setDialogOpen(true);
   };
 
   const openAdd = () => {
     setEditingId(null);
-    setForm(emptyForm);
+    setForm({ ...emptyForm, mode: scope === 'business' ? 'business' : 'personal' });
     setDialogOpen(true);
   };
 
-  const totalBalance = accounts.reduce((s, a) => s + Number(a.current_balance), 0);
-  const totalYtd = accounts.reduce((s, a) => s + Number(a.contributions_ytd), 0);
-  const totalYearlyTarget = accounts.reduce((s, a) => s + Number(a.contribution_target_yearly), 0);
+  // Scope-filtered set powers all summary cards and grouped sections.
+  const scopedAccounts = scope === 'all'
+    ? accounts
+    : accounts.filter(a => (a.mode || 'personal') === scope);
+
+  const totalBalance = scopedAccounts.reduce((s, a) => s + Number(a.current_balance), 0);
+  const totalYtd = scopedAccounts.reduce((s, a) => s + Number(a.contributions_ytd), 0);
+  const totalYearlyTarget = scopedAccounts.reduce((s, a) => s + Number(a.contribution_target_yearly), 0);
+
+  // Side-by-side personal vs business splits when "All" is active.
+  const personalBalance = accounts.filter(a => (a.mode || 'personal') === 'personal').reduce((s, a) => s + Number(a.current_balance), 0);
+  const businessBalance = accounts.filter(a => a.mode === 'business').reduce((s, a) => s + Number(a.current_balance), 0);
 
   const grouped = Object.entries(TYPE_GROUPS)
     .map(([key, g]) => ({
       key,
       label: g.label,
-      accounts: accounts.filter(a => g.types.includes(a.account_type)),
+      accounts: scopedAccounts.filter(a => g.types.includes(a.account_type)),
     }))
     .filter(g => g.accounts.length > 0);
 
@@ -178,19 +191,34 @@ export default function Wealth() {
     <div className="min-h-screen bg-background">
       <AppNav />
       <div className="container py-4 space-y-3">
-        <div className="flex items-center justify-between">
-          <h1 className="text-xl font-semibold text-foreground">Wealth</h1>
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-3 flex-wrap">
+            <h1 className="text-xl font-semibold text-foreground">Wealth</h1>
+            <ModeScopeToggle value={scope} onChange={setScope} storageKey="wealth_scope" />
+            <span className="text-[10px] text-muted-foreground">
+              Showing: <span className="text-foreground/80 font-medium">{scope === 'all' ? 'All' : scope === 'business' ? 'Business' : 'Personal'}</span>
+            </span>
+          </div>
           <Button size="sm" className="h-8" onClick={openAdd}><Plus className="h-3.5 w-3.5 mr-1" />Add Account</Button>
         </div>
 
-        {/* Summary cards */}
+        {/* Summary cards (scope-filtered) */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
           <Card>
             <CardHeader className="p-3 pb-1 flex flex-row items-center gap-2 space-y-0">
               <Wallet className="h-3.5 w-3.5 text-primary" />
-              <CardTitle className="text-[11px] font-medium text-muted-foreground">Total Balance</CardTitle>
+              <CardTitle className="text-[11px] font-medium text-muted-foreground">
+                {scope === 'all' ? 'Total Balance' : scope === 'business' ? 'Business Balance' : 'Personal Balance'}
+              </CardTitle>
             </CardHeader>
-            <CardContent className="p-3 pt-0"><span className="text-lg font-bold text-foreground">{fmt(totalBalance)}</span></CardContent>
+            <CardContent className="p-3 pt-0">
+              <span className="text-lg font-bold text-foreground">{fmt(totalBalance)}</span>
+              {scope === 'all' && (
+                <div className="mt-1 text-[10px] text-muted-foreground">
+                  P {fmt(personalBalance)} · B {fmt(businessBalance)}
+                </div>
+              )}
+            </CardContent>
           </Card>
           <Card>
             <CardHeader className="p-3 pb-1 flex flex-row items-center gap-2 space-y-0">
@@ -231,6 +259,12 @@ export default function Wealth() {
                       <div className="min-w-0">
                         <CardTitle className="text-sm font-semibold text-foreground truncate">{a.account_name}</CardTitle>
                         <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                          <Badge
+                            variant="outline"
+                            className={`text-[10px] px-1.5 py-0 ${a.mode === 'business' ? 'bg-primary/15 text-primary border-primary/25' : 'bg-secondary text-foreground border-border'}`}
+                          >
+                            {a.mode === 'business' ? 'Business' : 'Personal'}
+                          </Badge>
                           <Badge variant="secondary" className="text-[10px] px-1.5 py-0">{typeLabel(a.account_type)}</Badge>
                           {a.platform && <span className="text-[10px] text-muted-foreground">{a.platform}</span>}
                           {!a.is_active && <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-destructive border-destructive/30">Inactive</Badge>}
@@ -275,16 +309,26 @@ export default function Wealth() {
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div className="space-y-1">
+                <Label className="text-xs">Scope</Label>
+                <Select value={form.mode} onValueChange={v => setForm(f => ({ ...f, mode: v as 'personal' | 'business' }))}>
+                  <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="personal">Personal</SelectItem>
+                    <SelectItem value="business">Business</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
                 <Label className="text-xs">Type</Label>
                 <Select value={form.account_type} onValueChange={v => setForm(f => ({ ...f, account_type: v }))}>
                   <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
                   <SelectContent>{ACCOUNT_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Platform</Label>
-                <Input className="h-8 text-sm" value={form.platform} onChange={e => setForm(f => ({ ...f, platform: e.target.value }))} placeholder="Fidelity, Wealthfront…" />
-              </div>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Platform</Label>
+              <Input className="h-8 text-sm" value={form.platform} onChange={e => setForm(f => ({ ...f, platform: e.target.value }))} placeholder="Fidelity, Wealthfront…" />
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div className="space-y-1">

@@ -124,6 +124,14 @@ export default function Expenses() {
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [showPreview, setShowPreview] = useState(false);
 
+  // Cross-mode totals so the comparative summary strip always shows Personal vs Business
+  // side-by-side regardless of which mode tab the spreadsheet is on.
+  const [crossModeTotals, setCrossModeTotals] = useState<{
+    personalCashOut: number; businessCashOut: number;
+    truePersonal: number; trueBusiness: number;
+    pendingReimbursable: number;
+  }>({ personalCashOut: 0, businessCashOut: 0, truePersonal: 0, trueBusiness: 0, pendingReimbursable: 0 });
+
   const isProcessing = fileQueue.some(f => !['done', 'error'].includes(f.status));
   const totalFiles = fileQueue.length;
   const completedFiles = fileQueue.filter(f => f.status === 'done' || f.status === 'error').length;
@@ -133,8 +141,45 @@ export default function Expenses() {
   const categoryMode = mode === 'reimbursable_work' ? 'personal' : mode;
 
   useEffect(() => {
-    if (user) { loadTransactions(); loadCategories(); }
+    if (user) { loadTransactions(); loadCategories(); loadCrossModeTotals(); }
   }, [user, mode]);
+
+  // Lightweight aggregate fetch — we only need the math fields, not the full row.
+  // Pulls every txn (paged) once, computes all 5 aggregates client-side.
+  const loadCrossModeTotals = async () => {
+    if (!user) return;
+    let from = 0;
+    const pageSize = 1000;
+    type Row = { amount: number | null; transaction_mode: string | null; mode: string | null;
+      is_split_parent: boolean | null; is_transfer: boolean | null;
+      exclude_from_expense_totals: boolean | null; is_non_expense_cash_movement: boolean | null;
+      parse_status: string | null; counts_toward_true_personal_spend: boolean | null;
+      counts_toward_true_business_spend: boolean | null; is_reimbursable: boolean | null;
+      reimbursement_status: string | null; };
+    let all: Row[] = [];
+    let hasMore = true;
+    while (hasMore) {
+      const { data } = await supabase
+        .from('transactions_uploaded')
+        .select('amount, transaction_mode, mode, is_split_parent, is_transfer, exclude_from_expense_totals, is_non_expense_cash_movement, parse_status, counts_toward_true_personal_spend, counts_toward_true_business_spend, is_reimbursable, reimbursement_status')
+        .eq('owner_id', user.id)
+        .range(from, from + pageSize - 1);
+      if (data) all = [...all, ...(data as unknown as Row[])];
+      hasMore = (data?.length ?? 0) === pageSize;
+      from += pageSize;
+    }
+    const active = all.filter(r => !r.is_split_parent && r.parse_status !== 'parse_error');
+    const isOutflow = (r: Row) => !r.is_non_expense_cash_movement && !r.is_transfer && !r.exclude_from_expense_totals;
+    const sum = (rows: Row[]) => rows.reduce((s, r) => s + Math.abs(Number(r.amount) || 0), 0);
+
+    setCrossModeTotals({
+      personalCashOut: sum(active.filter(r => (r.transaction_mode || r.mode) === 'personal' && isOutflow(r))),
+      businessCashOut: sum(active.filter(r => (r.transaction_mode || r.mode) === 'business' && isOutflow(r))),
+      truePersonal: sum(active.filter(r => r.counts_toward_true_personal_spend)),
+      trueBusiness: sum(active.filter(r => r.counts_toward_true_business_spend)),
+      pendingReimbursable: sum(active.filter(r => r.is_reimbursable && r.reimbursement_status !== 'reimbursed')),
+    });
+  };
 
   const loadCategories = async () => {
     const { data } = await supabase
@@ -1395,6 +1440,32 @@ export default function Expenses() {
           </Button>
 
           <span className="text-[11px] text-muted-foreground font-mono">{filtered.length} rows</span>
+        </div>
+
+        {/* Comparative Summary — Personal vs Business at a glance, regardless of active tab */}
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mb-2">
+          <div className="glass-panel-sm p-2.5">
+            <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Personal Cash Out</p>
+            <p className="text-sm font-mono font-semibold text-foreground mt-0.5">{fmtMoney(crossModeTotals.personalCashOut)}</p>
+          </div>
+          <div className="glass-panel-sm p-2.5">
+            <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Business Cash Out</p>
+            <p className="text-sm font-mono font-semibold text-primary mt-0.5">{fmtMoney(crossModeTotals.businessCashOut)}</p>
+          </div>
+          <div className="glass-panel-sm p-2.5">
+            <p className="text-[10px] text-muted-foreground uppercase tracking-wider">True Personal</p>
+            <p className="text-sm font-mono font-semibold text-foreground mt-0.5">{fmtMoney(crossModeTotals.truePersonal)}</p>
+            <p className="text-[9px] text-muted-foreground">Excludes reimbursable</p>
+          </div>
+          <div className="glass-panel-sm p-2.5">
+            <p className="text-[10px] text-muted-foreground uppercase tracking-wider">True Business</p>
+            <p className="text-sm font-mono font-semibold text-primary mt-0.5">{fmtMoney(crossModeTotals.trueBusiness)}</p>
+            <p className="text-[9px] text-muted-foreground">Real business spend</p>
+          </div>
+          <div className="glass-panel-sm p-2.5">
+            <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Pending Reimbursable</p>
+            <p className="text-sm font-mono font-semibold text-warning mt-0.5">{fmtMoney(crossModeTotals.pendingReimbursable)}</p>
+          </div>
         </div>
 
         {/* V2 Stats Row */}

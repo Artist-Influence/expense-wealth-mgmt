@@ -18,6 +18,7 @@ import {
   Receipt, Search, Download, Clock, CheckCheck, Send, AlertTriangle,
   Plus, FolderOpen, ChevronDown
 } from 'lucide-react';
+import { ModeScopeToggle, readPersistedScope, type ModeScope } from '@/components/ModeScopeToggle';
 
 interface ReimbursableTransaction {
   id: string;
@@ -96,6 +97,7 @@ export default function Reimbursements() {
   const [groups, setGroups] = useState<ReimbursementGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<TabFilter>('pending');
+  const [scope, setScope] = useState<ModeScope>(() => readPersistedScope('reimbursements_scope', 'all'));
   const [search, setSearch] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [detailTx, setDetailTx] = useState<ReimbursableTransaction | null>(null);
@@ -146,8 +148,14 @@ export default function Reimbursements() {
     setLoading(false);
   };
 
+  // Scope-filter once; everything (filtered list + stats) flows from this.
+  const scopedTxs = useMemo(() => {
+    if (scope === 'all') return transactions;
+    return transactions.filter(t => (t.mode || 'personal') === scope);
+  }, [transactions, scope]);
+
   const filtered = useMemo(() => {
-    let result = transactions;
+    let result = scopedTxs;
     if (tab === 'pending') result = result.filter(t => ['none', 'pending'].includes(t.reimbursement_status));
     else if (tab === 'submitted') result = result.filter(t => ['submitted', 'approved'].includes(t.reimbursement_status));
     else if (tab === 'reimbursed') result = result.filter(t => ['reimbursed', 'partially_reimbursed'].includes(t.reimbursement_status));
@@ -161,32 +169,32 @@ export default function Reimbursements() {
       );
     }
     return result;
-  }, [transactions, tab, search]);
+  }, [scopedTxs, tab, search]);
 
-  // Stats
+  // Stats — scope-aware so the cards match the current Personal/Business/All view.
   const stats = useMemo(() => {
     const now = new Date();
     const thisMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
-    const pendingTotal = transactions
+    const pendingTotal = scopedTxs
       .filter(t => ['none', 'pending'].includes(t.reimbursement_status))
       .reduce((s, t) => s + Math.abs(t.amount || 0), 0);
 
-    const submittedTotal = transactions
+    const submittedTotal = scopedTxs
       .filter(t => ['submitted', 'approved'].includes(t.reimbursement_status))
       .reduce((s, t) => s + Math.abs(t.amount || 0), 0);
 
-    const reimbursedThisMonth = transactions
+    const reimbursedThisMonth = scopedTxs
       .filter(t => t.reimbursement_status === 'reimbursed' && t.date && t.date.startsWith(thisMonth))
       .reduce((s, t) => s + Math.abs(t.amount || 0), 0);
 
     const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-    const overdueTotal = transactions
+    const overdueTotal = scopedTxs
       .filter(t => t.reimbursement_status === 'submitted' && t.date && t.date < thirtyDaysAgo)
       .reduce((s, t) => s + Math.abs(t.amount || 0), 0);
 
     return { pendingTotal, submittedTotal, reimbursedThisMonth, overdueTotal };
-  }, [transactions]);
+  }, [scopedTxs]);
 
   const toggleSelect = (id: string) => {
     setSelectedIds(prev => {
@@ -372,6 +380,7 @@ export default function Reimbursements() {
             <p className="text-sm text-muted-foreground mt-1">Track expenses you fronted — get your money back.</p>
           </div>
           <div className="flex items-center gap-2">
+            <ModeScopeToggle value={scope} onChange={setScope} storageKey="reimbursements_scope" />
             <Button variant="outline" size="sm" onClick={exportCsv} className="gap-1.5">
               <Download className="h-3.5 w-3.5" /> Export
             </Button>
