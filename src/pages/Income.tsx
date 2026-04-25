@@ -31,6 +31,7 @@ interface IncomeTransaction {
   amount: number | null;
   income_type: string;
   taxable_status: string;
+  mode: string;
   source_account_name: string | null;
   linked_expense_id: string | null;
   linked_reimbursement_group_id: string | null;
