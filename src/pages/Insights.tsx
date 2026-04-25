@@ -844,6 +844,17 @@ export default function Insights() {
                 Business
               </button>
             </div>
+
+            <Select value={reviewMode} onValueChange={(v) => setReviewModePersisted(v as ReviewMode)}>
+              <SelectTrigger className="h-9 w-[180px] bg-card border-border text-xs" title="Which transactions are counted in totals">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="suggested">Approved + suggested</SelectItem>
+                <SelectItem value="manual">Approved only</SelectItem>
+                <SelectItem value="all">Include needs-review</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </div>
 
