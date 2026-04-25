@@ -83,6 +83,15 @@ export default function Insights() {
   const [taxReservePct, setTaxReservePct] = useState<number>(0);
   const [loading, setLoading] = useState(true);
 
+  // Review-mode filter (drives every chart/card)
+  const [reviewMode, setReviewMode] = useState<ReviewMode>(readReviewMode);
+  const COUNTED_STATUSES = useMemo(() => new Set(STATUSES_BY_MODE[reviewMode]), [reviewMode]);
+  const isCounted = (s: string) => COUNTED_STATUSES.has(s);
+  const setReviewModePersisted = (m: ReviewMode) => {
+    setReviewMode(m);
+    if (typeof window !== 'undefined') window.localStorage.setItem(REVIEW_MODE_KEY, m);
+  };
+
   // ─── Date filter (default: This Year) ───
   const _now = new Date();
   const [dateFrom, setDateFrom] = useState<string | null>(`${_now.getFullYear()}-01-01`);
