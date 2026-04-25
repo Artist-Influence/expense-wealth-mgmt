@@ -320,7 +320,18 @@ export default function Tax() {
               {profile.filing_status.replace(/_/g, ' ')} · {profile.city}, {profile.state}
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="inline-flex rounded-md border border-border/40 p-0.5 bg-secondary/40 text-xs">
+              {YEAR_OPTIONS.map(y => (
+                <button
+                  key={y}
+                  onClick={() => setSelectedYear(y)}
+                  className={`px-3 py-1 rounded-sm transition-colors ${selectedYear === y ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                >
+                  {y}
+                </button>
+              ))}
+            </div>
             <div className="inline-flex rounded-md border border-border/40 p-0.5 bg-secondary/40 text-xs">
               {(['personal', 'business', 'all'] as const).map(s => (
                 <button
@@ -337,6 +348,66 @@ export default function Tax() {
             </Button>
           </div>
         </div>
+
+        {/* Income vs Expenses Projection — actuals-driven, P/B side-by-side */}
+        {(() => {
+          const combinedRate = (federalPercent + nysPercent + (cityEnabled ? nycPercent : 0)) / 100;
+          const pNet = Math.max(0, projection.personal.taxable - projection.personal.deductions);
+          const bNet = Math.max(0, projection.business.taxable - projection.business.deductions);
+          const pTax = pNet * combinedRate;
+          const bTax = bNet * combinedRate;
+          return (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">{selectedYear} Projection — Income vs Expenses</CardTitle>
+                <CardDescription className="text-xs">
+                  Net = Taxable income − Deductible expenses. Estimated tax = Net × ({(combinedRate * 100).toFixed(1)}%) at your current Fed + NYS{cityEnabled ? ' + NYC' : ''} rates.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Scope</TableHead>
+                      <TableHead className="text-right">Taxable Income</TableHead>
+                      <TableHead className="text-right">Deductions</TableHead>
+                      <TableHead className="text-right">Net</TableHead>
+                      <TableHead className="text-right">Est. Tax</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    <TableRow>
+                      <TableCell className="font-medium">Personal</TableCell>
+                      <TableCell className="text-right">{fmt(projection.personal.taxable)}</TableCell>
+                      <TableCell className="text-right">−{fmt(projection.personal.deductions)}</TableCell>
+                      <TableCell className="text-right">{fmt(pNet)}</TableCell>
+                      <TableCell className="text-right text-warning">{fmt(pTax)}</TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell className="font-medium">Business</TableCell>
+                      <TableCell className="text-right">{fmt(projection.business.taxable)}</TableCell>
+                      <TableCell className="text-right">−{fmt(projection.business.deductions)}</TableCell>
+                      <TableCell className="text-right">{fmt(bNet)}</TableCell>
+                      <TableCell className="text-right text-warning">{fmt(bTax)}</TableCell>
+                    </TableRow>
+                    <TableRow className="font-semibold border-t-2">
+                      <TableCell>Total</TableCell>
+                      <TableCell className="text-right">{fmt(projection.personal.taxable + projection.business.taxable)}</TableCell>
+                      <TableCell className="text-right">−{fmt(projection.personal.deductions + projection.business.deductions)}</TableCell>
+                      <TableCell className="text-right">{fmt(pNet + bNet)}</TableCell>
+                      <TableCell className="text-right text-destructive">{fmt(pTax + bTax)}</TableCell>
+                    </TableRow>
+                  </TableBody>
+                </Table>
+                {selectedYear > nowYear && (
+                  <p className="text-[11px] text-muted-foreground mt-2">
+                    {selectedYear} has limited or no actuals yet — projections will populate as transactions land.
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          );
+        })()}
 
         {/* Summary Cards */}
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
