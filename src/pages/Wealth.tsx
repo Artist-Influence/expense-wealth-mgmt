@@ -503,7 +503,7 @@ export default function Wealth() {
           </Card>
         </div>
 
-        {/* Combined wealth-over-time chart (scope-aware) */}
+        {/* Combined wealth-over-time chart (scope-aware, starts Jan 2026) */}
         {scopedAccounts.length > 0 && (
           <CombinedWealthChart
             accounts={scopedAccounts.map(a => ({
@@ -513,6 +513,22 @@ export default function Wealth() {
               current_balance: Number(a.current_balance),
             }))}
             snapshots={snapshots.filter(s => scopedAccounts.some(a => a.id === s.account_id))}
+            startDate="2026-01-01"
+          />
+        )}
+
+        {/* Long-horizon compounding projection out to age 65 */}
+        {scopedAccounts.length > 0 && (
+          <WealthProjectionChart
+            accounts={scopedAccounts.filter(a => a.is_active).map(a => ({
+              id: a.id,
+              account_name: a.account_name,
+              account_type: a.account_type,
+              platform: a.platform,
+              current_balance: Number(a.current_balance),
+              contribution_target_monthly: Number(a.contribution_target_monthly),
+              contributions_ytd: Number(a.contributions_ytd),
+            }))}
           />
         )}
 
