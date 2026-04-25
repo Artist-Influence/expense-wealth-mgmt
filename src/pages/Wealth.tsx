@@ -167,12 +167,24 @@ export default function Wealth() {
         notes: values.notes || null,
         auto_track_pattern: values.auto_track_pattern || null,
       };
+      let savedId = editingId;
       if (editingId) {
         const { error } = await supabase.from('investment_accounts').update(payload).eq('id', editingId);
         if (error) throw error;
       } else {
-        const { error } = await supabase.from('investment_accounts').insert(payload);
+        const { data, error } = await supabase.from('investment_accounts').insert(payload).select('id').single();
         if (error) throw error;
+        savedId = data?.id || null;
+      }
+      // Auto-snapshot today's balance so the chart's "Today" point and history stay in sync.
+      if (savedId && Number(payload.current_balance) > 0) {
+        const today = new Date().toISOString().slice(0, 10);
+        await supabase
+          .from('account_balance_snapshots')
+          .upsert(
+            { owner_id: user!.id, account_id: savedId, as_of_date: today, balance: Number(payload.current_balance) },
+            { onConflict: 'account_id,as_of_date' }
+          );
       }
     },
     onSuccess: () => {
