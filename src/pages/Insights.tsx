@@ -828,6 +828,75 @@ export default function Insights() {
 
             {/* ═══════════ SPENDING TAB ═══════════ */}
             <TabsContent value="spending" className="space-y-4">
+              {/* ─── Money In vs Out (Cash Flow) ─── */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="glass-panel p-4">
+                  <div className="flex items-center gap-1.5 mb-1.5">
+                    <ArrowDownRight className="h-3.5 w-3.5 text-success" />
+                    <span className="text-[11px] text-muted-foreground uppercase tracking-wide">Money In</span>
+                  </div>
+                  <p className="text-2xl font-semibold font-mono text-success">{fmt(cashFlow.moneyIn)}</p>
+                  {cashFlow.inChange !== null && (
+                    <p className={`text-[11px] font-mono mt-1 ${cashFlow.inChange >= 0 ? 'text-success' : 'text-destructive'}`}>
+                      {cashFlow.inChange >= 0 ? '↑' : '↓'} {Math.abs(cashFlow.inChange).toFixed(1)}% vs prior
+                    </p>
+                  )}
+                </div>
+                <div className="glass-panel p-4">
+                  <div className="flex items-center gap-1.5 mb-1.5">
+                    <ArrowUpRight className="h-3.5 w-3.5 text-destructive" />
+                    <span className="text-[11px] text-muted-foreground uppercase tracking-wide">Money Out</span>
+                  </div>
+                  <p className="text-2xl font-semibold font-mono text-destructive">{fmt(cashFlow.moneyOut)}</p>
+                  {cashFlow.outChange !== null && (
+                    <p className={`text-[11px] font-mono mt-1 ${cashFlow.outChange <= 0 ? 'text-success' : 'text-destructive'}`}>
+                      {cashFlow.outChange >= 0 ? '↑' : '↓'} {Math.abs(cashFlow.outChange).toFixed(1)}% vs prior
+                    </p>
+                  )}
+                </div>
+                <div className="glass-panel p-4">
+                  <div className="flex items-center gap-1.5 mb-1.5">
+                    <Wallet className={`h-3.5 w-3.5 ${cashFlow.net >= 0 ? 'text-success' : 'text-destructive'}`} />
+                    <span className="text-[11px] text-muted-foreground uppercase tracking-wide">Net</span>
+                  </div>
+                  <p className={`text-2xl font-semibold font-mono ${cashFlow.net >= 0 ? 'text-success' : 'text-destructive'}`}>
+                    {cashFlow.net >= 0 ? '+' : ''}{fmt(cashFlow.net)}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground mt-1">{cashFlow.monthsCovered} mo · in − out</p>
+                </div>
+                <div className="glass-panel p-4">
+                  <div className="flex items-center gap-1.5 mb-1.5">
+                    <PiggyBank className={`h-3.5 w-3.5 ${cashFlow.savingsPct >= 20 ? 'text-success' : cashFlow.savingsPct >= 0 ? 'text-warning' : 'text-destructive'}`} />
+                    <span className="text-[11px] text-muted-foreground uppercase tracking-wide">Savings %</span>
+                  </div>
+                  <p className={`text-2xl font-semibold font-mono ${cashFlow.savingsPct >= 20 ? 'text-success' : cashFlow.savingsPct >= 0 ? 'text-warning' : 'text-destructive'}`}>
+                    {cashFlow.moneyIn > 0 ? `${cashFlow.savingsPct.toFixed(1)}%` : '—'}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground mt-1">target 20%+</p>
+                </div>
+              </div>
+
+              {/* Income vs Expenses chart (filter-aware) */}
+              {incomeVsExpensesScoped.length > 0 && (
+                <div className="glass-panel p-4">
+                  <h3 className="text-sm font-medium text-foreground mb-3">
+                    Money In vs Out by Month <span className="text-[10px] text-muted-foreground font-normal">· {dateLabel}</span>
+                  </h3>
+                  <ResponsiveContainer width="100%" height={260}>
+                    <ComposedChart data={incomeVsExpensesScoped} margin={{ left: 16, right: 16 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                      <XAxis dataKey="month" tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} />
+                      <YAxis tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} />
+                      <Tooltip contentStyle={tooltipStyle} formatter={(value: number, name: string) => [fmt(value), name.charAt(0).toUpperCase() + name.slice(1)]} />
+                      <Legend wrapperStyle={{ fontSize: '12px' }} />
+                      <Bar dataKey="income" fill="hsl(var(--success))" radius={[4, 4, 0, 0]} barSize={20} name="In" />
+                      <Bar dataKey="expenses" fill="hsl(var(--destructive))" radius={[4, 4, 0, 0]} barSize={20} name="Out" />
+                      <Line type="monotone" dataKey="net" stroke="hsl(var(--primary))" strokeWidth={2} dot={{ fill: 'hsl(var(--primary))', r: 3 }} name="Net" />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+
               {/* Spend Overview Cards */}
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
                 <div className="glass-panel-sm p-3">
