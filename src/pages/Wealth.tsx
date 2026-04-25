@@ -592,14 +592,46 @@ export default function Wealth() {
               <TrendingUp className="h-3.5 w-3.5 text-primary" />
               <CardTitle className="text-[11px] font-medium text-muted-foreground">Contributions YTD</CardTitle>
             </CardHeader>
-            <CardContent className="p-3 pt-0"><span className="text-lg font-bold text-foreground">{fmt(totalYtd)}</span></CardContent>
+            <CardContent className="p-3 pt-0">
+              <span className="text-lg font-bold text-foreground">{fmt(totalYtd)}</span>
+              <div className="mt-1 text-[10px] text-muted-foreground">
+                Auto-calculated from {currentYear} personal expenses
+              </div>
+            </CardContent>
           </Card>
-          <Card>
-            <CardHeader className="p-3 pb-1 flex flex-row items-center gap-2 space-y-0">
-              <Target className="h-3.5 w-3.5 text-primary" />
-              <CardTitle className="text-[11px] font-medium text-muted-foreground">Yearly Target</CardTitle>
+          <Card
+            onClick={() => setTargetDialogOpen(true)}
+            className="cursor-pointer transition-all hover:ring-1 hover:ring-primary/40 hover:bg-accent/30"
+            title="Click to set or edit your end-of-year wealth target"
+          >
+            <CardHeader className="p-3 pb-1 flex flex-row items-center justify-between gap-2 space-y-0">
+              <div className="flex items-center gap-2">
+                <Target className="h-3.5 w-3.5 text-primary" />
+                <CardTitle className="text-[11px] font-medium text-muted-foreground">
+                  {eoyTargetAmount > 0 ? `EOY ${eoyTargetYear} Target` : 'Yearly Target'}
+                </CardTitle>
+              </div>
+              <Pencil className="h-3 w-3 text-muted-foreground/60" />
             </CardHeader>
-            <CardContent className="p-3 pt-0"><span className="text-lg font-bold text-foreground">{fmt(totalYearlyTarget)}</span></CardContent>
+            <CardContent className="p-3 pt-0">
+              {totalYearlyTarget > 0 ? (
+                <>
+                  <span className="text-lg font-bold text-foreground">{fmt(totalYearlyTarget)}</span>
+                  <Progress value={targetProgressPct} className="h-1 mt-1.5" />
+                  <div className="mt-1 flex items-center justify-between text-[10px] text-muted-foreground">
+                    <span>{fmt(targetRemaining)} to go</span>
+                    {monthsLeftInTargetYear > 0 && (
+                      <span>~{fmt(targetRemaining / monthsLeftInTargetYear)}/mo · {monthsLeftInTargetYear}mo left</span>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <span className="text-lg font-bold text-muted-foreground/60 italic">Set target</span>
+                  <div className="mt-1 text-[10px] text-muted-foreground">Click to set EOY {currentYear} goal</div>
+                </>
+              )}
+            </CardContent>
           </Card>
         </div>
 
