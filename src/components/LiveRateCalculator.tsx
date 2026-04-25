@@ -60,21 +60,16 @@ async function fetchRate(symbolOrBasket: string): Promise<RateData> {
   const params: Record<string, string> = symbolOrBasket.startsWith('basket:')
     ? { basket: symbolOrBasket.slice('basket:'.length) }
     : { symbol: symbolOrBasket };
-  const { data, error } = await supabase.functions.invoke('market-rates', {
-    method: 'GET',
-    body: undefined,
-    headers: undefined as any,
-    // supabase-js doesn't pass query params natively — encode into the path.
-    // @ts-ignore — `path` augment via fetch fallback below.
-  });
-  // Fallback: use direct fetch because functions.invoke doesn't support GET query params cleanly.
-  if (data || error) {
-    const url = `https://hqfazvpnthsyxpzytggs.functions.supabase.co/market-rates?${new URLSearchParams(params)}`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`market-rates ${res.status}`);
-    return await res.json();
+  // The market-rates edge function takes query params, which supabase.functions.invoke()
+  // doesn't expose cleanly — call it directly via the project URL.
+  const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID;
+  const url = `https://${projectId}.functions.supabase.co/market-rates?${new URLSearchParams(params)}`;
+  const res = await fetch(url);
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`market-rates ${res.status}: ${text.slice(0, 120)}`);
   }
-  return data as RateData;
+  return (await res.json()) as RateData;
 }
 
 // Modified-Dietz realized CAGR over the snapshot window for one account.
