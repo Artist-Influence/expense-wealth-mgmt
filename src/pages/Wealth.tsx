@@ -682,8 +682,9 @@ export default function Wealth() {
             <h2 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">{g.label}</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
               {g.accounts.map(a => {
+                const liveYtd = liveYtdMap.get(a.id) ?? Number(a.contributions_ytd) ?? 0;
                 const pct = a.contribution_target_yearly > 0
-                  ? Math.min(100, (Number(a.contributions_ytd) / Number(a.contribution_target_yearly)) * 100)
+                  ? Math.min(100, (liveYtd / Number(a.contribution_target_yearly)) * 100)
                   : 0;
                 return (
                   <Card key={a.id} className="relative group">
@@ -711,15 +712,17 @@ export default function Wealth() {
                       {a.contribution_target_yearly > 0 ? (
                         <div className="space-y-1">
                           <div className="flex justify-between text-[10px] text-muted-foreground">
-                            <span>{fmt(Number(a.contributions_ytd))} contributed</span>
+                            <span>{fmt(liveYtd)} contributed</span>
                             <span>{fmt(Number(a.contribution_target_yearly))} target</span>
                           </div>
                           <Progress value={pct} className="h-1.5" />
                         </div>
                       ) : a.contribution_target_monthly > 0 ? (
-                        <p className="text-[10px] text-muted-foreground">Monthly target: {fmt(Number(a.contribution_target_monthly))}</p>
-                      ) : Number(a.contributions_ytd) > 0 && (
-                        <p className="text-[10px] text-muted-foreground">{fmt(Number(a.contributions_ytd))} contributed YTD</p>
+                        <p className="text-[10px] text-muted-foreground">
+                          Monthly target: {fmt(Number(a.contribution_target_monthly))}{liveYtd > 0 ? ` · ${fmt(liveYtd)} YTD` : ''}
+                        </p>
+                      ) : liveYtd > 0 && (
+                        <p className="text-[10px] text-muted-foreground">{fmt(liveYtd)} contributed YTD</p>
                       )}
 
                       {/* Snapshot-driven growth chart + inline editor */}
