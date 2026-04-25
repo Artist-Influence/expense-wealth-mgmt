@@ -1,43 +1,68 @@
-## Three small fixes
+## Delete bank-to-bank transfers from personal expenses
 
-### 1. Add BoA 5373 as a payment method
+### The problem
 
-`src/lib/method-detector.ts` — add the regex so any uploaded CSV with "BoA 5373" / "BoA_5373" / "BoA-5373" in its filename auto-tags every row's method column as **BoA 5373**:
+Personal view currently shows 18 transactions ($41,550 total) like:
 
-```ts
-[/bo?a[\s_-]*5373/i, 'BoA 5373'],
+> `Online Banking transfer to CHK 5563 Confirmation# XXXXX69389` — $200
+> `Online Banking transfer to CHK 5592 Confirmation# XXXXX79343` — $7,100
+
+These are BoA moving money between your own checking accounts (5373 → 5563 / 5592). Not expenses.
+
+The transfer detector already has a pattern for this kind of thing:
+
+```
+TRANSFER\s*(?:TO|FROM)\s*(?:SAVINGS|CHECKING|XXXX####)
 ```
 
-This sits alongside the existing 5563 / 5573 / 5592 entries. No DB or category changes — it's purely filename → method label. Apply this BoA 5373 card as a personal account (it gets registered in the method column of expense uploads automatically).
+…but it requires the literal word **CHECKING** or an `X####` mask. BoA abbreviates it as `CHK 5563`, which doesn't match — so these rows fall through to the medium-confidence "possible_transfer" bucket and stay counted as expenses.
 
-### 2. Income summary cards must respect Personal / Business toggle
+There are 8 CC payment rows (Amex "MOBILE PAYMENT - THANK YOU" → $23,183) that *are* already correctly excluded — we don't touch those.
 
-On the Income page right now, the **Personal Income** and **Business Income** cards always show both totals regardless of the toggle, which is confusing.
+### Fix
 
-Fix in `src/pages/Income.tsx`:
+**1. `src/lib/transfer-detector.ts`** — broaden the high-confidence pattern to recognize BoA's `CHK ####` shorthand and the generic `Online Banking transfer to …` phrasing:
 
-- When toggle = **All** → show both Personal Income + Business Income cards (current behavior).
-- When toggle = **Personal** → hide Business Income card; show only Personal Income + the personal-scoped detail cards.
-- When toggle = **Business** → hide Personal Income card; show only Business Income + the business-scoped detail cards.
+```ts
+[/ONLINE\s*BANKING\s*TRANSFER\s*(?:TO|FROM)/i, 'account_transfer'],
+[/TRANSFER\s*(?:TO|FROM)\s*(?:SAVINGS|CHECKING|CHK|SAV|(?:X|XXXX?\d{4}))/i, 'account_transfer'],
+```
 
-Implementation: change the `cards` array to conditionally include the Personal/Business cards based on `filterMode`, and also scope the totals to the active mode (right now `personalIncome`/`businessIncome` ignore the mode filter — make them respect it).
+This makes future imports auto-flag these as `is_transfer = true` + `exclude_from_expense_totals = true`, so they never pollute personal expense totals again.
 
-### 3. Income on the Income page must segment cleanly by view
+**2. Backfill existing rows** — one SQL update against `transactions_uploaded`:
 
-The table already filters by `filterMode`, but combined with the issue in #2 the segmentation feels broken. After fix #2, verify:
+```sql
+UPDATE transactions_uploaded
+SET is_transfer = true,
+    transfer_type = 'account_transfer',
+    exclude_from_expense_totals = true,
+    is_non_expense_cash_movement = true,
+    treatment_type = 'transfer',
+    counts_toward_true_personal_spend = false,
+    counts_toward_true_business_spend = false,
+    final_category = COALESCE(final_category, 'Internal Transfer'),
+    review_status = 'auto_categorized'
+WHERE description_raw ~* '(online banking transfer (to|from)|transfer (to|from) (chk|sav)\s*\d+)'
+  AND is_transfer = false;
+```
 
-- **Personal view**: table only shows rows where `mode = 'personal'`; all summary cards reflect only personal totals; CSV import default = Personal; manual entry default = Personal.
-- **Business view**: same but for business.
-- **All view**: shows everything plus the side-by-side Personal vs Business card pair.
+That hits all 18 personal rows (and any matching business rows with the same phrasing) in one shot. They stay in the database for audit but stop counting as spend.
 
-Also: the "Total Inflows" card label was already mode-aware ("Personal Total" / "Business Total" when filtered). Keep that, just make sure it sits next to the right single-mode card and not next to the cross-mode one.
+**3. Fix pre-existing TypeScript build errors** blocking compile (these are from the previous Income/Expenses edits, not from this work, but the build is currently broken so I'll repair them as part of this turn):
 
-### Files
+- `src/pages/Expenses.tsx` lines 380, 457, 546 — Supabase `.update(payload as Record<string, any>)` is being rejected by the typed client. Cast the payload to the row type or pass it directly typed instead of `Record<string, any>`.
+- `src/pages/Income.tsx` lines 348, 357 — same pattern, same fix.
 
-- `src/lib/method-detector.ts` — add BoA 5373 pattern
-- `src/pages/Income.tsx` — make summary cards respect the mode toggle (conditional card list + mode-scoped totals)
+### Files touched
+
+- `src/lib/transfer-detector.ts` — add the two regex patterns to the high-confidence list
+- `src/pages/Expenses.tsx` — fix the 3 type errors on `.update()` calls
+- `src/pages/Income.tsx` — fix the 2 type errors on `.update()` calls
+- One data UPDATE migration (via the data tool) to backfill the 18 personal rows
 
 ### Out of scope
 
-- No DB changes. The `mode` column already exists on income, and method is detected on expense CSV import (existing behavior).
-- Not touching Insights — its Personal/Business toggle already filters income correctly per the previous fix.
+- CC payments (already correctly excluded — leaving alone)
+- The 50 business "ONLINE DOMESTIC WIRE FEE" rows currently flagged `possible_transfer` — these are wire **fees**, which *are* real expenses, so they correctly stay as expenses
+- No schema changes, no new tables
