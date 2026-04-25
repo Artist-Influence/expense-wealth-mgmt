@@ -124,6 +124,14 @@ export default function Expenses() {
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [showPreview, setShowPreview] = useState(false);
 
+  // Cross-mode totals so the comparative summary strip always shows Personal vs Business
+  // side-by-side regardless of which mode tab the spreadsheet is on.
+  const [crossModeTotals, setCrossModeTotals] = useState<{
+    personalCashOut: number; businessCashOut: number;
+    truePersonal: number; trueBusiness: number;
+    pendingReimbursable: number;
+  }>({ personalCashOut: 0, businessCashOut: 0, truePersonal: 0, trueBusiness: 0, pendingReimbursable: 0 });
+
   const isProcessing = fileQueue.some(f => !['done', 'error'].includes(f.status));
   const totalFiles = fileQueue.length;
   const completedFiles = fileQueue.filter(f => f.status === 'done' || f.status === 'error').length;
