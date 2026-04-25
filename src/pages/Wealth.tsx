@@ -530,6 +530,10 @@ export default function Wealth() {
               contribution_target_monthly: Number(a.contribution_target_monthly),
               contributions_ytd: Number(a.contributions_ytd),
             }))}
+            snapshotsByAccount={snapshots.reduce((acc, s) => {
+              (acc[s.account_id] ||= []).push({ as_of_date: s.as_of_date, balance: Number(s.balance) });
+              return acc;
+            }, {} as Record<string, Array<{ as_of_date: string; balance: number }>>)}
           />
         )}
 
