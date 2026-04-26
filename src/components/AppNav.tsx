@@ -1,13 +1,17 @@
 import { Link, useLocation } from 'react-router-dom';
+import { useEffect, useState } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery } from '@tanstack/react-query';
 import {
   Receipt, BarChart3, Brain, Settings, LogOut, Database,
-  DollarSign, TrendingUp, Landmark, FileSpreadsheet, Target, CalendarCheck
+  DollarSign, TrendingUp, Landmark, FileSpreadsheet, Target, CalendarCheck,
+  Activity,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { HealthCheckPanel } from './HealthCheckPanel';
+import { runHealthCheck, shouldAutoRun, type HealthCheckSummary } from '@/lib/health-check';
 
 const navItems = [
   { to: '/', label: 'Expenses', icon: Receipt, active: true, showBadge: true },
