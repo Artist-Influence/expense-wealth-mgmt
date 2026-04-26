@@ -366,7 +366,7 @@ export default function Allocations() {
             )}
             {unreviewedCount > 0 && (
               <a
-                href={`/expenses?month=${selectedMonth}&scope=${scope}&review=unreviewed`}
+                href={`/?month=${selectedMonth}&scope=${scope}&review=unreviewed`}
                 className="block rounded border border-warning/30 bg-warning/5 px-3 py-2 text-[11px] text-warning hover:bg-warning/10 transition-colors cursor-pointer"
               >
                 ⚠️ {unreviewedCount} transaction{unreviewedCount > 1 ? 's' : ''} need{unreviewedCount === 1 ? 's' : ''} review this month — free cash estimate may change. <span className="underline">Review now →</span>
