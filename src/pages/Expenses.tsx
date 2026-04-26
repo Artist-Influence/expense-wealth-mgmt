@@ -9,13 +9,14 @@ import { ImportPreviewDialog, type FilePreviewInfo } from '@/components/ImportPr
 import { TransactionDetailDrawer } from '@/components/TransactionDetailDrawer';
 import { SplitTransactionDialog } from '@/components/SplitTransactionDialog';
 import { AddCategoryDialog } from '@/components/AddCategoryDialog';
+import { DuplicateResolverDialog, type DupClusterRow } from '@/components/DuplicateResolverDialog';
 import { previewCsvFile, parseCsvFileWithMapping, type ParsePreview, type ColumnMapping } from '@/lib/csv-parser';
 import { categorizeTransactions, categorizeWithAI, updateMerchantMemory, isDeductibleCategory } from '@/lib/categorization-engine';
 import { detectMethodFromFilename } from '@/lib/method-detector';
 import { detectTransfer } from '@/lib/transfer-detector';
 import { routeTransaction } from '@/lib/transaction-router';
 import { classifyIncome } from '@/lib/income-classifier';
-import { generateFingerprint, isNearDuplicate } from '@/lib/duplicate-detector';
+import { generateFingerprint, isNearDuplicate, findExactClusters, findNearClusters, type DuplicateCluster } from '@/lib/duplicate-detector';
 import { generateMerchantKey, normalizeDescription } from '@/lib/normalizer';
 import { backfillRecurringForOwner } from '@/lib/recurrence-detector';
 import { isStatementArtifact } from '@/lib/csv-parser';
@@ -30,7 +31,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import {
   Upload, Search, Download, Check, CheckCheck, Edit3, X,
   ArrowLeftRight, AlertTriangle, Ban, FileText, Filter,
-  Calendar, ChevronDown, Trash2, Briefcase, User, Receipt, Scissors, RefreshCw
+  Calendar, ChevronDown, Trash2, Briefcase, User, Receipt, Scissors, RefreshCw, Copy
 } from 'lucide-react';
 
 type TransactionMode = 'personal' | 'business' | 'reimbursable_work';
@@ -98,6 +99,12 @@ export default function Expenses() {
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [methodFilter, setMethodFilter] = useState<string>('all');
   const [scanningRecurring, setScanningRecurring] = useState(false);
+  const [sweepingDuplicates, setSweepingDuplicates] = useState(false);
+  const [resolverOpen, setResolverOpen] = useState(false);
+  const [exactClusters, setExactClusters] = useState<DuplicateCluster[]>([]);
+  const [nearClusters, setNearClusters] = useState<DuplicateCluster[]>([]);
+  const [crossModePairs, setCrossModePairs] = useState<{ rowIds: string[] }[]>([]);
+  const [clusterRowIndex, setClusterRowIndex] = useState<Map<string, DupClusterRow>>(new Map());
   const [dateFrom, setDateFrom] = useState<string | null>(null);
   const [dateTo, setDateTo] = useState<string | null>(null);
   const [dateLabel, setDateLabel] = useState<string>('All Dates');
@@ -249,7 +256,133 @@ export default function Expenses() {
     setLoading(false);
   };
 
-  // Filtering and sorting
+  /**
+   * "Find duplicates" sweep across already-imported rows.
+   * Loads all rows for the active mode (paged), groups by fingerprint,
+   * then runs near-dup pairwise within amount buckets. Marks DB rows so
+   * the existing "Possible duplicates" filter and badge work, then opens
+   * the resolver dialog. Also surfaces cross-mode same-charge pairs as
+   * read-only suggestions.
+   */
+  const runDuplicateSweep = async () => {
+    if (!user) return;
+    setSweepingDuplicates(true);
+    const tId = toast.loading('Scanning for duplicate transactions…');
+    try {
+      // Pull a slim row set across ALL modes (cross-mode tab needs it).
+      const rows: { id: string; date: string | null; description_normalized: string | null; description_raw: string | null; amount: number | null; duplicate_fingerprint: string | null; mode: string; created_at: string | null; final_category: string | null; predicted_category: string | null; final_method: string | null; predicted_method: string | null; source_file_name: string | null; source_account_name: string | null; duplicate_status: string | null; is_transfer: boolean | null; is_split_parent: boolean | null; parent_transaction_id: string | null; review_status: string }[] = [];
+      let from = 0;
+      const pageSize = 1000;
+      let hasMore = true;
+      while (hasMore) {
+        const { data } = await supabase
+          .from('transactions_uploaded')
+          .select('id, date, description_normalized, description_raw, amount, duplicate_fingerprint, mode, created_at, final_category, predicted_category, final_method, predicted_method, source_file_name, source_account_name, duplicate_status, is_transfer, is_split_parent, parent_transaction_id, review_status')
+          .eq('owner_id', user.id)
+          .range(from, from + pageSize - 1);
+        if (data) rows.push(...(data as any));
+        hasMore = (data?.length ?? 0) === pageSize;
+        from += pageSize;
+      }
+
+      // Filter out rows that aren't real expenses for clustering purposes.
+      const activeRows = rows.filter(r =>
+        r.amount != null &&
+        !r.is_split_parent &&
+        !r.parent_transaction_id &&
+        r.review_status !== 'archived'
+      );
+
+      // Same-mode clustering uses normalized fingerprint already in DB (or recomputed).
+      const sameModeRows = activeRows.filter(r => r.mode === categoryMode).map(r => ({
+        id: r.id,
+        date: r.date,
+        description_normalized: r.description_normalized || '',
+        amount: Number(r.amount),
+        fingerprint: r.duplicate_fingerprint || generateFingerprint(r.mode, r.date, Number(r.amount), r.description_normalized || ''),
+        created_at: r.created_at,
+      }));
+
+      const exact = findExactClusters(sameModeRows);
+      const exactIds = new Set<string>();
+      for (const c of exact) for (const id of c.rowIds) exactIds.add(id);
+      const near = findNearClusters(sameModeRows, exactIds, 7);
+
+      // Cross-mode pairs: same date + amount + matching merchant key, different mode.
+      const crossPairs: { rowIds: string[] }[] = [];
+      const byKey = new Map<string, typeof activeRows>();
+      for (const r of activeRows) {
+        const mk = generateMerchantKey(r.description_normalized || '');
+        if (!mk || !r.date) continue;
+        const k = `${r.date}|${Math.round(Number(r.amount) * 100)}|${mk}`;
+        const list = byKey.get(k) || [];
+        list.push(r);
+        byKey.set(k, list);
+      }
+      for (const list of byKey.values()) {
+        if (list.length < 2) continue;
+        const modes = new Set(list.map(r => r.mode));
+        if (modes.size < 2) continue;
+        crossPairs.push({ rowIds: list.map(r => r.id) });
+      }
+
+      // Mark same-mode dups in DB (idempotent).
+      if (exact.length > 0) {
+        for (const c of exact) {
+          const [keeper, ...losers] = c.rowIds;
+          if (losers.length > 0) {
+            await supabase.from('transactions_uploaded')
+              .update({ duplicate_status: 'possible_duplicate', duplicate_of_transaction_id: keeper })
+              .in('id', losers);
+          }
+        }
+      }
+      if (near.length > 0) {
+        for (const c of near) {
+          const [keeper, ...losers] = c.rowIds;
+          if (losers.length > 0) {
+            await supabase.from('transactions_uploaded')
+              .update({ duplicate_status: 'possible_duplicate', duplicate_of_transaction_id: keeper })
+              .in('id', losers);
+          }
+        }
+      }
+
+      // Build row index for the dialog
+      const idx = new Map<string, DupClusterRow>();
+      for (const r of activeRows) {
+        idx.set(r.id, {
+          id: r.id, date: r.date, description_raw: r.description_raw,
+          description_normalized: r.description_normalized, amount: r.amount,
+          final_category: r.final_category, predicted_category: r.predicted_category,
+          final_method: r.final_method, predicted_method: r.predicted_method,
+          source_file_name: r.source_file_name, source_account_name: r.source_account_name,
+          mode: r.mode, duplicate_status: r.duplicate_status,
+        });
+      }
+
+      setExactClusters(exact);
+      setNearClusters(near);
+      setCrossModePairs(crossPairs);
+      setClusterRowIndex(idx);
+      toast.dismiss(tId);
+      const total = exact.length + near.length;
+      if (total === 0 && crossPairs.length === 0) {
+        toast.success('No duplicates found 🎉');
+      } else {
+        toast.success(`Found ${exact.length} exact + ${near.length} possible${crossPairs.length ? ` + ${crossPairs.length} cross-mode` : ''} cluster${total + crossPairs.length === 1 ? '' : 's'}`);
+        setResolverOpen(true);
+      }
+      await loadTransactions();
+    } catch (err: any) {
+      toast.dismiss(tId);
+      toast.error(`Sweep failed: ${err?.message || 'unknown error'}`);
+      console.error(err);
+    } finally {
+      setSweepingDuplicates(false);
+    }
+  };
+
   const filtered = useMemo(() => {
     let result = transactions.filter(tx => {
       if (statusFilter === 'unreviewed') {
@@ -1014,11 +1147,27 @@ export default function Expenses() {
       const dates = validRows.map(r => r.date).filter(Boolean).sort();
       const minDate = dates[0];
       const maxDate = dates[dates.length - 1];
+      // Widen the lookup window by ±3 days so edge-of-window matches still hit.
+      const shiftDate = (iso: string, days: number) => {
+        const d = new Date(iso + 'T00:00:00');
+        d.setDate(d.getDate() + days);
+        return d.toISOString().slice(0, 10);
+      };
 
       const existingFingerprints = new Set<string>();
       const existingForNearDup: { date: string | null; amount: number; description_normalized: string; id: string; fingerprint: string }[] = [];
 
+      const ingestExisting = (rows: { id: string; date: string | null; description_normalized: string | null; amount: number | null; duplicate_fingerprint: string | null }[]) => {
+        for (const row of rows) {
+          const fp = row.duplicate_fingerprint || generateFingerprint(categoryMode, row.date, row.amount ?? 0, row.description_normalized || '');
+          existingFingerprints.add(fp);
+          existingForNearDup.push({ date: row.date, amount: row.amount ?? 0, description_normalized: row.description_normalized || '', id: row.id, fingerprint: fp });
+        }
+      };
+
       if (minDate && maxDate) {
+        const fromDate = shiftDate(minDate, -3);
+        const toDate = shiftDate(maxDate, 3);
         let from = 0;
         const pageSize = 1000;
         let hasMore = true;
@@ -1027,27 +1176,46 @@ export default function Expenses() {
             .from('transactions_uploaded')
             .select('id, date, description_normalized, amount, duplicate_fingerprint')
             .eq('mode', categoryMode).eq('owner_id', user.id)
-            .gte('date', minDate).lte('date', maxDate)
+            .gte('date', fromDate).lte('date', toDate)
             .range(from, from + pageSize - 1);
-          if (existing) {
-            for (const row of existing) {
-              const fp = row.duplicate_fingerprint || generateFingerprint(categoryMode, row.date, row.amount ?? 0, row.description_normalized || '');
-              existingFingerprints.add(fp);
-              existingForNearDup.push({ date: row.date, amount: row.amount ?? 0, description_normalized: row.description_normalized || '', id: row.id, fingerprint: fp });
-            }
-          }
+          if (existing) ingestExisting(existing as any);
           hasMore = (existing?.length ?? 0) === pageSize;
           from += pageSize;
         }
+      }
+      // Also pull rows with NULL date so they participate in fp matching.
+      {
+        const { data: nullDateRows } = await supabase
+          .from('transactions_uploaded')
+          .select('id, date, description_normalized, amount, duplicate_fingerprint')
+          .eq('mode', categoryMode).eq('owner_id', user.id)
+          .is('date', null)
+          .limit(1000);
+        if (nullDateRows) ingestExisting(nullDateRows as any);
       }
 
       let exactDupCount = 0, possibleDupCount = 0;
       const rowsToInsert: typeof validRows = [];
       const dupStatuses: Map<number, { status: string; matchId: string | null }> = new Map();
+      const exactSkippedDetail: { date: string | null; amount: number; description: string; matched_id: string | null }[] = [];
+      // In-file dedup: track signatures already seen in THIS import (amount + merchant key).
+      const inFileNearSeen = new Map<string, number>();
 
       for (const tx of validRows) {
         const fp = generateFingerprint(categoryMode, tx.date, tx.amount, tx.description_normalized);
-        if (appSettings.preventExactDuplicates && existingFingerprints.has(fp)) { exactDupCount++; continue; }
+        if (appSettings.preventExactDuplicates && existingFingerprints.has(fp)) {
+          exactDupCount++;
+          const matched = existingForNearDup.find(e => e.fingerprint === fp);
+          if (exactSkippedDetail.length < 50) {
+            exactSkippedDetail.push({
+              date: tx.date,
+              amount: tx.amount,
+              description: tx.description_raw?.slice(0, 120) || tx.description_normalized?.slice(0, 120) || '',
+              matched_id: matched?.id || null,
+            });
+          }
+          continue;
+        }
         let nearDupMatch: string | null = null;
         if (appSettings.flagPossibleDuplicates) {
           for (const existing of existingForNearDup) {
@@ -1055,7 +1223,23 @@ export default function Expenses() {
             if (isNearDuplicate(tx, existing)) { nearDupMatch = existing.id; possibleDupCount++; break; }
           }
         }
-        dupStatuses.set(rowsToInsert.length, { status: nearDupMatch ? 'possible_duplicate' : 'unique', matchId: nearDupMatch });
+        // In-file near-duplicate sweep (against rows already queued for insert this batch).
+        if (!nearDupMatch && appSettings.flagPossibleDuplicates) {
+          const mk = generateMerchantKey(tx.description_normalized || '');
+          const inFileKey = `${Math.round(tx.amount * 100)}|${mk}`;
+          if (mk && inFileNearSeen.has(inFileKey)) {
+            // Mark THIS row as a possible duplicate of the earlier one in the same file.
+            const earlierIdx = inFileNearSeen.get(inFileKey)!;
+            const earlierFp = generateFingerprint(categoryMode, rowsToInsert[earlierIdx].date, rowsToInsert[earlierIdx].amount, rowsToInsert[earlierIdx].description_normalized);
+            // We don't have its DB id yet; rely on duplicate_fingerprint to link post-insert.
+            void earlierFp;
+            possibleDupCount++;
+            nearDupMatch = '__in_file__';
+          } else if (mk) {
+            inFileNearSeen.set(inFileKey, rowsToInsert.length);
+          }
+        }
+        dupStatuses.set(rowsToInsert.length, { status: nearDupMatch ? 'possible_duplicate' : 'unique', matchId: nearDupMatch === '__in_file__' ? null : nearDupMatch });
         rowsToInsert.push(tx);
         existingFingerprints.add(fp);
       }
@@ -1160,7 +1344,7 @@ export default function Expenses() {
         transfers_detected: 0, parse_errors: parseErrorRows.length, owner_id: user.id,
         detected_headers: detectedHeaders || null,
         mapped_columns: mapping as any,
-        parse_details: { total_raw_rows: parsed.length, filtered_artifacts: parsed.length - validRows.length - parseErrorRows.length, valid_rows: validRows.length, parse_error_count: parseErrorRows.length, exact_duplicates: exactDupCount, possible_duplicates: possibleDupCount } as any,
+        parse_details: { total_raw_rows: parsed.length, filtered_artifacts: parsed.length - validRows.length - parseErrorRows.length, valid_rows: validRows.length, parse_error_count: parseErrorRows.length, exact_duplicates: exactDupCount, possible_duplicates: possibleDupCount, exact_duplicates_detail: exactSkippedDetail } as any,
       } as any).select().single();
       if (batchError) throw batchError;
 
@@ -1566,6 +1750,32 @@ export default function Expenses() {
             >
               <RefreshCw className={`h-3 w-3 ${scanningRecurring ? 'animate-spin' : ''}`} />
               {scanningRecurring ? 'Scanning…' : 'Re-scan recurring'}
+            </Button>
+          )}
+
+          {selectedIds.size === 0 && user && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 gap-1 text-xs glass-input"
+              disabled={sweepingDuplicates}
+              onClick={runDuplicateSweep}
+              title="Scan for duplicate rows already in the database"
+            >
+              <Copy className={`h-3 w-3 ${sweepingDuplicates ? 'animate-pulse' : ''}`} />
+              {sweepingDuplicates ? 'Scanning…' : 'Find duplicates'}
+            </Button>
+          )}
+
+          {(exactClusters.length > 0 || nearClusters.length > 0 || crossModePairs.length > 0) && selectedIds.size === 0 && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 gap-1 text-xs border-warning/40 text-warning hover:bg-warning/10"
+              onClick={() => setResolverOpen(true)}
+            >
+              <AlertTriangle className="h-3 w-3" />
+              Resolve {exactClusters.length + nearClusters.length + crossModePairs.length}
             </Button>
           )}
 
@@ -1986,6 +2196,21 @@ export default function Expenses() {
         onConfirm={handlePreviewConfirm}
         onCancel={handlePreviewCancel}
         filePreviews={filePreviews}
+      />
+
+      {/* Duplicate Resolver Dialog */}
+      <DuplicateResolverDialog
+        open={resolverOpen}
+        onClose={() => setResolverOpen(false)}
+        exactClusters={exactClusters}
+        nearClusters={nearClusters}
+        crossModePairs={crossModePairs}
+        rowIndex={clusterRowIndex}
+        onResolved={async () => {
+          // Re-run the sweep silently to refresh cluster lists after a resolution.
+          await loadTransactions();
+          await runDuplicateSweep();
+        }}
       />
     </div>
   );

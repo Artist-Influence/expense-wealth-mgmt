@@ -1,10 +1,13 @@
-import { CheckCircle, AlertCircle, Loader2, FileText, ChevronDown, ChevronUp } from 'lucide-react';
+import { CheckCircle, AlertCircle, Loader2, FileText, ChevronDown, ChevronUp, Copy } from 'lucide-react';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { Link } from 'react-router-dom';
 import { Eye } from 'lucide-react';
 import { useState } from 'react';
+import { supabase } from '@/integrations/supabase/client';
 
 export type FileStatus = 'queued' | 'parsing' | 'deduplicating' | 'categorizing' | 'inserting' | 'done' | 'error';
 
@@ -46,8 +49,13 @@ interface FileProgressListProps {
   mode: string;
 }
 
+type SkippedRow = { date: string | null; amount: number; description: string; matched_id: string | null };
+
 export function FileProgressList({ items, mode }: FileProgressListProps) {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const [skippedDialogBatchId, setSkippedDialogBatchId] = useState<string | null>(null);
+  const [skippedRows, setSkippedRows] = useState<SkippedRow[]>([]);
+  const [skippedLoading, setSkippedLoading] = useState(false);
 
   if (items.length === 0) return null;
 
@@ -58,6 +66,23 @@ export function FileProgressList({ items, mode }: FileProgressListProps) {
       else next.add(id);
       return next;
     });
+  };
+
+  const openSkipped = async (batchId: string) => {
+    setSkippedDialogBatchId(batchId);
+    setSkippedLoading(true);
+    setSkippedRows([]);
+    try {
+      const { data } = await supabase
+        .from('upload_batches')
+        .select('parse_details')
+        .eq('id', batchId)
+        .maybeSingle();
+      const detail = (data?.parse_details as any)?.exact_duplicates_detail;
+      if (Array.isArray(detail)) setSkippedRows(detail as SkippedRow[]);
+    } finally {
+      setSkippedLoading(false);
+    }
   };
 
   return (
@@ -110,7 +135,18 @@ export function FileProgressList({ items, mode }: FileProgressListProps) {
               {item.result.skipped > 0 && (
                 <>
                   <span className="text-muted-foreground">Exact duplicates skipped</span>
-                  <span className="text-muted-foreground text-right">{item.result.skipped}</span>
+                  <span className="text-right">
+                    {item.result.batchId ? (
+                      <button
+                        onClick={() => openSkipped(item.result!.batchId)}
+                        className="text-warning hover:text-warning/80 underline-offset-2 hover:underline inline-flex items-center gap-1"
+                      >
+                        <Copy className="h-3 w-3" /> {item.result.skipped} (view)
+                      </button>
+                    ) : (
+                      <span className="text-muted-foreground">{item.result.skipped}</span>
+                    )}
+                  </span>
                 </>
               )}
               {(item.result.possibleDuplicates ?? 0) > 0 && (
@@ -147,6 +183,41 @@ export function FileProgressList({ items, mode }: FileProgressListProps) {
           )}
         </div>
       ))}
+
+      <Dialog open={!!skippedDialogBatchId} onOpenChange={(v) => !v && setSkippedDialogBatchId(null)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Copy className="h-4 w-4 text-warning" /> Rows skipped as exact duplicates
+            </DialogTitle>
+            <DialogDescription>
+              These rows already existed in your data with the same date, amount, and merchant — so they were not re-imported.
+              {skippedRows.length >= 50 && ' (Showing first 50.)'}
+            </DialogDescription>
+          </DialogHeader>
+          {skippedLoading ? (
+            <div className="flex items-center justify-center py-8 text-muted-foreground text-sm">
+              <Loader2 className="h-4 w-4 animate-spin mr-2" /> Loading…
+            </div>
+          ) : skippedRows.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-4">No detailed list available for this import.</p>
+          ) : (
+            <ScrollArea className="max-h-[60vh]">
+              <div className="space-y-1 text-xs">
+                {skippedRows.map((r, i) => (
+                  <div key={i} className="flex items-center justify-between gap-3 px-2 py-1.5 rounded border border-border/40 bg-background/40">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <span className="text-muted-foreground shrink-0 w-20">{r.date || 'no date'}</span>
+                      <span className="truncate">{r.description || '—'}</span>
+                    </div>
+                    <span className="shrink-0 font-mono">{r.amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}</span>
+                  </div>
+                ))}
+              </div>
+            </ScrollArea>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
