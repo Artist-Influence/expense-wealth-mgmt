@@ -411,20 +411,8 @@ export function WealthProjectionChart({
               className="h-6 w-14 text-xs px-1.5"
             />
           </div>
-          <div className="inline-flex items-center rounded-md border border-border/60 overflow-hidden">
-            <button
-              type="button"
-              onClick={() => setYScale('linear')}
-              className={`text-[10px] px-2 py-1 transition-colors ${yScale === 'linear' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
-              title="Linear scale — emphasizes late-year totals"
-            >Linear</button>
-            <button
-              type="button"
-              onClick={() => setYScale('log')}
-              className={`text-[10px] px-2 py-1 transition-colors border-l border-border/60 ${yScale === 'log' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
-              title="Log scale — makes early-year growth visible across long horizons"
-            >Log</button>
-          </div>
+
+
           <Button
             variant="ghost"
             size="sm"
