@@ -20,6 +20,17 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { NON_EARNING_TYPES } from '@/lib/income-classifier';
 import { effectiveCategory } from '@/lib/categorization-engine';
 
+// Mirror of effectiveCategory: prefer the user-confirmed value, fall back to the
+// engine's prediction. Most rows have predicted_method populated but final_method
+// still null, so reading only final_method makes the chart look like "Unknown 100%".
+const effectiveMethod = (t: { final_method: string | null; predicted_method: string | null }) => {
+  const raw = (t.final_method || t.predicted_method || '').trim();
+  if (!raw) return 'Unknown';
+  if (/^amex/i.test(raw)) return 'Amex';
+  if (/^boa/i.test(raw) || /bank of america/i.test(raw)) return 'Bank of America';
+  return raw;
+};
+
 interface Transaction {
   date: string | null;
   description_raw: string | null;
@@ -98,6 +109,7 @@ export default function Insights() {
   const [dateFrom, setDateFrom] = useState<string | null>(`${_now.getFullYear()}-01-01`);
   const [dateTo, setDateTo] = useState<string | null>(null);
   const [dateLabel, setDateLabel] = useState<string>('Year to Date');
+  const [hiddenTrendCats, setHiddenTrendCats] = useState<Set<string>>(new Set());
 
   // Auto-pick the mode that actually has data on first load
   useEffect(() => {
@@ -458,28 +470,45 @@ export default function Insights() {
       monthMap.set(month, (monthMap.get(month) || 0) + Math.abs(t.amount || 0));
     });
 
-    // Get top 6 categories by total
-    const catTotals = [...catMonthMap.entries()].map(([cat, months]) => ({
-      cat,
-      total: [...months.values()].reduce((s, v) => s + v, 0),
-      months,
-    })).sort((a, b) => b.total - a.total).slice(0, 6);
+    // Top 6 categories by total spend
+    const catTotals = [...catMonthMap.entries()]
+      .map(([cat, months]) => ({
+        cat,
+        total: [...months.values()].reduce((s, v) => s + v, 0),
+        months,
+      }))
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 6);
 
-    // Get all months sorted
+    // Union of months across the top 6, last 12 only
     const allMonths = new Set<string>();
     catTotals.forEach(c => c.months.forEach((_, m) => allMonths.add(m)));
     const sortedMonths = [...allMonths].sort().slice(-12);
 
-    return catTotals.map(c => ({
-      category: c.cat,
-      data: sortedMonths.map(m => ({ month: m, amount: Math.round((c.months.get(m) || 0) * 100) / 100 })),
+    // Reshape into one row per month with one key per category for a multi-line chart
+    const rows = sortedMonths.map(m => {
+      const [y, mo] = m.split('-').map(Number);
+      const label = new Date(y, mo - 1, 1).toLocaleString('en-US', { month: 'short', year: '2-digit' });
+      const row: Record<string, number | string> = { month: m, label };
+      catTotals.forEach(c => {
+        row[c.cat] = Math.round((c.months.get(m) || 0) * 100) / 100;
+      });
+      return row;
+    });
+
+    const categories = catTotals.map((c, i) => ({
+      name: c.cat,
+      total: Math.round(c.total * 100) / 100,
+      color: CHART_COLORS[i % CHART_COLORS.length],
     }));
+
+    return { rows, categories };
   }, [approvedExpenses]);
 
   const methodBreakdown = useMemo(() => {
     const methodMap = new Map<string, number>();
     approvedExpenses.forEach(t => {
-      const method = t.final_method || 'Unknown';
+      const method = effectiveMethod(t);
       methodMap.set(method, (methodMap.get(method) || 0) + Math.abs(t.amount || 0));
     });
     return [...methodMap.entries()]
@@ -1293,7 +1322,7 @@ export default function Insights() {
                           innerRadius={60}
                           outerRadius={100}
                           paddingAngle={2}
-                          label={({ name, percent }) => `${name} (${(percent * 100).toFixed(0)}%)`}
+                          label={({ name, percent, value }: any) => `${name} · $${Math.round(Number(value) || 0).toLocaleString()} (${(percent * 100).toFixed(0)}%)`}
                           labelLine={{ stroke: 'hsl(var(--muted-foreground))' }}
                           fontSize={10}
                         >
@@ -1307,33 +1336,77 @@ export default function Insights() {
                   ) : <p className="text-sm text-muted-foreground text-center py-10">No data yet</p>}
                 </div>
 
-                {/* Category Sparklines */}
+                {/* Category Trends — multi-line chart with totals */}
                 <div className="glass-panel p-4">
-                  <h3 className="text-sm font-medium text-foreground mb-3">Category Trends (Top 6)</h3>
-                  {categoryTrends.length > 0 ? (
-                    <div className="grid grid-cols-2 gap-3">
-                      {categoryTrends.map((ct, idx) => (
-                        <div key={ct.category} className="p-2 rounded-lg bg-secondary/30 border border-border/20">
-                          <p className="text-[11px] font-medium text-foreground truncate mb-1">{ct.category}</p>
-                          <ResponsiveContainer width="100%" height={50}>
-                            <LineChart data={ct.data}>
-                              <Line
-                                type="monotone"
-                                dataKey="amount"
-                                stroke={CHART_COLORS[idx % CHART_COLORS.length]}
-                                strokeWidth={1.5}
-                                dot={false}
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-sm font-medium text-foreground">Category Trends (Top 6)</h3>
+                    <span className="text-[10px] text-muted-foreground">
+                      Total: <span className="text-foreground font-semibold font-mono">
+                        {fmt(categoryTrends.categories
+                          .filter(c => !hiddenTrendCats.has(c.name))
+                          .reduce((s, c) => s + c.total, 0))}
+                      </span>
+                    </span>
+                  </div>
+                  {categoryTrends.rows.length > 0 ? (
+                    <>
+                      <ResponsiveContainer width="100%" height={300}>
+                        <LineChart data={categoryTrends.rows} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                          <CartesianGrid strokeDasharray="2 4" stroke="hsl(var(--border))" opacity={0.5} />
+                          <XAxis dataKey="label" tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} />
+                          <YAxis
+                            tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
+                            tickFormatter={(v: number) => v >= 1000 ? `$${Math.round(v / 1000)}k` : `$${v}`}
+                          />
+                          <Tooltip
+                            contentStyle={tooltipStyle}
+                            formatter={(value: number, name: string) => [fmt(Number(value) || 0), name]}
+                          />
+                          {categoryTrends.categories.map(c => (
+                            <Line
+                              key={c.name}
+                              type="monotone"
+                              dataKey={c.name}
+                              stroke={c.color}
+                              strokeWidth={2}
+                              dot={{ r: 3 }}
+                              activeDot={{ r: 5 }}
+                              connectNulls
+                              hide={hiddenTrendCats.has(c.name)}
+                            />
+                          ))}
+                        </LineChart>
+                      </ResponsiveContainer>
+                      <div className="flex flex-wrap items-center gap-1.5 mt-2 pt-2 border-t border-border/50">
+                        {categoryTrends.categories.map(c => {
+                          const off = hiddenTrendCats.has(c.name);
+                          return (
+                            <button
+                              key={c.name}
+                              type="button"
+                              onClick={() => setHiddenTrendCats(prev => {
+                                const next = new Set(prev);
+                                if (next.has(c.name)) next.delete(c.name); else next.add(c.name);
+                                return next;
+                              })}
+                              className={`flex items-center gap-1.5 text-[10px] px-2 py-0.5 rounded-full border transition-all ${
+                                off
+                                  ? 'border-border/40 text-muted-foreground/60 line-through'
+                                  : 'border-border/60 text-foreground hover:border-foreground/40'
+                              }`}
+                              title={off ? 'Click to show' : 'Click to hide'}
+                            >
+                              <span
+                                className="h-2 w-2 rounded-full"
+                                style={{ background: off ? 'hsl(var(--muted))' : c.color }}
                               />
-                              <Tooltip
-                                contentStyle={tooltipStyle}
-                                formatter={(value: number) => [fmt(value), ct.category]}
-                                labelFormatter={(label) => label}
-                              />
-                            </LineChart>
-                          </ResponsiveContainer>
-                        </div>
-                      ))}
-                    </div>
+                              {c.name}
+                              <span className="text-muted-foreground font-mono">{fmt(c.total)}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </>
                   ) : <p className="text-sm text-muted-foreground text-center py-10">No data yet</p>}
                 </div>
               </div>
