@@ -77,7 +77,7 @@ export function CombinedWealthChart({
     // auto-snapshots from account-creation day don't shift the x-axis backwards.
     const earliest = allDates[0];
     const effectiveStart = startDate > earliest ? startDate : earliest;
-    const startD = new Date(effectiveStart);
+    const startD = parseLocalDate(effectiveStart);
     const now = new Date();
     const months: string[] = [];
     const cur = new Date(startD.getFullYear(), startD.getMonth(), 1);
