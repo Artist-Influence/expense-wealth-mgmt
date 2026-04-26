@@ -426,15 +426,43 @@ export function WealthProjectionChart({
         </div>
       </CardHeader>
       <CardContent className="p-3 pt-1">
-        {/* Headline */}
-        <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 mb-2">
-          <div className="text-xs text-muted-foreground">
-            At age {TARGET_AGE}: <span className="text-foreground font-semibold text-sm">{fmtUsd(finalTotal)}</span>
-          </div>
-          <div className="text-[10px] text-muted-foreground">
-            Range: <span className="text-foreground/80">{fmtUsd(finalLow)}</span> – <span className="text-foreground/80">{fmtUsd(finalHigh)}</span>
-          </div>
-        </div>
+        {/* Hero stat strip */}
+        {(() => {
+          const startTotal = series[0]?.total || 0;
+          const multiplier = startTotal > 0 ? finalTotal / startTotal : 0;
+          const yearsAhead = TARGET_AGE - age;
+          return (
+            <div className="grid grid-cols-3 gap-2 mb-3">
+              <div className="rounded-lg border border-border/50 bg-muted/10 p-2.5">
+                <div className="text-[9px] uppercase tracking-wider text-muted-foreground font-medium">Today</div>
+                <div className="text-lg font-semibold tabular-nums tracking-tight text-foreground mt-0.5">
+                  {fmtUsd(startTotal)}
+                </div>
+                <div className="text-[10px] text-muted-foreground mt-0.5">
+                  {accounts.length} account{accounts.length === 1 ? '' : 's'} · age {age}
+                </div>
+              </div>
+              <div className="rounded-lg border border-border/50 bg-muted/10 p-2.5">
+                <div className="text-[9px] uppercase tracking-wider text-muted-foreground font-medium">At Age {TARGET_AGE}</div>
+                <div className="text-lg font-semibold tabular-nums tracking-tight text-foreground mt-0.5">
+                  {fmtUsd(finalTotal)}
+                </div>
+                <div className="text-[10px] text-muted-foreground mt-0.5">
+                  in {yearsAhead} year{yearsAhead === 1 ? '' : 's'}
+                </div>
+              </div>
+              <div className="rounded-lg border border-primary/30 bg-gradient-to-br from-primary/10 to-primary/5 p-2.5">
+                <div className="text-[9px] uppercase tracking-wider text-primary/80 font-medium">Multiplier</div>
+                <div className="text-lg font-semibold tabular-nums tracking-tight text-foreground mt-0.5">
+                  {multiplier >= 1000 ? `${(multiplier / 1000).toFixed(1)}k×` : `${multiplier.toFixed(0)}×`} <span className="text-[10px] font-normal text-muted-foreground">your money</span>
+                </div>
+                <div className="text-[10px] text-muted-foreground mt-0.5 truncate">
+                  Range: {fmtUsd(finalLow)}–{fmtUsd(finalHigh)}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Assumptions panel */}
         {showSettings && (
