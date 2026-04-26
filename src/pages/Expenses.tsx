@@ -266,6 +266,14 @@ export default function Expenses() {
           return false;
         }
       }
+      if (methodFilter !== 'all') {
+        const effMethod = (tx.final_method || tx.predicted_method || tx.source_account_name || '').trim();
+        if (methodFilter === '__nomethod__') {
+          if (effMethod) return false;
+        } else if (effMethod.toLowerCase() !== methodFilter.toLowerCase()) {
+          return false;
+        }
+      }
       if (dateFrom && (!tx.date || tx.date < dateFrom)) return false;
       if (dateTo && (!tx.date || tx.date > dateTo)) return false;
       if (search) {
@@ -286,6 +294,10 @@ export default function Expenses() {
         case 'description': aVal = (a.description_raw || '').toLowerCase(); bVal = (b.description_raw || '').toLowerCase(); break;
         case 'amount': aVal = Math.abs(a.amount || 0); bVal = Math.abs(b.amount || 0); break;
         case 'category': aVal = (a.final_category || a.predicted_category || '').toLowerCase(); bVal = (b.final_category || b.predicted_category || '').toLowerCase(); break;
+        case 'method':
+          aVal = (a.final_method || a.predicted_method || a.source_account_name || '').toLowerCase();
+          bVal = (b.final_method || b.predicted_method || b.source_account_name || '').toLowerCase();
+          break;
         case 'confidence': aVal = a.confidence || 0; bVal = b.confidence || 0; break;
         default: aVal = a.date || ''; bVal = b.date || '';
       }
@@ -295,7 +307,19 @@ export default function Expenses() {
     });
 
     return result;
-  }, [transactions, statusFilter, extraFilter, categoryFilter, dateFrom, dateTo, search, sortCol, sortAsc]);
+  }, [transactions, statusFilter, extraFilter, categoryFilter, methodFilter, dateFrom, dateTo, search, sortCol, sortAsc]);
+
+  // Available payment methods derived from loaded transactions for the Method filter.
+  // Falls back to source_account_name (set on upload from filename) so accounts that
+  // never had a method explicitly tagged still show up as a slice option.
+  const availableMethods = useMemo(() => {
+    const set = new Set<string>();
+    transactions.forEach(t => {
+      const m = (t.final_method || t.predicted_method || t.source_account_name || '').trim();
+      if (m) set.add(m);
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [transactions]);
 
   // Available months derived from transactions for the date filter
   const availableMonths = useMemo(() => {
