@@ -51,6 +51,7 @@ const INCOME_TYPE_BADGE: Record<string, { class: string }> = {
   interest: { class: 'bg-accent/15 text-accent border-accent/25' },
   tax_refund: { class: 'bg-success/15 text-success border-success/25' },
   transfer: { class: 'bg-muted text-muted-foreground border-border' },
+  personal_repayment: { class: 'bg-muted text-muted-foreground border-border italic' },
   owner_contribution: { class: 'bg-secondary text-secondary-foreground border-border' },
   loan_proceeds: { class: 'bg-secondary text-secondary-foreground border-border' },
   other: { class: 'bg-muted text-muted-foreground border-border' },
@@ -138,9 +139,10 @@ export default function Income() {
     const payroll = inRange.filter(t => t.income_type === 'payroll').reduce((s, t) => s + (t.amount || 0), 0);
     // Non-earning = transfers, refunds, reimbursements, owner contribs, loan proceeds, tax refunds
     const nonEarning = inRange.filter(t => (NON_EARNING_TYPES as readonly string[]).includes(t.income_type)).reduce((s, t) => s + (t.amount || 0), 0);
+    const personalRepayments = inRange.filter(t => t.income_type === 'personal_repayment').reduce((s, t) => s + (t.amount || 0), 0);
     // Other earned = anything earned that's not payroll or business revenue (interest, "other")
     const otherEarned = inRange.filter(t => !(NON_EARNING_TYPES as readonly string[]).includes(t.income_type) && !['business_revenue', 'payroll'].includes(t.income_type)).reduce((s, t) => s + (t.amount || 0), 0);
-    return { totalInflows, taxable, nonTaxable, revenue, payroll, nonEarning, otherEarned, personalIncome, businessIncome };
+    return { totalInflows, taxable, nonTaxable, revenue, payroll, nonEarning, personalRepayments, otherEarned, personalIncome, businessIncome };
   }, [transactions, dateFrom, dateTo, filterMode]);
 
   // Filtering
@@ -366,6 +368,25 @@ export default function Income() {
     }
   };
 
+  // Mark as personal repayment / transfer (excludes from income everywhere via NON_EARNING_TYPES)
+  const markAsRepayment = async (ids: string[]) => {
+    if (ids.length === 0) return;
+    const { error } = await supabase
+      .from('income_transactions')
+      .update({
+        income_type: 'personal_repayment',
+        taxable_status: 'non_taxable',
+        status: 'approved',
+      } as never)
+      .in('id', ids);
+    if (error) { toast.error('Failed to mark as repayment'); return; }
+    setTransactions(prev => prev.map(t => ids.includes(t.id)
+      ? { ...t, income_type: 'personal_repayment', taxable_status: 'non_taxable', status: 'approved' }
+      : t));
+    setSelectedIds(new Set());
+    toast.success(`Marked ${ids.length} as repayment — excluded from income totals`);
+  };
+
   const bulkDelete = async () => {
     if (selectedIds.size === 0) return;
     if (!confirm(`Delete ${selectedIds.size} income transaction(s)? This cannot be undone.`)) return;
@@ -423,6 +444,7 @@ export default function Income() {
       ? [{ label: 'Business Revenue', value: summaryCards.revenue, icon: Briefcase, color: 'text-primary' }]
       : []),
     { label: 'Other Earned', value: summaryCards.otherEarned, icon: Receipt, color: 'text-muted-foreground' },
+    { label: 'Repayments / Owed Back', value: summaryCards.personalRepayments, icon: ShieldOff, color: 'text-muted-foreground' },
     { label: 'Transfers / Non-Earning', value: summaryCards.nonEarning, icon: Receipt, color: 'text-muted-foreground' },
   ];
 
@@ -617,6 +639,14 @@ export default function Income() {
               <Button variant="outline" size="sm" onClick={() => bulkUpdate('status', 'approved')}>
                 <Check className="h-4 w-4 mr-1" /> Approve
               </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => markAsRepayment(Array.from(selectedIds))}
+                title="Mark as personal repayment / owed back — excludes from all income & tax totals"
+              >
+                <ShieldOff className="h-4 w-4 mr-1" /> Mark Repayment
+              </Button>
               <Button variant="destructive" size="sm" onClick={bulkDelete}>
                 <Trash2 className="h-4 w-4 mr-1" /> Delete
               </Button>
@@ -695,6 +725,17 @@ export default function Income() {
                       {tx.status !== 'approved' && (
                         <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => updateField(tx.id, 'status', 'approved')} title="Approve">
                           <Check className="h-3.5 w-3.5 text-success" />
+                        </Button>
+                      )}
+                      {tx.income_type !== 'personal_repayment' && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7"
+                          onClick={() => markAsRepayment([tx.id])}
+                          title="Mark as personal repayment — exclude from income totals"
+                        >
+                          <ShieldOff className="h-3.5 w-3.5 text-muted-foreground" />
                         </Button>
                       )}
                     </div>

@@ -14,6 +14,7 @@ export const NON_EARNING_TYPES = [
   'loan_proceeds',
   'owner_contribution',
   'tax_refund',
+  'personal_repayment', // Friend/family paying you back; not income.
 ] as const;
 
 export function isEarnedIncome(income_type: string | null | undefined): boolean {
@@ -94,6 +95,7 @@ export const INCOME_TYPE_OPTIONS = [
   { value: 'tax_refund', label: 'Tax Refund' },
   { value: 'reimbursement', label: 'Reimbursement' },
   { value: 'transfer', label: 'Transfer' },
+  { value: 'personal_repayment', label: 'Personal Repayment / Owed' },
   { value: 'owner_contribution', label: 'Owner Contribution' },
   { value: 'loan_proceeds', label: 'Loan Proceeds' },
   { value: 'other', label: 'Other' },
