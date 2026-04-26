@@ -72,6 +72,10 @@ export default function Tax() {
   const [deductionRows, setDeductionRows] = useState<DeductionRow[]>([]);
   const [taxPayments, setTaxPayments] = useState<TaxPaymentRow[]>([]);
   const [unreviewedDeductionCount, setUnreviewedDeductionCount] = useState(0);
+  // Total dollars of unreviewed business spend that COULD become deductions
+  // once categorized. Lets us tell the user "you're potentially leaving $X on
+  // the table" instead of just showing $0.
+  const [potentialDeductions, setPotentialDeductions] = useState<{ count: number; total: number }>({ count: 0, total: 0 });
   // Projection split: per-mode taxable income & deductions, regardless of active scope.
   const [projection, setProjection] = useState<{
     personal: { taxable: number; deductions: number };
