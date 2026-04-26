@@ -139,9 +139,10 @@ export default function Income() {
     const payroll = inRange.filter(t => t.income_type === 'payroll').reduce((s, t) => s + (t.amount || 0), 0);
     // Non-earning = transfers, refunds, reimbursements, owner contribs, loan proceeds, tax refunds
     const nonEarning = inRange.filter(t => (NON_EARNING_TYPES as readonly string[]).includes(t.income_type)).reduce((s, t) => s + (t.amount || 0), 0);
+    const personalRepayments = inRange.filter(t => t.income_type === 'personal_repayment').reduce((s, t) => s + (t.amount || 0), 0);
     // Other earned = anything earned that's not payroll or business revenue (interest, "other")
     const otherEarned = inRange.filter(t => !(NON_EARNING_TYPES as readonly string[]).includes(t.income_type) && !['business_revenue', 'payroll'].includes(t.income_type)).reduce((s, t) => s + (t.amount || 0), 0);
-    return { totalInflows, taxable, nonTaxable, revenue, payroll, nonEarning, otherEarned, personalIncome, businessIncome };
+    return { totalInflows, taxable, nonTaxable, revenue, payroll, nonEarning, personalRepayments, otherEarned, personalIncome, businessIncome };
   }, [transactions, dateFrom, dateTo, filterMode]);
 
   // Filtering
