@@ -100,7 +100,7 @@ export function CombinedWealthChart({
     };
 
     const rows = months.map(m => {
-      const label = new Date(m).toLocaleString('en-US', { month: 'short', year: '2-digit' });
+      const label = labelForMonth(m);
       const row: any = { label, _date: m };
       let total = 0;
       let any = false;
