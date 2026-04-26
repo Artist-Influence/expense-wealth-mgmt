@@ -1576,6 +1576,16 @@ export default function Expenses() {
         </div>
 
         {/* Comparative Summary — Personal vs Business at a glance, regardless of active tab */}
+        <div className="flex items-center justify-between mb-1.5">
+          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
+            Summary <span className="text-foreground/70 font-mono">· {dateLabel}</span>
+            {dateActive && (
+              <span className="ml-2 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm bg-primary/15 text-primary text-[9px] font-medium">
+                Filtered
+              </span>
+            )}
+          </p>
+        </div>
         <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mb-2">
           <div className="glass-panel-sm p-2.5">
             <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Personal Cash Out</p>
@@ -1598,6 +1608,33 @@ export default function Expenses() {
           <div className="glass-panel-sm p-2.5">
             <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Pending Reimbursable</p>
             <p className="text-sm font-mono font-semibold text-warning mt-0.5">{fmtMoney(crossModeTotals.pendingReimbursable)}</p>
+          </div>
+        </div>
+
+        {/* Period insight tiles — Avg / day, Largest expense, Unique merchants */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mb-2">
+          <div className="glass-panel-sm p-2.5">
+            <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Avg / day</p>
+            <p className="text-sm font-mono font-semibold text-foreground mt-0.5">{fmtMoney(stats.avgPerDay)}</p>
+            <p className="text-[9px] text-muted-foreground">over {stats.spanDays} day{stats.spanDays === 1 ? '' : 's'}</p>
+          </div>
+          <div className="glass-panel-sm p-2.5">
+            <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Largest expense</p>
+            {stats.largest ? (
+              <>
+                <p className="text-sm font-mono font-semibold text-foreground mt-0.5">{fmtMoney(stats.largest.amount)}</p>
+                <p className="text-[9px] text-muted-foreground truncate" title={stats.largest.description}>
+                  {stats.largest.description}{stats.largest.date ? ` · ${stats.largest.date}` : ''}
+                </p>
+              </>
+            ) : (
+              <p className="text-sm font-mono font-semibold text-muted-foreground mt-0.5">—</p>
+            )}
+          </div>
+          <div className="glass-panel-sm p-2.5">
+            <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Unique merchants</p>
+            <p className="text-sm font-mono font-semibold text-foreground mt-0.5">{stats.uniqueMerchants}</p>
+            <p className="text-[9px] text-muted-foreground">distinct payees in period</p>
           </div>
         </div>
 
