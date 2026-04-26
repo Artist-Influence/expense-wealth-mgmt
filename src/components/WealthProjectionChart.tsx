@@ -591,77 +591,191 @@ export function WealthProjectionChart({
           </div>
         )}
 
-        <div className="h-[300px]">
-          <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={series} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="2 4" stroke="hsl(var(--border))" opacity={0.5} />
-              <XAxis
-                dataKey="year"
-                tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
-                tickFormatter={(v) => String(v)}
-              />
-              <YAxis
-                tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
-                tickFormatter={(v) => fmtUsd(Number(v))}
-                scale={yScale === 'log' ? 'log' : 'auto'}
-                domain={yScale === 'log' ? [1, 'auto'] : [0, 'auto']}
-                allowDataOverflow={false}
-                width={60}
-              />
-              <Tooltip
-                contentStyle={{
-                  background: 'hsl(var(--popover))',
-                  border: '1px solid hsl(var(--border))',
-                  borderRadius: 8,
-                  fontSize: 11,
-                }}
-                labelFormatter={(year, payload) => {
-                  const a = payload?.[0]?.payload?.age;
-                  return a != null ? `${year} · age ${a}` : String(year);
-                }}
-                formatter={(value: any, name: any) => {
-                  if (value == null) return ['—', name];
-                  if (name === 'totalBand') return [null, null] as any;
-                  if (name === 'total') return [fmtUsd(Number(value)), 'Total'];
-                  const acc = accounts.find(a => a.id === name);
-                  return [fmtUsd(Number(value)), acc?.account_name || name];
-                }}
-              />
-              {/* Range band behind the lines */}
-              <Area
-                type="monotone"
-                dataKey="totalBand"
-                stroke="none"
-                fill="hsl(var(--foreground))"
-                fillOpacity={0.07}
-                isAnimationActive={false}
-                name="totalBand"
-              />
-              {accounts.map(a => (
-                <Line
-                  key={a.id}
-                  type="monotone"
-                  dataKey={a.id}
-                  stroke={colorFor(a.id)}
-                  strokeWidth={1.75}
-                  dot={false}
-                  hide={hidden.has(a.id)}
-                  name={a.id}
-                  isAnimationActive={false}
-                />
-              ))}
-              <Line
-                type="monotone"
-                dataKey="total"
-                stroke="hsl(var(--foreground))"
-                strokeWidth={2.5}
-                dot={false}
-                name="total"
-                isAnimationActive={false}
-              />
-            </ComposedChart>
-          </ResponsiveContainer>
-        </div>
+        {(() => {
+          // Compute milestones to render: only those between today's total and finalHigh,
+          // and only meaningful breakpoints.
+          const startTotal = series[0]?.total || 0;
+          const allMilestones = [
+            { v: 100_000, label: '$100k' },
+            { v: 500_000, label: '$500k' },
+            { v: 1_000_000, label: '$1M' },
+            { v: 5_000_000, label: '$5M' },
+            { v: 10_000_000, label: '$10M' },
+            { v: 25_000_000, label: '$25M' },
+            { v: 100_000_000, label: '$100M' },
+          ];
+          const yMax = finalHigh || finalTotal || 1;
+          const milestones = allMilestones.filter(m => m.v > startTotal * 1.2 && m.v < yMax * 0.95);
+          // Find crossover year for each milestone (first year total >= milestone).
+          const crossovers = milestones
+            .map(m => {
+              const row = series.find(r => (r.total || 0) >= m.v);
+              return row ? { ...m, year: row.year, age: row.age } : null;
+            })
+            .filter(Boolean) as Array<{ v: number; label: string; year: number; age: number }>;
+
+          // Build start-anchor for the "Today" reference line label.
+          const startYear = series[0]?.year;
+
+          return (
+            <div className="h-[360px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <ComposedChart data={series} margin={{ top: 12, right: 56, left: 0, bottom: 0 }}>
+                  <defs>
+                    {accounts.map(a => (
+                      <linearGradient key={a.id} id={`grad-${a.id}`} x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor={colorFor(a.id)} stopOpacity={0.85} />
+                        <stop offset="100%" stopColor={colorFor(a.id)} stopOpacity={0.35} />
+                      </linearGradient>
+                    ))}
+                    <linearGradient id="grad-upside" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="hsl(var(--foreground))" stopOpacity={0.12} />
+                      <stop offset="100%" stopColor="hsl(var(--foreground))" stopOpacity={0.02} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="2 4" stroke="hsl(var(--border))" opacity={0.4} vertical={false} />
+                  <XAxis
+                    dataKey="year"
+                    tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
+                    tickFormatter={(v) => String(v)}
+                    axisLine={{ stroke: 'hsl(var(--border))' }}
+                    tickLine={false}
+                  />
+                  <YAxis
+                    tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
+                    tickFormatter={(v) => fmtUsd(Number(v))}
+                    domain={[0, 'auto']}
+                    width={60}
+                    axisLine={false}
+                    tickLine={false}
+                  />
+                  <Tooltip
+                    cursor={{ stroke: 'hsl(var(--foreground))', strokeOpacity: 0.2, strokeWidth: 1 }}
+                    contentStyle={{
+                      background: 'hsl(var(--popover))',
+                      border: '1px solid hsl(var(--border))',
+                      borderRadius: 10,
+                      fontSize: 11,
+                      boxShadow: '0 8px 24px -8px hsl(0 0% 0% / 0.4)',
+                    }}
+                    labelFormatter={(year, payload) => {
+                      const a = payload?.[0]?.payload?.age;
+                      const t = payload?.[0]?.payload?.total;
+                      return (
+                        <div className="space-y-0.5">
+                          <div className="font-semibold text-foreground">{year} · age {a}</div>
+                          {t != null && <div className="text-muted-foreground text-[10px]">Total: <span className="text-foreground font-medium">{fmtUsd(Number(t))}</span></div>}
+                        </div>
+                      ) as any;
+                    }}
+                    formatter={(value: any, name: any) => {
+                      if (value == null) return ['—', name];
+                      if (name === 'totalHigh' || name === 'totalLow') return [null, null] as any;
+                      const acc = accounts.find(a => a.id === name);
+                      return [fmtUsd(Number(value)), acc?.account_name || name];
+                    }}
+                  />
+
+                  {/* Upside ribbon: from expected total up to optimistic total */}
+                  <Area
+                    type="monotone"
+                    dataKey="totalHigh"
+                    stroke="none"
+                    fill="url(#grad-upside)"
+                    isAnimationActive={false}
+                    name="totalHigh"
+                    activeDot={false}
+                  />
+
+                  {/* Stacked account areas */}
+                  {accounts.map(a => (
+                    <Area
+                      key={a.id}
+                      type="monotone"
+                      dataKey={a.id}
+                      stackId="acc"
+                      stroke={colorFor(a.id)}
+                      strokeWidth={1.5}
+                      fill={`url(#grad-${a.id})`}
+                      hide={hidden.has(a.id)}
+                      name={a.id}
+                      isAnimationActive={false}
+                      activeDot={{ r: 3, strokeWidth: 0 }}
+                    />
+                  ))}
+
+                  {/* Conservative-case line on top of the stack */}
+                  <Line
+                    type="monotone"
+                    dataKey="totalLow"
+                    stroke="hsl(var(--muted-foreground))"
+                    strokeWidth={1}
+                    strokeDasharray="3 4"
+                    dot={false}
+                    name="totalLow"
+                    isAnimationActive={false}
+                    activeDot={false}
+                  />
+
+                  {/* Today anchor */}
+                  {startYear != null && (
+                    <ReferenceLine
+                      x={startYear}
+                      stroke="hsl(var(--primary))"
+                      strokeOpacity={0.5}
+                      strokeDasharray="2 3"
+                      label={{
+                        value: `Today · ${fmtUsd(startTotal)}`,
+                        position: 'insideTopLeft',
+                        fill: 'hsl(var(--primary))',
+                        fontSize: 9,
+                        offset: 8,
+                      }}
+                    />
+                  )}
+
+                  {/* Milestone reference lines */}
+                  {milestones.map(m => (
+                    <ReferenceLine
+                      key={m.v}
+                      y={m.v}
+                      stroke="hsl(var(--muted-foreground))"
+                      strokeOpacity={0.35}
+                      strokeDasharray="3 6"
+                      label={{
+                        value: m.label,
+                        position: 'right',
+                        fill: 'hsl(var(--muted-foreground))',
+                        fontSize: 9,
+                        offset: 6,
+                      }}
+                    />
+                  ))}
+
+                  {/* Crossover markers */}
+                  {crossovers.map(c => (
+                    <ReferenceDot
+                      key={`x-${c.v}`}
+                      x={c.year}
+                      y={c.v}
+                      r={4}
+                      fill="hsl(var(--background))"
+                      stroke="hsl(var(--primary))"
+                      strokeWidth={2}
+                      label={{
+                        value: `age ${c.age}`,
+                        position: 'top',
+                        fill: 'hsl(var(--primary))',
+                        fontSize: 9,
+                        offset: 6,
+                      }}
+                    />
+                  ))}
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+          );
+        })()}
 
         {/* Clickable legend */}
         <div className="flex flex-wrap items-center gap-1.5 mt-2 pt-2 border-t border-border/50">
