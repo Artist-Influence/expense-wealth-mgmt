@@ -534,6 +534,11 @@ export default function Expenses() {
     // Any meaningful inline edit promotes the row to 'edited' (unless we're clearing the category).
     if (field === 'final_category') {
       updatePayload.review_status = nextValue ? 'edited' : 'needs_review';
+      // Auto-recompute tax-deduction flag when the category changes inline.
+      updatePayload.counts_as_tax_deduction = isDeductibleCategory(
+        tx.transaction_mode as any,
+        nextValue,
+      );
     } else if (!['approved'].includes(tx.review_status)) {
       updatePayload.review_status = 'edited';
     } else {
