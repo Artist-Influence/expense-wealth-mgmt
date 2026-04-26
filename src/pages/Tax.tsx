@@ -42,8 +42,11 @@ interface IncomeRow {
 
 interface DeductionRow {
   final_category: string | null;
+  predicted_category: string | null;
   amount: number | null;
   review_status: string;
+  transaction_mode: string | null;
+  counts_as_tax_deduction: boolean | null;
 }
 
 interface TaxPaymentRow {
