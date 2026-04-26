@@ -31,8 +31,17 @@ interface DuplicateResolverDialogProps {
   exactClusters: DuplicateCluster[];
   nearClusters: DuplicateCluster[];
   crossModePairs: { rowIds: string[] }[];
-  rowIndex: Map<string, DupClusterRow>;
+  rowIndex: Map<string, DupClusterRow> | Record<string, DupClusterRow>;
+  // NEW — optional income duplicates
+  incomeClusters?: DuplicateCluster[];
+  incomeRowIndex?: Map<string, DupClusterRow> | Record<string, DupClusterRow>;
   onResolved: () => void; // refresh after change
+}
+
+function getRow(idx: Map<string, DupClusterRow> | Record<string, DupClusterRow> | undefined, id: string): DupClusterRow | undefined {
+  if (!idx) return undefined;
+  if (idx instanceof Map) return idx.get(id);
+  return (idx as Record<string, DupClusterRow>)[id];
 }
 
 const PAGE_SIZE = 10;
@@ -54,25 +63,32 @@ export function DuplicateResolverDialog({
   nearClusters,
   crossModePairs,
   rowIndex,
+  incomeClusters = [],
+  incomeRowIndex,
   onResolved,
 }: DuplicateResolverDialogProps) {
-  const [tab, setTab] = useState<'exact' | 'near' | 'cross'>('exact');
+  const [tab, setTab] = useState<'exact' | 'near' | 'cross' | 'income'>('exact');
   const [page, setPage] = useState(0);
   const [busyId, setBusyId] = useState<string | null>(null);
 
-  // Reset state when reopening
+  // Reset state when reopening — pick first non-empty tab
   useEffect(() => {
     if (open) {
       setPage(0);
-      // Pick first non-empty tab
-      if (exactClusters.length === 0 && nearClusters.length > 0) setTab('near');
-      else if (exactClusters.length === 0 && nearClusters.length === 0 && crossModePairs.length > 0) setTab('cross');
+      if (exactClusters.length > 0) setTab('exact');
+      else if (incomeClusters.length > 0) setTab('income');
+      else if (nearClusters.length > 0) setTab('near');
+      else if (crossModePairs.length > 0) setTab('cross');
       else setTab('exact');
     }
-  }, [open, exactClusters.length, nearClusters.length, crossModePairs.length]);
+  }, [open, exactClusters.length, nearClusters.length, crossModePairs.length, incomeClusters.length]);
 
   const activeList: { rowIds: string[] }[] =
-    tab === 'exact' ? exactClusters : tab === 'near' ? nearClusters : crossModePairs;
+    tab === 'exact' ? exactClusters
+    : tab === 'near' ? nearClusters
+    : tab === 'cross' ? crossModePairs
+    : incomeClusters;
+  const activeRowIndex = tab === 'income' ? incomeRowIndex : rowIndex;
 
   const pageCount = Math.max(1, Math.ceil(activeList.length / PAGE_SIZE));
   const visible = useMemo(() => activeList.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE), [activeList, page]);
@@ -122,15 +138,31 @@ export function DuplicateResolverDialog({
   async function markNotDuplicates(rowIds: string[], clusterKey: string) {
     setBusyId(clusterKey);
     try {
-      const { error } = await supabase
-        .from('transactions_uploaded')
-        .update({ duplicate_status: 'unique', duplicate_of_transaction_id: null })
-        .in('id', rowIds);
+      const table = tab === 'income' ? 'income_transactions' : 'transactions_uploaded';
+      const updates: any = tab === 'income'
+        ? { duplicate_status: 'not_duplicate', duplicate_of_income_id: null }
+        : { duplicate_status: 'not_duplicate', duplicate_of_transaction_id: null };
+      const { error } = await supabase.from(table as any).update(updates).in('id', rowIds);
       if (error) throw error;
       toast.success('Marked as not duplicates');
       onResolved();
     } catch (e: any) {
       toast.error(`Update failed: ${e?.message || 'unknown error'}`);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function deleteIncomeLosers(loserIds: string[], clusterKey: string) {
+    if (!confirm(`Delete ${loserIds.length} duplicate income row${loserIds.length > 1 ? 's' : ''}? Keeps the oldest.`)) return;
+    setBusyId(clusterKey);
+    try {
+      const { error } = await supabase.from('income_transactions').delete().in('id', loserIds);
+      if (error) throw error;
+      toast.success(`Deleted ${loserIds.length} duplicate income row${loserIds.length > 1 ? 's' : ''}`);
+      onResolved();
+    } catch (e: any) {
+      toast.error(`Delete failed: ${e?.message || 'unknown error'}`);
     } finally {
       setBusyId(null);
     }
@@ -149,9 +181,12 @@ export function DuplicateResolverDialog({
         </DialogHeader>
 
         <Tabs value={tab} onValueChange={(v) => { setTab(v as any); setPage(0); }} className="flex-1 flex flex-col min-h-0">
-          <TabsList className="grid grid-cols-3 w-full shrink-0">
+          <TabsList className="grid grid-cols-4 w-full shrink-0">
             <TabsTrigger value="exact">
-              Exact <Badge variant="secondary" className="ml-2">{exactClusters.length}</Badge>
+              Exp Exact <Badge variant="secondary" className="ml-2">{exactClusters.length}</Badge>
+            </TabsTrigger>
+            <TabsTrigger value="income">
+              Income <Badge variant="secondary" className="ml-2">{incomeClusters.length}</Badge>
             </TabsTrigger>
             <TabsTrigger value="near">
               Possible <Badge variant="secondary" className="ml-2">{nearClusters.length}</Badge>
@@ -165,18 +200,19 @@ export function DuplicateResolverDialog({
             {activeList.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
                 <Check className="h-10 w-10 mb-2 text-success/60" />
-                <p className="text-sm">No {tab === 'exact' ? 'exact' : tab === 'near' ? 'possible' : 'cross-mode'} duplicates found.</p>
+                <p className="text-sm">No {tab === 'exact' ? 'exact expense' : tab === 'near' ? 'possible' : tab === 'cross' ? 'cross-mode' : 'income'} duplicates found.</p>
               </div>
             ) : (
               <ScrollArea className="h-[55vh] pr-3">
                 <div className="space-y-3">
                   {visible.map((cluster, ci) => {
                     const clusterKey = `${tab}-${page}-${ci}`;
-                    const rows = cluster.rowIds.map(id => rowIndex.get(id)).filter(Boolean) as DupClusterRow[];
+                    const rows = cluster.rowIds.map(id => getRow(activeRowIndex, id)).filter(Boolean) as DupClusterRow[];
                     if (rows.length < 2) return null;
                     const keeper = rows[0]; // oldest
                     const losers = rows.slice(1);
                     const isCross = tab === 'cross';
+                    const isIncome = tab === 'income';
 
                     return (
                       <div key={clusterKey} className="glass-panel p-3 space-y-2">
@@ -196,24 +232,38 @@ export function DuplicateResolverDialog({
                               >
                                 <X className="h-3 w-3 mr-1" /> Not duplicates
                               </Button>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                disabled={busyId === clusterKey}
-                                onClick={() => archiveLosers(keeper.id, losers.map(r => r.id), clusterKey)}
-                                className="h-7 text-xs border-warning/40 text-warning hover:bg-warning/10"
-                              >
-                                <Check className="h-3 w-3 mr-1" /> Keep oldest, archive {losers.length}
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                disabled={busyId === clusterKey}
-                                onClick={() => hardDelete(losers.map(r => r.id), clusterKey)}
-                                className="h-7 text-xs text-destructive hover:bg-destructive/10"
-                              >
-                                <Trash2 className="h-3 w-3" />
-                              </Button>
+                              {isIncome ? (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  disabled={busyId === clusterKey}
+                                  onClick={() => deleteIncomeLosers(losers.map(r => r.id), clusterKey)}
+                                  className="h-7 text-xs border-warning/40 text-warning hover:bg-warning/10"
+                                >
+                                  <Trash2 className="h-3 w-3 mr-1" /> Keep oldest, delete {losers.length}
+                                </Button>
+                              ) : (
+                                <>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    disabled={busyId === clusterKey}
+                                    onClick={() => archiveLosers(keeper.id, losers.map(r => r.id), clusterKey)}
+                                    className="h-7 text-xs border-warning/40 text-warning hover:bg-warning/10"
+                                  >
+                                    <Check className="h-3 w-3 mr-1" /> Keep oldest, archive {losers.length}
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    disabled={busyId === clusterKey}
+                                    onClick={() => hardDelete(losers.map(r => r.id), clusterKey)}
+                                    className="h-7 text-xs text-destructive hover:bg-destructive/10"
+                                  >
+                                    <Trash2 className="h-3 w-3" />
+                                  </Button>
+                                </>
+                              )}
                             </div>
                           )}
                         </div>
