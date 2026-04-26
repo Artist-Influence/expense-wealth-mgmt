@@ -165,9 +165,12 @@ export function DuplicateResolverDialog({
         </DialogHeader>
 
         <Tabs value={tab} onValueChange={(v) => { setTab(v as any); setPage(0); }} className="flex-1 flex flex-col min-h-0">
-          <TabsList className="grid grid-cols-3 w-full shrink-0">
+          <TabsList className="grid grid-cols-4 w-full shrink-0">
             <TabsTrigger value="exact">
-              Exact <Badge variant="secondary" className="ml-2">{exactClusters.length}</Badge>
+              Exp Exact <Badge variant="secondary" className="ml-2">{exactClusters.length}</Badge>
+            </TabsTrigger>
+            <TabsTrigger value="income">
+              Income <Badge variant="secondary" className="ml-2">{incomeClusters.length}</Badge>
             </TabsTrigger>
             <TabsTrigger value="near">
               Possible <Badge variant="secondary" className="ml-2">{nearClusters.length}</Badge>
@@ -181,18 +184,19 @@ export function DuplicateResolverDialog({
             {activeList.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
                 <Check className="h-10 w-10 mb-2 text-success/60" />
-                <p className="text-sm">No {tab === 'exact' ? 'exact' : tab === 'near' ? 'possible' : 'cross-mode'} duplicates found.</p>
+                <p className="text-sm">No {tab === 'exact' ? 'exact expense' : tab === 'near' ? 'possible' : tab === 'cross' ? 'cross-mode' : 'income'} duplicates found.</p>
               </div>
             ) : (
               <ScrollArea className="h-[55vh] pr-3">
                 <div className="space-y-3">
                   {visible.map((cluster, ci) => {
                     const clusterKey = `${tab}-${page}-${ci}`;
-                    const rows = cluster.rowIds.map(id => rowIndex.get(id)).filter(Boolean) as DupClusterRow[];
+                    const rows = cluster.rowIds.map(id => getRow(activeRowIndex, id)).filter(Boolean) as DupClusterRow[];
                     if (rows.length < 2) return null;
                     const keeper = rows[0]; // oldest
                     const losers = rows.slice(1);
                     const isCross = tab === 'cross';
+                    const isIncome = tab === 'income';
 
                     return (
                       <div key={clusterKey} className="glass-panel p-3 space-y-2">
