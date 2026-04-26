@@ -74,6 +74,7 @@ interface Transaction {
   predicted_method: string | null;
   review_status: string;
   is_transfer: boolean;
+  transfer_type: string | null;
   exclude_from_expense_totals: boolean;
   parse_status: string;
   is_split_parent: boolean;
