@@ -75,6 +75,7 @@ interface Transaction {
   exclude_from_expense_totals: boolean | null;
   transfer_type: string | null;
   source_file_name: string | null;
+  source_account_name: string | null;
   upload_batch_id: string | null;
   is_split_parent: boolean;
   parent_transaction_id: string | null;
@@ -95,6 +96,7 @@ export default function Expenses() {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [extraFilter, setExtraFilter] = useState<string>('all');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
+  const [methodFilter, setMethodFilter] = useState<string>('all');
   const [scanningRecurring, setScanningRecurring] = useState(false);
   const [dateFrom, setDateFrom] = useState<string | null>(null);
   const [dateTo, setDateTo] = useState<string | null>(null);
@@ -150,6 +152,7 @@ export default function Expenses() {
     const month = searchParams.get('month');
     const scope = searchParams.get('scope') as TransactionMode | null;
     const review = searchParams.get('review');
+    const method = searchParams.get('method');
     let consumed = false;
     if (scope && ['personal', 'business', 'reimbursable_work'].includes(scope)) {
       setMode(scope);
@@ -167,6 +170,10 @@ export default function Expenses() {
     }
     if (review) {
       setStatusFilter(review);
+      consumed = true;
+    }
+    if (method) {
+      setMethodFilter(method);
       consumed = true;
     }
     if (consumed) {
@@ -264,6 +271,14 @@ export default function Expenses() {
           return false;
         }
       }
+      if (methodFilter !== 'all') {
+        const effMethod = (tx.final_method || tx.predicted_method || tx.source_account_name || '').trim();
+        if (methodFilter === '__nomethod__') {
+          if (effMethod) return false;
+        } else if (effMethod.toLowerCase() !== methodFilter.toLowerCase()) {
+          return false;
+        }
+      }
       if (dateFrom && (!tx.date || tx.date < dateFrom)) return false;
       if (dateTo && (!tx.date || tx.date > dateTo)) return false;
       if (search) {
@@ -284,6 +299,10 @@ export default function Expenses() {
         case 'description': aVal = (a.description_raw || '').toLowerCase(); bVal = (b.description_raw || '').toLowerCase(); break;
         case 'amount': aVal = Math.abs(a.amount || 0); bVal = Math.abs(b.amount || 0); break;
         case 'category': aVal = (a.final_category || a.predicted_category || '').toLowerCase(); bVal = (b.final_category || b.predicted_category || '').toLowerCase(); break;
+        case 'method':
+          aVal = (a.final_method || a.predicted_method || a.source_account_name || '').toLowerCase();
+          bVal = (b.final_method || b.predicted_method || b.source_account_name || '').toLowerCase();
+          break;
         case 'confidence': aVal = a.confidence || 0; bVal = b.confidence || 0; break;
         default: aVal = a.date || ''; bVal = b.date || '';
       }
@@ -293,7 +312,19 @@ export default function Expenses() {
     });
 
     return result;
-  }, [transactions, statusFilter, extraFilter, categoryFilter, dateFrom, dateTo, search, sortCol, sortAsc]);
+  }, [transactions, statusFilter, extraFilter, categoryFilter, methodFilter, dateFrom, dateTo, search, sortCol, sortAsc]);
+
+  // Available payment methods derived from loaded transactions for the Method filter.
+  // Falls back to source_account_name (set on upload from filename) so accounts that
+  // never had a method explicitly tagged still show up as a slice option.
+  const availableMethods = useMemo(() => {
+    const set = new Set<string>();
+    transactions.forEach(t => {
+      const m = (t.final_method || t.predicted_method || t.source_account_name || '').trim();
+      if (m) set.add(m);
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [transactions]);
 
   // Available months derived from transactions for the date filter
   const availableMonths = useMemo(() => {
@@ -1423,6 +1454,19 @@ export default function Expenses() {
             </SelectContent>
           </Select>
 
+          <Select value={methodFilter} onValueChange={setMethodFilter}>
+            <SelectTrigger className={`w-[160px] h-8 glass-input text-xs ${methodFilter !== 'all' ? 'border-primary/40 text-primary' : ''}`}>
+              <SelectValue placeholder="Method" />
+            </SelectTrigger>
+            <SelectContent className="max-h-[320px]">
+              <SelectItem value="all">All Methods</SelectItem>
+              <SelectItem value="__nomethod__">(No method)</SelectItem>
+              {availableMethods.map(m => (
+                <SelectItem key={m} value={m}>{m}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
           {/* Date range filter */}
           <Popover>
             <PopoverTrigger asChild>
@@ -1690,7 +1734,7 @@ export default function Expenses() {
                   <SortHeader col="description" label="Description" />
                   <SortHeader col="amount" label="Amount" className="text-right" />
                   <SortHeader col="category" label="Category" />
-                  <th className="px-2 py-2 text-left text-[11px] font-medium text-muted-foreground">Method</th>
+                  <SortHeader col="method" label="Method" />
                   <th className="px-2 py-2 text-left text-[11px] font-medium text-muted-foreground">Owner</th>
                   <SortHeader col="confidence" label="Conf" />
                   <th className="px-2 py-2 text-left text-[11px] font-medium text-muted-foreground">Status</th>
@@ -1767,7 +1811,9 @@ export default function Expenses() {
                       </td>
                       <td className="px-1 py-0.5" onClick={e => e.stopPropagation()}>
                         {tx.is_split_parent ? (
-                          <span className="text-muted-foreground px-1">{tx.final_method || tx.predicted_method || '—'}</span>
+                          <span className="text-muted-foreground px-1">
+                            {tx.final_method || tx.predicted_method || tx.source_account_name || '—'}
+                          </span>
                         ) : (
                           <InlineMethodCell tx={tx} onCommit={v => inlineUpdate(tx, 'final_method', v)} />
                         )}
@@ -1995,7 +2041,8 @@ function InlineMethodCell({ tx, onCommit }: { tx: Transaction; onCommit: (value:
         if (e.key === 'Enter') { e.preventDefault(); (e.target as HTMLInputElement).blur(); }
         else if (e.key === 'Escape') { setValue(initial); (e.target as HTMLInputElement).blur(); }
       }}
-      placeholder="—"
+      placeholder={tx.source_account_name || '—'}
+      title={tx.source_account_name ? `Source account from upload: ${tx.source_account_name}` : undefined}
       className="h-6 px-1.5 text-xs border-transparent bg-transparent hover:bg-secondary/40 focus:bg-secondary/60 focus:border-border text-muted-foreground placeholder:text-muted-foreground/50"
     />
   );
