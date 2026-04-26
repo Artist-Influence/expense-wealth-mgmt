@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   ComposedChart, Line, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
+  ReferenceLine, ReferenceDot,
 } from 'recharts';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
