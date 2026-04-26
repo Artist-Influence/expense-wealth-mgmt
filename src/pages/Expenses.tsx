@@ -15,7 +15,7 @@ import { detectMethodFromFilename } from '@/lib/method-detector';
 import { detectTransfer } from '@/lib/transfer-detector';
 import { routeTransaction } from '@/lib/transaction-router';
 import { classifyIncome } from '@/lib/income-classifier';
-import { generateFingerprint, isNearDuplicate } from '@/lib/duplicate-detector';
+import { generateFingerprint, isNearDuplicate, findExactClusters, findNearClusters, type DuplicateCluster } from '@/lib/duplicate-detector';
 import { generateMerchantKey, normalizeDescription } from '@/lib/normalizer';
 import { backfillRecurringForOwner } from '@/lib/recurrence-detector';
 import { isStatementArtifact } from '@/lib/csv-parser';
