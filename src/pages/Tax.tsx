@@ -13,6 +13,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
 import { DollarSign, TrendingUp, Shield, AlertTriangle, Settings, Landmark, Building2, Building } from 'lucide-react';
+import { effectiveCategory, deductibilityHint, type DeductibilityHint } from '@/lib/categorization-engine';
 
 interface TaxProfile {
   id: string;
