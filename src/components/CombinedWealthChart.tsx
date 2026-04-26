@@ -19,6 +19,15 @@ const PALETTE = [
 
 const fmt = (n: number) => '$' + Math.round(n).toLocaleString();
 
+// Parse YYYY-MM-DD as a LOCAL date (avoid UTC midnight shifting back a day in
+// negative-offset timezones, which would mis-label Jan-26 as "Dec 25" etc.).
+const parseLocalDate = (yyyymmdd: string) => {
+  const [y, mo, d] = yyyymmdd.split('-').map(Number);
+  return new Date(y, (mo || 1) - 1, d || 1);
+};
+const labelForMonth = (yyyymmdd: string) =>
+  parseLocalDate(yyyymmdd).toLocaleString('en-US', { month: 'short', year: '2-digit' });
+
 export function CombinedWealthChart({
   accounts,
   snapshots,
@@ -68,7 +77,7 @@ export function CombinedWealthChart({
     // auto-snapshots from account-creation day don't shift the x-axis backwards.
     const earliest = allDates[0];
     const effectiveStart = startDate > earliest ? startDate : earliest;
-    const startD = new Date(effectiveStart);
+    const startD = parseLocalDate(effectiveStart);
     const now = new Date();
     const months: string[] = [];
     const cur = new Date(startD.getFullYear(), startD.getMonth(), 1);
@@ -91,7 +100,7 @@ export function CombinedWealthChart({
     };
 
     const rows = months.map(m => {
-      const label = new Date(m).toLocaleString('en-US', { month: 'short', year: '2-digit' });
+      const label = labelForMonth(m);
       const row: any = { label, _date: m };
       let total = 0;
       let any = false;

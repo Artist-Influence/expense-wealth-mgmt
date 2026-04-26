@@ -1,68 +1,47 @@
 ## Problem
 
-The two summary cards show $0 even though the data is there:
+Looking at the screenshot, the x-axis shows `Nov 25` and `Dec 25` even though every snapshot in the database starts on `2026-01-01` (verified via DB query — earliest snapshot is Jan 2026, 16 rows total spanning Jan→Apr 2026).
 
-- **Contributions YTD**: shows $0 because `contributions_ytd` in the DB is 0 for every account. The card reads stored values instead of calculating live. The "Sync from Expenses" button writes those values, but you've never clicked it (and shouldn't have to).
+The chart isn't actually plotting Nov/Dec 2025 data — it's a **timezone bug in the label formatter**. The month keys (`'2026-01-01'`, `'2026-02-01'`, …) are passed to `new Date(m)`, which parses bare `YYYY-MM-DD` strings as **UTC midnight**. When `toLocaleString('en-US', { month: 'short', year: '2-digit' })` then renders in the browser's local timezone (UTC-5/-8 in the Americas), it shifts back by hours and lands on the previous day:
 
-  Confirmed in the DB — your real 2026 contributions are sitting in `transactions_uploaded`:
-  - Gemini: **$5,600** (6 transfers)
-  - Wealthfront: **$6,600** (7 transfers)
-  - Dub: **$5,400** (3 transfers)
-  - Pokémon/TCGPlayer: **$445.60** (2 transfers)
-  - **Total YTD: ~$18,045.60**
+- `new Date('2026-01-01')` → UTC midnight Jan 1 → local Dec 31 2025 → label `"Dec 25"`
+- `new Date('2026-02-01')` → UTC midnight Feb 1 → local Jan 31 2026 → label `"Jan 26"`
+- …and so on
 
-- **Yearly Target**: shows $0 because no per-account `contribution_target_yearly` is set, and there is no place to set a portfolio-wide end-of-year target. The number it shows today is just the sum of empty per-account fields.
+So every month label is off by one. The Jan 2026 data point is mis-labeled `Dec 25`, the Feb point reads `Jan 26`, etc. There is no real Nov/Dec data to remove — we just need to fix the labels.
 
 ## Fix
 
-### 1. Contributions YTD — make it always live, no button required
+**File: `src/components/CombinedWealthChart.tsx`**
 
-In `src/pages/Wealth.tsx`, replace the stored-field calculation with a live SQL aggregation that runs on page load:
+Parse the `YYYY-MM-DD` month keys as **local dates** so the label matches the actual month. Replace any `new Date(m).toLocaleString(...)` calls with a small helper:
 
-- New `useQuery` keyed `['contributions_ytd_live', user.id, year]` that runs the same logic as the "Sync from Expenses" button: for each account with an `auto_track_pattern`, sum `ABS(amount)` from `transactions_uploaded` where `mode='personal'`, `date BETWEEN <year>-01-01 AND <year>-12-31`, and description matches any of the `|`-split tokens.
-- Returns a `Map<account_id, number>`.
-- Card reads `Array.from(map.values()).reduce(...)` for the total, scope-filtered by which accounts are visible.
-- Per-account cards also read from this map so the "$X contributed" line under each account is live too.
-- Keep the "Sync from Expenses" button — it now just persists the live values to `contributions_ytd` (so the projection chart, which reads the stored field for monthly-pace estimation, stays accurate). Auto-call it once on load if the stored values are stale (>$1 drift) so the projection chart self-heals without a click.
+```ts
+const labelForMonth = (yyyymmdd: string) => {
+  const [y, mo] = yyyymmdd.split('-').map(Number);
+  // Construct in local TZ (month is 0-indexed)
+  return new Date(y, mo - 1, 1).toLocaleString('en-US', {
+    month: 'short',
+    year: '2-digit',
+  });
+};
+```
 
-Tooltip on the card: "Sum of personal expenses YTD matching each account's auto-track pattern. Updates live."
+Apply it where the row label is built (currently line 94):
+```ts
+const label = labelForMonth(m);
+```
 
-### 2. Yearly Target — clickable card → end-of-2026 portfolio target
+Same treatment for any other place that does `new Date(<YYYY-MM-DD>)` for display in this file (verify line 71's `new Date(effectiveStart)` — that one is used only for month iteration arithmetic, not display, but switch it to `new Date(y, mo-1, 1)` too so the loop isn't off-by-a-day either).
 
-The card currently sums per-account `contribution_target_yearly`. We'll keep that as a fallback, but add a portfolio-level override stored in a new lightweight settings row.
-
-- **Schema (migration)**: add two columns to `app_settings`:
-  - `wealth_target_amount NUMERIC NOT NULL DEFAULT 0`
-  - `wealth_target_year INTEGER NOT NULL DEFAULT 2026`
-  
-  (Reusing `app_settings` since it's already per-owner with RLS — no new table needed.)
-
-- **Card behavior**:
-  - Whole card becomes clickable (cursor-pointer + hover ring).
-  - Shows `$X target by EOY 2026` when set, or `Set 2026 target` ghost text when unset.
-  - Below the number, a thin progress bar: `YTD / target` with `$X to go · Y months left` caption.
-
-- **Click → modal** (`SetWealthTargetDialog`):
-  - "End-of-year target" amount input.
-  - Year selector (default 2026, allow 2027+ for forward planning).
-  - Shows live math: "You're at $X YTD. To hit $Y by Dec 2026, contribute ~$Z/month for the next N months."
-  - Save button writes to `app_settings.wealth_target_amount` + `wealth_target_year`.
-
-- **Display logic**:
-  - If `wealth_target_amount > 0`: show that number, label as "EOY {year} Target".
-  - Else: fall back to summed per-account targets, label "Yearly Target (per-account)".
-
-### 3. Per-account "Contributions YTD" field in the edit modal
-
-Becomes read-only / informational, since it's now derived. Replaces with a small caption: "Auto-calculated from expenses matching `{auto_track_pattern}`. Edit the pattern to adjust." (Keeps the field editable as a manual override only when no pattern is set.)
+After the fix, the x-axis will read `Jan 26, Feb 26, Mar 26, Apr 26, Today` — starting at January as expected, with no phantom Nov/Dec 2025 ticks.
 
 ## Out of scope
 
-- Changing the per-account `contribution_target_yearly` UX (still editable in the per-account modal for fine-grained planning).
-- Any change to projection chart logic — it still uses `contributions_ytd` from the DB, which the auto-sync keeps fresh.
+- No DB changes (no Nov/Dec snapshots exist).
+- No changes to `WealthProjectionChart` (separate component, separate axis).
+- No change to the `startDate="2026-01-01"` prop — it's already correct; only the label rendering was wrong.
 
 ## Files
 
-- `src/pages/Wealth.tsx` — live YTD query, clickable target card, fallback logic, edit-modal copy tweak
-- `src/components/SetWealthTargetDialog.tsx` (new) — target-setting modal with monthly-pace math
-- Migration: add `wealth_target_amount` + `wealth_target_year` to `app_settings`
+- `src/components/CombinedWealthChart.tsx` — fix `new Date(YYYY-MM-DD)` parsing for month labels and the iteration cursor.
