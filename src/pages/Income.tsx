@@ -444,6 +444,7 @@ export default function Income() {
       ? [{ label: 'Business Revenue', value: summaryCards.revenue, icon: Briefcase, color: 'text-primary' }]
       : []),
     { label: 'Other Earned', value: summaryCards.otherEarned, icon: Receipt, color: 'text-muted-foreground' },
+    { label: 'Repayments / Owed Back', value: summaryCards.personalRepayments, icon: ShieldOff, color: 'text-muted-foreground' },
     { label: 'Transfers / Non-Earning', value: summaryCards.nonEarning, icon: Receipt, color: 'text-muted-foreground' },
   ];
 
