@@ -1814,18 +1814,6 @@ export default function Expenses() {
                           <span className="text-muted-foreground px-1">
                             {tx.final_method || tx.predicted_method || tx.source_account_name || '—'}
                           </span>
-                        ) : (tx.final_method || tx.predicted_method) ? (
-                          <InlineMethodCell tx={tx} onCommit={v => inlineUpdate(tx, 'final_method', v)} />
-                        ) : tx.source_account_name ? (
-                          // Untagged row — surface the source account (from upload filename) so
-                          // accounts like "Chase 5592" are still discoverable in the table.
-                          <span
-                            className="px-1.5 text-[11px] italic text-muted-foreground/70 cursor-text hover:text-foreground/80"
-                            title="From source filename — click cell to set a method"
-                            onClick={() => {/* InlineMethodCell handles its own focus once a value exists */}}
-                          >
-                            {tx.source_account_name}
-                          </span>
                         ) : (
                           <InlineMethodCell tx={tx} onCommit={v => inlineUpdate(tx, 'final_method', v)} />
                         )}
