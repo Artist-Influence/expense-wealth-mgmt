@@ -1454,6 +1454,19 @@ export default function Expenses() {
             </SelectContent>
           </Select>
 
+          <Select value={methodFilter} onValueChange={setMethodFilter}>
+            <SelectTrigger className={`w-[160px] h-8 glass-input text-xs ${methodFilter !== 'all' ? 'border-primary/40 text-primary' : ''}`}>
+              <SelectValue placeholder="Method" />
+            </SelectTrigger>
+            <SelectContent className="max-h-[320px]">
+              <SelectItem value="all">All Methods</SelectItem>
+              <SelectItem value="__nomethod__">(No method)</SelectItem>
+              {availableMethods.map(m => (
+                <SelectItem key={m} value={m}>{m}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
           {/* Date range filter */}
           <Popover>
             <PopoverTrigger asChild>
