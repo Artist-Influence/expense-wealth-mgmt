@@ -161,7 +161,7 @@ export function WealthProjectionChart({
   const [overrides, setOverrides] = useState<Set<string>>(() => loadOverrides());
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [showSettings, setShowSettings] = useState(false);
-  const [yScale, setYScale] = useState<'linear' | 'log'>('log');
+  
   // Track which auto-seeded rates were clamped down from a higher live value,
   // purely for transparency in the assumptions panel.
   const [cappedFrom, setCappedFrom] = useState<Record<string, number>>({});
