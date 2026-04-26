@@ -138,15 +138,31 @@ export function DuplicateResolverDialog({
   async function markNotDuplicates(rowIds: string[], clusterKey: string) {
     setBusyId(clusterKey);
     try {
-      const { error } = await supabase
-        .from('transactions_uploaded')
-        .update({ duplicate_status: 'unique', duplicate_of_transaction_id: null })
-        .in('id', rowIds);
+      const table = tab === 'income' ? 'income_transactions' : 'transactions_uploaded';
+      const updates: any = tab === 'income'
+        ? { duplicate_status: 'not_duplicate', duplicate_of_income_id: null }
+        : { duplicate_status: 'not_duplicate', duplicate_of_transaction_id: null };
+      const { error } = await supabase.from(table as any).update(updates).in('id', rowIds);
       if (error) throw error;
       toast.success('Marked as not duplicates');
       onResolved();
     } catch (e: any) {
       toast.error(`Update failed: ${e?.message || 'unknown error'}`);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function deleteIncomeLosers(loserIds: string[], clusterKey: string) {
+    if (!confirm(`Delete ${loserIds.length} duplicate income row${loserIds.length > 1 ? 's' : ''}? Keeps the oldest.`)) return;
+    setBusyId(clusterKey);
+    try {
+      const { error } = await supabase.from('income_transactions').delete().in('id', loserIds);
+      if (error) throw error;
+      toast.success(`Deleted ${loserIds.length} duplicate income row${loserIds.length > 1 ? 's' : ''}`);
+      onResolved();
+    } catch (e: any) {
+      toast.error(`Delete failed: ${e?.message || 'unknown error'}`);
     } finally {
       setBusyId(null);
     }
