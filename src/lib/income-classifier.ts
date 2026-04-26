@@ -95,6 +95,7 @@ export const INCOME_TYPE_OPTIONS = [
   { value: 'tax_refund', label: 'Tax Refund' },
   { value: 'reimbursement', label: 'Reimbursement' },
   { value: 'transfer', label: 'Transfer' },
+  { value: 'personal_repayment', label: 'Personal Repayment / Owed' },
   { value: 'owner_contribution', label: 'Owner Contribution' },
   { value: 'loan_proceeds', label: 'Loan Proceeds' },
   { value: 'other', label: 'Other' },
