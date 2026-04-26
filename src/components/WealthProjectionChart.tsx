@@ -789,15 +789,16 @@ export function WealthProjectionChart({
           {accounts.map(a => {
             const off = hidden.has(a.id);
             const ass = assumptions[a.id];
+            const finalForAcc = Number(finalRow?.[a.id] ?? 0);
             return (
               <button
                 key={a.id}
                 type="button"
                 onClick={() => toggle(a.id)}
-                className={`flex items-center gap-1.5 text-[10px] px-2 py-0.5 rounded-full border transition-all ${
+                className={`flex items-center gap-1.5 text-[10px] px-2 py-1 rounded-full border transition-all ${
                   off
                     ? 'border-border/40 text-muted-foreground/60 line-through'
-                    : 'border-border/60 text-foreground hover:border-foreground/40'
+                    : 'border-border/60 text-foreground hover:border-foreground/40 hover:bg-muted/30'
                 }`}
                 title={off ? 'Click to show' : `Click to hide · ${ass?.annual_rate_pct ?? '?'}%/yr`}
               >
@@ -805,8 +806,13 @@ export function WealthProjectionChart({
                   className="h-2 w-2 rounded-full"
                   style={{ background: off ? 'hsl(var(--muted))' : colorFor(a.id) }}
                 />
-                {a.account_name}
-                {ass && <span className="text-muted-foreground">{ass.annual_rate_pct}%</span>}
+                <span className="font-medium">{a.account_name}</span>
+                {!off && (
+                  <span className="text-muted-foreground tabular-nums">
+                    {fmtUsd(finalForAcc)}
+                  </span>
+                )}
+                {ass && <span className="text-muted-foreground/70 text-[9px]">· {ass.annual_rate_pct}%</span>}
               </button>
             );
           })}
