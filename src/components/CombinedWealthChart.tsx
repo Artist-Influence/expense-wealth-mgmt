@@ -19,6 +19,15 @@ const PALETTE = [
 
 const fmt = (n: number) => '$' + Math.round(n).toLocaleString();
 
+// Parse YYYY-MM-DD as a LOCAL date (avoid UTC midnight shifting back a day in
+// negative-offset timezones, which would mis-label Jan-26 as "Dec 25" etc.).
+const parseLocalDate = (yyyymmdd: string) => {
+  const [y, mo, d] = yyyymmdd.split('-').map(Number);
+  return new Date(y, (mo || 1) - 1, d || 1);
+};
+const labelForMonth = (yyyymmdd: string) =>
+  parseLocalDate(yyyymmdd).toLocaleString('en-US', { month: 'short', year: '2-digit' });
+
 export function CombinedWealthChart({
   accounts,
   snapshots,
