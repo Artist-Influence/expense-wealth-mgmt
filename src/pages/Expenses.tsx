@@ -10,7 +10,7 @@ import { TransactionDetailDrawer } from '@/components/TransactionDetailDrawer';
 import { SplitTransactionDialog } from '@/components/SplitTransactionDialog';
 import { AddCategoryDialog } from '@/components/AddCategoryDialog';
 import { previewCsvFile, parseCsvFileWithMapping, type ParsePreview, type ColumnMapping } from '@/lib/csv-parser';
-import { categorizeTransactions, categorizeWithAI, updateMerchantMemory } from '@/lib/categorization-engine';
+import { categorizeTransactions, categorizeWithAI, updateMerchantMemory, isDeductibleCategory } from '@/lib/categorization-engine';
 import { detectMethodFromFilename } from '@/lib/method-detector';
 import { detectTransfer } from '@/lib/transfer-detector';
 import { routeTransaction } from '@/lib/transaction-router';
@@ -424,6 +424,7 @@ export default function Expenses() {
     tax_treatment?: string; is_reimbursable?: boolean; reimbursable_to?: string;
     reimbursement_status?: string; business_purpose?: string;
     counts_toward_true_personal_spend?: boolean; counts_toward_true_business_spend?: boolean;
+    counts_as_tax_deduction?: boolean;
     client_or_project_tag?: string;
     _keepNeedsReview?: boolean;
   }) => {
@@ -443,6 +444,15 @@ export default function Expenses() {
       final_notes: values.notes,
       review_status: (!values.category && values._keepNeedsReview) ? 'needs_review' : 'edited',
     };
+
+    // Auto-recompute tax-deduction flag from (mode, category) unless the user
+    // explicitly toggled it in the drawer (values.counts_as_tax_deduction set).
+    if (values.counts_as_tax_deduction !== undefined) {
+      updatePayload.counts_as_tax_deduction = values.counts_as_tax_deduction;
+    } else if (values.category !== undefined) {
+      const mode = values.transaction_mode || transactions.find(t => t.id === id)?.transaction_mode;
+      updatePayload.counts_as_tax_deduction = isDeductibleCategory(mode as any, values.category);
+    }
 
     if (values.transaction_mode !== undefined) updatePayload.transaction_mode = values.transaction_mode;
     if (values.economic_owner !== undefined) updatePayload.economic_owner = values.economic_owner;
@@ -481,7 +491,13 @@ export default function Expenses() {
     if (!category) { toast.error('Set a category first'); return; }
     const { error } = await supabase
       .from('transactions_uploaded')
-      .update({ final_category: category, final_method: tx.final_method || tx.predicted_method, final_notes: tx.final_notes || tx.predicted_notes, review_status: 'approved' })
+      .update({
+        final_category: category,
+        final_method: tx.final_method || tx.predicted_method,
+        final_notes: tx.final_notes || tx.predicted_notes,
+        review_status: 'approved',
+        counts_as_tax_deduction: isDeductibleCategory(tx.transaction_mode as any, category),
+      })
       .eq('id', tx.id);
     if (!error) {
       if (tx.parse_status === 'ok' && !tx.is_transfer && !tx.is_split_parent && !tx.parent_transaction_id && tx.duplicate_status !== 'possible_duplicate') {
@@ -524,6 +540,11 @@ export default function Expenses() {
     // Any meaningful inline edit promotes the row to 'edited' (unless we're clearing the category).
     if (field === 'final_category') {
       updatePayload.review_status = nextValue ? 'edited' : 'needs_review';
+      // Auto-recompute tax-deduction flag when the category changes inline.
+      updatePayload.counts_as_tax_deduction = isDeductibleCategory(
+        tx.transaction_mode as any,
+        nextValue,
+      );
     } else if (!['approved'].includes(tx.review_status)) {
       updatePayload.review_status = 'edited';
     } else {
@@ -1113,6 +1134,13 @@ export default function Expenses() {
             treatment_type: isCcPayment ? 'credit_card_payment' : isRefund ? 'refund' : isHighConfTransfer ? 'transfer' : 'expense',
             counts_toward_true_personal_spend: (isHighConfTransfer || isCcPayment || isRefund) ? false : modeDefaults.counts_toward_true_personal_spend,
             counts_toward_true_business_spend: (isHighConfTransfer || isCcPayment || isRefund) ? false : modeDefaults.counts_toward_true_business_spend,
+            // Auto-flag tax deductibility based on (mode, category). Never flags
+            // transfers / CC payments / refunds. User can override per-row in the
+            // detail drawer. Without this the Tax page perpetually shows $0.
+            counts_as_tax_deduction:
+              (isHighConfTransfer || isCcPayment || isRefund)
+                ? false
+                : isDeductibleCategory(mode, finalCat || predictedCat),
           };
         });
         const { error: txError } = await supabase.from('transactions_uploaded').insert(chunk);

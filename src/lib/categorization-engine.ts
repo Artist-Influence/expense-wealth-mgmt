@@ -5,6 +5,51 @@ import { detectRecurrence } from './recurrence-detector';
 
 export type RecurringHistoryMap = Map<string, { date: string; amount: number }[]>;
 
+// ──────────────────────────────────────────────────────────────────────────────
+// Tax-deduction auto-flagging
+//
+// Determines whether a categorized transaction should default to
+// `counts_as_tax_deduction = true`. The user can always override per-row in
+// the detail drawer; this just gives us a sane non-zero starting point so the
+// Tax page doesn't perpetually show $0 deductions.
+//
+// Sets are intentionally narrow & lower-cased for fuzzy comparison.
+// ──────────────────────────────────────────────────────────────────────────────
+const BUSINESS_DEDUCTIBLE_CATEGORIES = new Set<string>([
+  'vendor payment', 'subscriptions', 'software', 'equipment', 'office supplies',
+  'travel', 'dining', 'meals', 'marketing', 'advertising', 'insurance',
+  'fees', 'bank fees', 'commission', 'payroll', 'contractor',
+  'professional services', 'rent', 'utilities', 'phone', 'internet',
+  'shipping', 'education', 'business',
+]);
+
+// Personal categories that are commonly itemizable (kept narrow on purpose —
+// most personal spend is NOT deductible).
+const PERSONAL_DEDUCTIBLE_CATEGORIES = new Set<string>([
+  'health', 'medical', 'health/medical', 'charity', 'charitable',
+  'mortgage interest', 'state taxes', 'property tax', 'property taxes',
+]);
+
+// Categories that should NEVER be auto-flagged regardless of mode (they are
+// transfers / capital movements / tax payments themselves).
+const NEVER_DEDUCTIBLE = new Set<string>([
+  'cc payment', 'transfer', 'investment', 'tax payment', 'owner draw',
+  'distribution', 'capital contribution', 'loan payment',
+]);
+
+export function isDeductibleCategory(
+  mode: 'personal' | 'business' | string | null | undefined,
+  category: string | null | undefined,
+): boolean {
+  if (!category) return false;
+  const c = category.trim().toLowerCase();
+  if (!c) return false;
+  if (NEVER_DEDUCTIBLE.has(c)) return false;
+  if (mode === 'business') return BUSINESS_DEDUCTIBLE_CATEGORIES.has(c);
+  if (mode === 'personal') return PERSONAL_DEDUCTIBLE_CATEGORIES.has(c);
+  return false;
+}
+
 interface MerchantMemoryRecord {
   merchant_key: string;
   most_common_category: string | null;

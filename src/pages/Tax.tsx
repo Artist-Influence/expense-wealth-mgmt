@@ -72,6 +72,10 @@ export default function Tax() {
   const [deductionRows, setDeductionRows] = useState<DeductionRow[]>([]);
   const [taxPayments, setTaxPayments] = useState<TaxPaymentRow[]>([]);
   const [unreviewedDeductionCount, setUnreviewedDeductionCount] = useState(0);
+  // Total dollars of unreviewed business spend that COULD become deductions
+  // once categorized. Lets us tell the user "you're potentially leaving $X on
+  // the table" instead of just showing $0.
+  const [potentialDeductions, setPotentialDeductions] = useState<{ count: number; total: number }>({ count: 0, total: 0 });
   // Projection split: per-mode taxable income & deductions, regardless of active scope.
   const [projection, setProjection] = useState<{
     personal: { taxable: number; deductions: number };
@@ -166,18 +170,33 @@ export default function Tax() {
     const { data } = await q;
     setDeductionRows((data as DeductionRow[]) || []);
 
-    // Also count unreviewed deductions for warning
+    // Count + sum unreviewed business transactions in scope. These are the
+    // rows that haven't been categorized yet, so they CAN'T be flagged as
+    // deductions (the flag is set at categorize-time). The whole pile is
+    // potential additional deductions.
     let cq = supabase
       .from('transactions_uploaded')
-      .select('id', { count: 'exact', head: true })
+      .select('amount', { count: 'exact' })
       .eq('owner_id', user!.id)
-      .eq('counts_as_tax_deduction', true)
+      .eq('is_split_parent', false)
+      .eq('is_transfer', false)
       .in('review_status', ['needs_review', 'suggested', 'ai_suggested'])
       .gte('date', yearStart)
       .lte('date', yearEnd);
-    if (scope !== 'all') cq = cq.eq('transaction_mode', scope);
-    const { count } = await cq;
+    // Only ever count business spend as "potential deductions" — most personal
+    // spend isn't deductible so it'd be misleading.
+    if (scope === 'business' || scope === 'all') {
+      cq = cq.eq('transaction_mode', 'business');
+    } else {
+      cq = cq.eq('transaction_mode', 'personal');
+    }
+    const { data: unreviewedRows, count } = await cq;
     setUnreviewedDeductionCount(count || 0);
+    const total = (unreviewedRows || []).reduce(
+      (s: number, r: any) => s + Math.abs(Number(r.amount || 0)),
+      0,
+    );
+    setPotentialDeductions({ count: count || 0, total });
   }
 
   async function loadTaxPayments() {
@@ -439,12 +458,24 @@ export default function Tax() {
           ) : null;
         })()}
 
-        {/* Unreviewed deductions warning */}
-        {unreviewedDeductionCount > 0 && (
-          <div className="rounded-lg border border-warning/30 bg-warning/5 px-4 py-2 text-xs text-warning flex items-start gap-2">
-            <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
-            <span>{unreviewedDeductionCount} potential deduction{unreviewedDeductionCount > 1 ? 's' : ''} from unreviewed transactions excluded — review them to include in estimates.</span>
-          </div>
+        {/* Unreviewed business spend → potential additional deductions */}
+        {potentialDeductions.count > 0 && (
+          <a
+            href={`/?scope=${scope === 'all' ? 'business' : scope}&review=unreviewed`}
+            className="block rounded-lg border border-warning/30 bg-warning/5 px-4 py-3 text-xs text-warning hover:bg-warning/10 transition-colors"
+          >
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+              <div className="flex-1">
+                <div className="font-medium">
+                  {potentialDeductions.count} {scope === 'personal' ? 'personal' : 'business'} transaction{potentialDeductions.count > 1 ? 's' : ''} still need categorization for {selectedYear}
+                </div>
+                <div className="text-warning/80 mt-0.5">
+                  Up to <span className="font-semibold">{fmt(potentialDeductions.total)}</span> in additional deductions could be unlocked. Your tax estimate is likely overstated. <span className="underline">Review now →</span>
+                </div>
+              </div>
+            </div>
+          </a>
         )}
 
         {/* Adjusted income context */}
