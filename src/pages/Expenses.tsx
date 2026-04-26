@@ -256,7 +256,133 @@ export default function Expenses() {
     setLoading(false);
   };
 
-  // Filtering and sorting
+  /**
+   * "Find duplicates" sweep across already-imported rows.
+   * Loads all rows for the active mode (paged), groups by fingerprint,
+   * then runs near-dup pairwise within amount buckets. Marks DB rows so
+   * the existing "Possible duplicates" filter and badge work, then opens
+   * the resolver dialog. Also surfaces cross-mode same-charge pairs as
+   * read-only suggestions.
+   */
+  const runDuplicateSweep = async () => {
+    if (!user) return;
+    setSweepingDuplicates(true);
+    const tId = toast.loading('Scanning for duplicate transactions…');
+    try {
+      // Pull a slim row set across ALL modes (cross-mode tab needs it).
+      const rows: { id: string; date: string | null; description_normalized: string | null; description_raw: string | null; amount: number | null; duplicate_fingerprint: string | null; mode: string; created_at: string | null; final_category: string | null; predicted_category: string | null; final_method: string | null; predicted_method: string | null; source_file_name: string | null; source_account_name: string | null; duplicate_status: string | null; is_transfer: boolean | null; is_split_parent: boolean | null; parent_transaction_id: string | null; review_status: string }[] = [];
+      let from = 0;
+      const pageSize = 1000;
+      let hasMore = true;
+      while (hasMore) {
+        const { data } = await supabase
+          .from('transactions_uploaded')
+          .select('id, date, description_normalized, description_raw, amount, duplicate_fingerprint, mode, created_at, final_category, predicted_category, final_method, predicted_method, source_file_name, source_account_name, duplicate_status, is_transfer, is_split_parent, parent_transaction_id, review_status')
+          .eq('owner_id', user.id)
+          .range(from, from + pageSize - 1);
+        if (data) rows.push(...(data as any));
+        hasMore = (data?.length ?? 0) === pageSize;
+        from += pageSize;
+      }
+
+      // Filter out rows that aren't real expenses for clustering purposes.
+      const activeRows = rows.filter(r =>
+        r.amount != null &&
+        !r.is_split_parent &&
+        !r.parent_transaction_id &&
+        r.review_status !== 'archived'
+      );
+
+      // Same-mode clustering uses normalized fingerprint already in DB (or recomputed).
+      const sameModeRows = activeRows.filter(r => r.mode === categoryMode).map(r => ({
+        id: r.id,
+        date: r.date,
+        description_normalized: r.description_normalized || '',
+        amount: Number(r.amount),
+        fingerprint: r.duplicate_fingerprint || generateFingerprint(r.mode, r.date, Number(r.amount), r.description_normalized || ''),
+        created_at: r.created_at,
+      }));
+
+      const exact = findExactClusters(sameModeRows);
+      const exactIds = new Set<string>();
+      for (const c of exact) for (const id of c.rowIds) exactIds.add(id);
+      const near = findNearClusters(sameModeRows, exactIds, 7);
+
+      // Cross-mode pairs: same date + amount + matching merchant key, different mode.
+      const crossPairs: { rowIds: string[] }[] = [];
+      const byKey = new Map<string, typeof activeRows>();
+      for (const r of activeRows) {
+        const mk = generateMerchantKey(r.description_normalized || '');
+        if (!mk || !r.date) continue;
+        const k = `${r.date}|${Math.round(Number(r.amount) * 100)}|${mk}`;
+        const list = byKey.get(k) || [];
+        list.push(r);
+        byKey.set(k, list);
+      }
+      for (const list of byKey.values()) {
+        if (list.length < 2) continue;
+        const modes = new Set(list.map(r => r.mode));
+        if (modes.size < 2) continue;
+        crossPairs.push({ rowIds: list.map(r => r.id) });
+      }
+
+      // Mark same-mode dups in DB (idempotent).
+      if (exact.length > 0) {
+        for (const c of exact) {
+          const [keeper, ...losers] = c.rowIds;
+          if (losers.length > 0) {
+            await supabase.from('transactions_uploaded')
+              .update({ duplicate_status: 'possible_duplicate', duplicate_of_transaction_id: keeper })
+              .in('id', losers);
+          }
+        }
+      }
+      if (near.length > 0) {
+        for (const c of near) {
+          const [keeper, ...losers] = c.rowIds;
+          if (losers.length > 0) {
+            await supabase.from('transactions_uploaded')
+              .update({ duplicate_status: 'possible_duplicate', duplicate_of_transaction_id: keeper })
+              .in('id', losers);
+          }
+        }
+      }
+
+      // Build row index for the dialog
+      const idx = new Map<string, DupClusterRow>();
+      for (const r of activeRows) {
+        idx.set(r.id, {
+          id: r.id, date: r.date, description_raw: r.description_raw,
+          description_normalized: r.description_normalized, amount: r.amount,
+          final_category: r.final_category, predicted_category: r.predicted_category,
+          final_method: r.final_method, predicted_method: r.predicted_method,
+          source_file_name: r.source_file_name, source_account_name: r.source_account_name,
+          mode: r.mode, duplicate_status: r.duplicate_status,
+        });
+      }
+
+      setExactClusters(exact);
+      setNearClusters(near);
+      setCrossModePairs(crossPairs);
+      setClusterRowIndex(idx);
+      toast.dismiss(tId);
+      const total = exact.length + near.length;
+      if (total === 0 && crossPairs.length === 0) {
+        toast.success('No duplicates found 🎉');
+      } else {
+        toast.success(`Found ${exact.length} exact + ${near.length} possible${crossPairs.length ? ` + ${crossPairs.length} cross-mode` : ''} cluster${total + crossPairs.length === 1 ? '' : 's'}`);
+        setResolverOpen(true);
+      }
+      await loadTransactions();
+    } catch (err: any) {
+      toast.dismiss(tId);
+      toast.error(`Sweep failed: ${err?.message || 'unknown error'}`);
+      console.error(err);
+    } finally {
+      setSweepingDuplicates(false);
+    }
+  };
+
   const filtered = useMemo(() => {
     let result = transactions.filter(tx => {
       if (statusFilter === 'unreviewed') {
