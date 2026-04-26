@@ -1014,11 +1014,27 @@ export default function Expenses() {
       const dates = validRows.map(r => r.date).filter(Boolean).sort();
       const minDate = dates[0];
       const maxDate = dates[dates.length - 1];
+      // Widen the lookup window by ±3 days so edge-of-window matches still hit.
+      const shiftDate = (iso: string, days: number) => {
+        const d = new Date(iso + 'T00:00:00');
+        d.setDate(d.getDate() + days);
+        return d.toISOString().slice(0, 10);
+      };
 
       const existingFingerprints = new Set<string>();
       const existingForNearDup: { date: string | null; amount: number; description_normalized: string; id: string; fingerprint: string }[] = [];
 
+      const ingestExisting = (rows: { id: string; date: string | null; description_normalized: string | null; amount: number | null; duplicate_fingerprint: string | null }[]) => {
+        for (const row of rows) {
+          const fp = row.duplicate_fingerprint || generateFingerprint(categoryMode, row.date, row.amount ?? 0, row.description_normalized || '');
+          existingFingerprints.add(fp);
+          existingForNearDup.push({ date: row.date, amount: row.amount ?? 0, description_normalized: row.description_normalized || '', id: row.id, fingerprint: fp });
+        }
+      };
+
       if (minDate && maxDate) {
+        const fromDate = shiftDate(minDate, -3);
+        const toDate = shiftDate(maxDate, 3);
         let from = 0;
         const pageSize = 1000;
         let hasMore = true;
@@ -1027,27 +1043,46 @@ export default function Expenses() {
             .from('transactions_uploaded')
             .select('id, date, description_normalized, amount, duplicate_fingerprint')
             .eq('mode', categoryMode).eq('owner_id', user.id)
-            .gte('date', minDate).lte('date', maxDate)
+            .gte('date', fromDate).lte('date', toDate)
             .range(from, from + pageSize - 1);
-          if (existing) {
-            for (const row of existing) {
-              const fp = row.duplicate_fingerprint || generateFingerprint(categoryMode, row.date, row.amount ?? 0, row.description_normalized || '');
-              existingFingerprints.add(fp);
-              existingForNearDup.push({ date: row.date, amount: row.amount ?? 0, description_normalized: row.description_normalized || '', id: row.id, fingerprint: fp });
-            }
-          }
+          if (existing) ingestExisting(existing as any);
           hasMore = (existing?.length ?? 0) === pageSize;
           from += pageSize;
         }
+      }
+      // Also pull rows with NULL date so they participate in fp matching.
+      {
+        const { data: nullDateRows } = await supabase
+          .from('transactions_uploaded')
+          .select('id, date, description_normalized, amount, duplicate_fingerprint')
+          .eq('mode', categoryMode).eq('owner_id', user.id)
+          .is('date', null)
+          .limit(1000);
+        if (nullDateRows) ingestExisting(nullDateRows as any);
       }
 
       let exactDupCount = 0, possibleDupCount = 0;
       const rowsToInsert: typeof validRows = [];
       const dupStatuses: Map<number, { status: string; matchId: string | null }> = new Map();
+      const exactSkippedDetail: { date: string | null; amount: number; description: string; matched_id: string | null }[] = [];
+      // In-file dedup: track signatures already seen in THIS import (amount + merchant key).
+      const inFileNearSeen = new Map<string, number>();
 
       for (const tx of validRows) {
         const fp = generateFingerprint(categoryMode, tx.date, tx.amount, tx.description_normalized);
-        if (appSettings.preventExactDuplicates && existingFingerprints.has(fp)) { exactDupCount++; continue; }
+        if (appSettings.preventExactDuplicates && existingFingerprints.has(fp)) {
+          exactDupCount++;
+          const matched = existingForNearDup.find(e => e.fingerprint === fp);
+          if (exactSkippedDetail.length < 50) {
+            exactSkippedDetail.push({
+              date: tx.date,
+              amount: tx.amount,
+              description: tx.description_raw?.slice(0, 120) || tx.description_normalized?.slice(0, 120) || '',
+              matched_id: matched?.id || null,
+            });
+          }
+          continue;
+        }
         let nearDupMatch: string | null = null;
         if (appSettings.flagPossibleDuplicates) {
           for (const existing of existingForNearDup) {
@@ -1055,7 +1090,23 @@ export default function Expenses() {
             if (isNearDuplicate(tx, existing)) { nearDupMatch = existing.id; possibleDupCount++; break; }
           }
         }
-        dupStatuses.set(rowsToInsert.length, { status: nearDupMatch ? 'possible_duplicate' : 'unique', matchId: nearDupMatch });
+        // In-file near-duplicate sweep (against rows already queued for insert this batch).
+        if (!nearDupMatch && appSettings.flagPossibleDuplicates) {
+          const mk = generateMerchantKey(tx.description_normalized || '');
+          const inFileKey = `${Math.round(tx.amount * 100)}|${mk}`;
+          if (mk && inFileNearSeen.has(inFileKey)) {
+            // Mark THIS row as a possible duplicate of the earlier one in the same file.
+            const earlierIdx = inFileNearSeen.get(inFileKey)!;
+            const earlierFp = generateFingerprint(categoryMode, rowsToInsert[earlierIdx].date, rowsToInsert[earlierIdx].amount, rowsToInsert[earlierIdx].description_normalized);
+            // We don't have its DB id yet; rely on duplicate_fingerprint to link post-insert.
+            void earlierFp;
+            possibleDupCount++;
+            nearDupMatch = '__in_file__';
+          } else if (mk) {
+            inFileNearSeen.set(inFileKey, rowsToInsert.length);
+          }
+        }
+        dupStatuses.set(rowsToInsert.length, { status: nearDupMatch ? 'possible_duplicate' : 'unique', matchId: nearDupMatch === '__in_file__' ? null : nearDupMatch });
         rowsToInsert.push(tx);
         existingFingerprints.add(fp);
       }
