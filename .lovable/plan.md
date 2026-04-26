@@ -1,98 +1,98 @@
-## What's wrong with the current chart
+## What's actually broken
 
-Looking at the screenshot, the log-scale fix made things technically correct but visually flat:
+### Issue 1 — 404 on the "Review now" warning link
 
-- Six near-parallel thin lines that all look identical in slope and color-weight.
-- Half the chart is dead space (the area below $10k and above $1M).
-- The headline "At age 65: $11.55M" is small text buried at the top — the most important number on the screen is the least visible.
-- No visual anchors: you can't instantly tell *when* you cross $1M, *when* you cross $5M, or how much of the future is "growth" vs "what you have today."
-- The range band ($3.65M – $35.47M) is a useful number but invisible in the chart.
-
-This is data, not a story. Let's make it a story.
-
-## Redesign
-
-Replace the line-chart view with a **stacked area chart** plus a hero stat strip and milestone markers. This is what a polished personal-finance tool (Wealthfront, Personal Capital, Monarch) actually looks like.
-
-### 1. Hero stat strip (above the chart)
-
-A 3-card row that tells the whole story before you even look at the graph:
-
-```text
-┌─────────────────┬───────────────────┬─────────────────────┐
-│  TODAY          │  AT AGE 65        │  MULTIPLIER         │
-│  $48,200        │  $11.5M           │  239× your money    │
-│  4 accounts     │  in 40 years      │  Range: $3.6M–$35M  │
-└─────────────────┴───────────────────┴─────────────────────┘
+In `src/pages/Allocations.tsx` (line ~369) the warning links to:
+```
+/expenses?month=...&scope=...&review=unreviewed
 ```
 
-- Big numbers (text-2xl), tabular-nums, color-coded.
-- Multiplier card uses a subtle gradient background so it pops.
-- Eliminates the need to squint at the chart for the headline number.
+But the app's router (`src/App.tsx`) mounts the Expenses page at `/`, not `/expenses` — so this path falls through to the NotFound route. Pure typo.
 
-### 2. Stacked area chart (replaces overlapping lines)
+### Issue 2 — Tax deductions stuck at $0
 
-Each account becomes a stacked color band — Gemini on top of Dub on top of S&P, etc. The total height = total wealth at that year. This is dramatically easier to read because:
+This is a real data-pipeline bug, not a display bug. Verified against your 2026 transactions:
 
-- You see the **total trajectory** as the top of the stack, no separate "total" line needed.
-- You see **each account's contribution** as the thickness of its band — visually obvious which accounts are doing the heavy lifting.
-- Crypto's exponential growth becomes a visible "wedge" expanding over time instead of a thin line crossing other thin lines.
-- No more spaghetti.
+- **0 of ~1,220 transactions** have `counts_as_tax_deduction = true`.
+- 205 business rows are properly categorized (`approved` / `edited`) — but every single one was inserted with `counts_as_tax_deduction = false` (the column default).
+- 571 business rows are `suggested` and still have NULL category, so they wouldn't count even if the flag were set.
 
-Technical: use Recharts `<Area stackId="acc" />` per account with `linearGradient` defs so each band fades from solid (bottom) to translucent (top) — premium look. Stroke at the top edge in the account color, ~1.5px.
+Tracing the code: the `counts_as_tax_deduction` flag is **never** written by the import pipeline (`src/pages/Expenses.tsx` lines 1089-1116) or by the categorization engine. The only place it's ever set is the manual TransactionDetailDrawer toggle. So unless you've individually clicked "tax deduction" on every business expense, the Tax page will always show $0.
 
-### 3. Range band as a soft shadow above the stack
+The Tax page in turn requires both `counts_as_tax_deduction = true` AND `review_status IN (approved, auto_categorized, edited)` — so unreviewed rows get silently excluded too.
 
-The optimistic/conservative ±band renders as a single light-gray ribbon **above** the expected stack (showing "upside") and a darker ribbon **below the top edge** (showing downside). Subtle `fillOpacity={0.08}`. So you see the most-likely outcome as solid, and the uncertainty as ghosted halos around it.
+## Fix plan
 
-### 4. Milestone reference lines
+### Fix 1 — Allocations link (1-line change)
 
-Horizontal dashed lines at meaningful wealth markers, labeled on the right edge:
+`src/pages/Allocations.tsx` — change `/expenses?...` to `/?...` so the warning link points at the actual Expenses route.
 
-- `$1M` (financial-independence-lite)
-- `$5M` (comfortable retirement)
-- `$10M` (generational wealth)
+### Fix 2 — Auto-flag tax-deductible business expenses
 
-Only show milestones that are within the chart's y-range. Labels in muted-foreground at ~9px, right-aligned. When the total line crosses one, the visual moment is unmistakable.
+Three coordinated changes:
 
-### 5. "Today" anchor
+#### A. Categorization engine: auto-flag business rows by category
 
-Vertical reference line on the leftmost year (2026) with a tiny "Today · $48k" label. Establishes the starting point so the growth feels real.
+In the import pipeline (`src/pages/Expenses.tsx` ~line 1089-1116, where each row payload is built), set `counts_as_tax_deduction` automatically based on:
+- `transaction_mode === 'business'` AND
+- the predicted/final category is in a deductible set, AND
+- it's not a transfer / CC payment / refund
 
-### 6. Crossover dots
+Deductible business categories (from your actual 2026 data):
+```
+Vendor Payment, Subscriptions, Equipment, Office Supplies, Software,
+Travel, Dining, Meals, Marketing, Advertising, Insurance, Fees,
+Commission, Payroll, Contractor, Professional Services, Rent, Utilities,
+Phone, Internet, Shipping, Education, Bank Fees, Business
+```
 
-For each milestone you cross before age 65, place a small `ReferenceDot` at the (year, milestone) crossover with a subtle pulse. So you see "you hit $1M at age 38" as a literal marker on the curve.
+Excluded (never deductible even when business-flagged): `CC Payment`, `Transfer`, `Investment`, `Tax Payment`, `Owner Draw`, `Distribution`.
 
-### 7. Drop the linear/log toggle
+Personal mode stays opt-in (only `Health/Medical`, `Charity`, `Mortgage Interest`, `State Taxes`, `Property Tax` flagged — most personal expenses aren't deductible).
 
-With the stacked area, log scale becomes meaningless (you can't stack on a log axis). Linear works because the stacked total naturally fills the chart's vertical space. Remove the toggle entirely — fewer knobs, more clarity.
+A small helper `isDeductibleCategory(mode, category)` in `src/lib/categorization-engine.ts` keeps the rules in one place. Both the import pipeline and the inline category-edit handler in Expenses call it.
 
-### 8. Cleaner legend pills
+#### B. Inline edits re-flag automatically
 
-Below the chart: rounded pills showing color swatch + account name + "$X.XM at 65" + rate%. Click to toggle visibility. The "at 65" inline number lets you compare account contributions at a glance without hovering.
+In `src/pages/Expenses.tsx`, when a user changes `final_category`, recompute `counts_as_tax_deduction` via the helper and update both fields together. So if you change a business row from "Subscriptions" to "Investment", the deduction flag flips off automatically. User can still override manually in the detail drawer.
 
-## Visual polish
+#### C. Backfill existing 2026 data
 
-- Card uses a subtle `bg-gradient-to-br from-card to-card/60` for depth.
-- Hero stat numbers use `font-semibold tabular-nums tracking-tight`.
-- Each account color gets a matching CSS gradient (top → bottom fade) defined once in `<defs>`.
-- Milestone lines: `strokeDasharray="3 6"`, `stroke="hsl(var(--muted-foreground))"`, `strokeOpacity={0.3}`.
-- Today marker: solid `stroke="hsl(var(--primary))"`, `strokeOpacity={0.5}`, with a small label badge.
-- Chart height bumped from 300px → 360px to give the visualization room to breathe.
-- Tooltip restyled: rounded card, account swatches inline, total at bottom with a subtle divider.
+A one-time migration that, for every existing `transactions_uploaded` row:
+- If `transaction_mode = 'business'` AND `is_split_parent = false` AND `is_transfer = false` AND `treatment_type = 'expense'` AND `final_category` is in the deductible set → set `counts_as_tax_deduction = true`.
+- If `transaction_mode = 'personal'` AND `final_category` is in the personal-deductible set → same.
+- Leave everything else untouched.
 
-## What you'll see after
+This unblocks the user's existing data without requiring them to re-import or hand-tag 200+ transactions.
 
-Instead of 6 thin parallel lines on a log scale, you'll see:
+### Fix 3 — Tax page: surface unreviewed business spend honestly
 
-- A bold "$11.5M" number front and center.
-- A rich stacked landscape that grows from a small base in 2026 to a tall colorful mountain by 2066.
-- Dashed lines marking $1M, $5M, $10M with the crossover years visible.
-- A "Today · $48k" anchor on the left that makes the journey concrete.
-- Each account's contribution to your future wealth obvious at a glance from band thickness.
+The current `unreviewedDeductionCount` counter only counts rows that already have `counts_as_tax_deduction = true` AND are unreviewed — by definition almost zero, so the warning never fires. Change it to count **all** business unreviewed transactions in the year (since most should be deductible), with a friendlier message:
+
+> ⚠️ 571 business transactions still need categorization for 2026 — your deductions are likely much higher than shown. [Review →]
+
+The link goes to `/?scope=business&review=unreviewed` (the proper Expenses route + the existing Expenses filter).
+
+Also expand the existing "Income data covers 0 of 4 months" warning to be less misleading — it currently fires whenever there's no income recorded yet, even though deductions might be present. Combine both signals into a single data-coverage panel.
+
+### Fix 4 — Tax page: relax the deduction filter (small)
+
+`loadDeductions` and `loadProjection` exclude `suggested` and `ai_suggested` rows. That's defensible (don't promise tax savings on guesses), but at minimum we should also surface a "potential additional deductions: $X" line below the projection table so the user sees what they'd unlock by reviewing. One extra small query, one extra row in the projection card.
 
 ## Files touched
 
-- `src/components/WealthProjectionChart.tsx` — full chart-section rewrite. Hero stat strip, stacked-area Recharts setup with gradient defs, reference lines/dots, restyled legend pills. Remove the linear/log toggle and its state. Keep all the existing simulation math, assumptions panel, live-rate seeding, and clamping logic untouched.
+- `src/pages/Allocations.tsx` — fix the `/expenses` → `/` link.
+- `src/lib/categorization-engine.ts` — add `isDeductibleCategory(mode, category)` helper + exported deductible-category sets.
+- `src/pages/Expenses.tsx` — call the helper in the import insert payload and in the inline category-update mutation.
+- `src/pages/Tax.tsx` — fix the unreviewed counter to count uncategorized business spend (not deduction-flagged-and-unreviewed), add "potential additional deductions" line, fix the warning link to `/?scope=business&review=unreviewed`.
+- New migration `supabase/migrations/<ts>_backfill_tax_deduction_flags.sql` — one-time UPDATE statements for existing data.
 
-No DB or other component changes.
+No schema changes (the column already exists), no RLS changes.
+
+## What you'll see after
+
+- Click the orange "Review now →" warning in Allocations → goes to the Expenses page filtered to unreviewed transactions for that month/scope, instead of 404.
+- Tax page deductions row immediately shows real numbers (~$45k+ from your already-approved business categories like Vendor Payment, Dining, Subscriptions, etc.) once the backfill runs.
+- "Est. Tax" drops accordingly — your $80,735 business tax estimate will shrink as your $36k of Vendor Payments + $5k Payroll + $1.8k Subscriptions etc. start counting against it.
+- A clear, actionable warning on the Tax page tells you exactly how many business transactions still need review to unlock more deductions.
+- Going forward, every newly categorized business expense in a deductible category auto-flags itself — no more silent zero.
