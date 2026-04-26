@@ -49,8 +49,13 @@ interface FileProgressListProps {
   mode: string;
 }
 
+type SkippedRow = { date: string | null; amount: number; description: string; matched_id: string | null };
+
 export function FileProgressList({ items, mode }: FileProgressListProps) {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const [skippedDialogBatchId, setSkippedDialogBatchId] = useState<string | null>(null);
+  const [skippedRows, setSkippedRows] = useState<SkippedRow[]>([]);
+  const [skippedLoading, setSkippedLoading] = useState(false);
 
   if (items.length === 0) return null;
 
@@ -61,6 +66,23 @@ export function FileProgressList({ items, mode }: FileProgressListProps) {
       else next.add(id);
       return next;
     });
+  };
+
+  const openSkipped = async (batchId: string) => {
+    setSkippedDialogBatchId(batchId);
+    setSkippedLoading(true);
+    setSkippedRows([]);
+    try {
+      const { data } = await supabase
+        .from('upload_batches')
+        .select('parse_details')
+        .eq('id', batchId)
+        .maybeSingle();
+      const detail = (data?.parse_details as any)?.exact_duplicates_detail;
+      if (Array.isArray(detail)) setSkippedRows(detail as SkippedRow[]);
+    } finally {
+      setSkippedLoading(false);
+    }
   };
 
   return (
