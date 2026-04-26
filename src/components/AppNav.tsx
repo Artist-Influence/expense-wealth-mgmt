@@ -139,16 +139,42 @@ export function AppNav() {
           })}
         </div>
 
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={signOut}
-          className="text-muted-foreground hover:text-foreground text-xs gap-1.5"
-        >
-          <LogOut className="h-3.5 w-3.5" />
-          <span className="hidden sm:inline">Sign Out</span>
-        </Button>
+        <div className="flex items-center gap-1.5 shrink-0">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => setHealthOpen(true)}
+                className={`flex items-center gap-1.5 h-7 px-2 rounded-lg border text-xs font-medium transition-colors ${healthTone}`}
+              >
+                <Activity className="h-3.5 w-3.5" />
+                <span className="hidden md:inline">
+                  {totalIssues === 0 ? 'Healthy' : `${totalIssues} issue${totalIssues > 1 ? 's' : ''}`}
+                </span>
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="text-xs">
+              Data Health Check {healthSummary?.ranAt ? `· last run ${new Date(healthSummary.ranAt).toLocaleString()}` : ''}
+            </TooltipContent>
+          </Tooltip>
+
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={signOut}
+            className="text-muted-foreground hover:text-foreground text-xs gap-1.5"
+          >
+            <LogOut className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Sign Out</span>
+          </Button>
+        </div>
       </div>
+
+      <HealthCheckPanel
+        open={healthOpen}
+        onClose={() => setHealthOpen(false)}
+        initialSummary={healthSummary}
+        onSummaryChange={setHealthSummary}
+      />
     </nav>
   );
 }
