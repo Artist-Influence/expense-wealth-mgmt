@@ -727,6 +727,17 @@ export default function Income() {
                           <Check className="h-3.5 w-3.5 text-success" />
                         </Button>
                       )}
+                      {tx.income_type !== 'personal_repayment' && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7"
+                          onClick={() => markAsRepayment([tx.id])}
+                          title="Mark as personal repayment — exclude from income totals"
+                        >
+                          <ShieldOff className="h-3.5 w-3.5 text-muted-foreground" />
+                        </Button>
+                      )}
                     </div>
                   </TableCell>
                 </TableRow>
