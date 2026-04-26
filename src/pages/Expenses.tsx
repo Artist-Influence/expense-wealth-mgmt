@@ -75,6 +75,7 @@ interface Transaction {
   exclude_from_expense_totals: boolean | null;
   transfer_type: string | null;
   source_file_name: string | null;
+  source_account_name: string | null;
   upload_batch_id: string | null;
   is_split_parent: boolean;
   parent_transaction_id: string | null;
