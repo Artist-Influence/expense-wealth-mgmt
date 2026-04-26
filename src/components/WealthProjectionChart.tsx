@@ -577,7 +577,11 @@ export function WealthProjectionChart({
               />
               <YAxis
                 tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
-                tickFormatter={(v) => v >= 1_000_000 ? `$${(v / 1_000_000).toFixed(1)}M` : v >= 1000 ? `$${Math.round(v / 1000)}k` : `$${v}`}
+                tickFormatter={(v) => fmtUsd(Number(v))}
+                scale={yScale === 'log' ? 'log' : 'auto'}
+                domain={yScale === 'log' ? [1, 'auto'] : [0, 'auto']}
+                allowDataOverflow={false}
+                width={60}
               />
               <Tooltip
                 contentStyle={{
