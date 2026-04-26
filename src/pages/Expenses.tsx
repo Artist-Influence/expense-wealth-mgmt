@@ -491,7 +491,13 @@ export default function Expenses() {
     if (!category) { toast.error('Set a category first'); return; }
     const { error } = await supabase
       .from('transactions_uploaded')
-      .update({ final_category: category, final_method: tx.final_method || tx.predicted_method, final_notes: tx.final_notes || tx.predicted_notes, review_status: 'approved' })
+      .update({
+        final_category: category,
+        final_method: tx.final_method || tx.predicted_method,
+        final_notes: tx.final_notes || tx.predicted_notes,
+        review_status: 'approved',
+        counts_as_tax_deduction: isDeductibleCategory(tx.transaction_mode as any, category),
+      })
       .eq('id', tx.id);
     if (!error) {
       if (tx.parse_status === 'ok' && !tx.is_transfer && !tx.is_split_parent && !tx.parent_transaction_id && tx.duplicate_status !== 'possible_duplicate') {
