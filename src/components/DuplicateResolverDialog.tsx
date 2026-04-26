@@ -232,24 +232,38 @@ export function DuplicateResolverDialog({
                               >
                                 <X className="h-3 w-3 mr-1" /> Not duplicates
                               </Button>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                disabled={busyId === clusterKey}
-                                onClick={() => archiveLosers(keeper.id, losers.map(r => r.id), clusterKey)}
-                                className="h-7 text-xs border-warning/40 text-warning hover:bg-warning/10"
-                              >
-                                <Check className="h-3 w-3 mr-1" /> Keep oldest, archive {losers.length}
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                disabled={busyId === clusterKey}
-                                onClick={() => hardDelete(losers.map(r => r.id), clusterKey)}
-                                className="h-7 text-xs text-destructive hover:bg-destructive/10"
-                              >
-                                <Trash2 className="h-3 w-3" />
-                              </Button>
+                              {isIncome ? (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  disabled={busyId === clusterKey}
+                                  onClick={() => deleteIncomeLosers(losers.map(r => r.id), clusterKey)}
+                                  className="h-7 text-xs border-warning/40 text-warning hover:bg-warning/10"
+                                >
+                                  <Trash2 className="h-3 w-3 mr-1" /> Keep oldest, delete {losers.length}
+                                </Button>
+                              ) : (
+                                <>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    disabled={busyId === clusterKey}
+                                    onClick={() => archiveLosers(keeper.id, losers.map(r => r.id), clusterKey)}
+                                    className="h-7 text-xs border-warning/40 text-warning hover:bg-warning/10"
+                                  >
+                                    <Check className="h-3 w-3 mr-1" /> Keep oldest, archive {losers.length}
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    disabled={busyId === clusterKey}
+                                    onClick={() => hardDelete(losers.map(r => r.id), clusterKey)}
+                                    className="h-7 text-xs text-destructive hover:bg-destructive/10"
+                                  >
+                                    <Trash2 className="h-3 w-3" />
+                                  </Button>
+                                </>
+                              )}
                             </div>
                           )}
                         </div>
