@@ -13,6 +13,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
 import { DollarSign, TrendingUp, Shield, AlertTriangle, Settings, Landmark, Building2, Building } from 'lucide-react';
+import { effectiveCategory, deductibilityHint, type DeductibilityHint } from '@/lib/categorization-engine';
 
 interface TaxProfile {
   id: string;
@@ -41,8 +42,11 @@ interface IncomeRow {
 
 interface DeductionRow {
   final_category: string | null;
+  predicted_category: string | null;
   amount: number | null;
   review_status: string;
+  transaction_mode: string | null;
+  counts_as_tax_deduction: boolean | null;
 }
 
 interface TaxPaymentRow {
@@ -117,18 +121,61 @@ export default function Tax() {
 
   // Projection always pulls personal+business splits independent of `scope` so the
   // "Income vs Expenses" projection card can show side-by-side personal vs business.
+  //
+  // We no longer require `counts_as_tax_deduction = true` — instead we pull every
+  // categorized expense in the year and decide deductibility client-side via
+  // `deductibilityHint`, so high-confidence predicted-but-not-yet-approved rows
+  // count toward the projection (matches what the user sees on Expenses).
   async function loadProjection() {
-    const [{ data: incPersonal }, { data: incBusiness }, { data: dedPersonal }, { data: dedBusiness }] = await Promise.all([
-      supabase.from('income_transactions').select('amount, taxable_status').eq('owner_id', user!.id).eq('mode', 'personal').gte('date', yearStart).lte('date', yearEnd),
-      supabase.from('income_transactions').select('amount, taxable_status').eq('owner_id', user!.id).eq('mode', 'business').gte('date', yearStart).lte('date', yearEnd),
-      supabase.from('transactions_uploaded').select('amount').eq('owner_id', user!.id).eq('transaction_mode', 'personal').eq('counts_as_tax_deduction', true).eq('is_split_parent', false).in('review_status', ['approved', 'auto_categorized', 'edited']).gte('date', yearStart).lte('date', yearEnd),
-      supabase.from('transactions_uploaded').select('amount').eq('owner_id', user!.id).eq('transaction_mode', 'business').eq('counts_as_tax_deduction', true).eq('is_split_parent', false).in('review_status', ['approved', 'auto_categorized', 'edited']).gte('date', yearStart).lte('date', yearEnd),
+    const reportingStatuses = ['approved', 'auto_categorized', 'edited', 'suggested', 'ai_suggested'];
+    const fetchAll = async (m: 'personal' | 'business') => {
+      let from = 0;
+      const pageSize = 1000;
+      let all: any[] = [];
+      let hasMore = true;
+      while (hasMore) {
+        const { data } = await supabase
+          .from('transactions_uploaded')
+          .select('amount, final_category, predicted_category, counts_as_tax_deduction, review_status')
+          .eq('owner_id', user!.id)
+          .eq('transaction_mode', m)
+          .eq('is_split_parent', false)
+          .in('review_status', reportingStatuses)
+          .gte('date', yearStart)
+          .lte('date', yearEnd)
+          .range(from, from + pageSize - 1);
+        if (data) all = [...all, ...data];
+        hasMore = (data?.length ?? 0) === pageSize;
+        from += pageSize;
+      }
+      return all;
+    };
+    const [incPersonal, incBusiness, txPersonal, txBusiness] = await Promise.all([
+      supabase.from('income_transactions').select('amount, taxable_status').eq('owner_id', user!.id).eq('mode', 'personal').gte('date', yearStart).lte('date', yearEnd).then(r => r.data),
+      supabase.from('income_transactions').select('amount, taxable_status').eq('owner_id', user!.id).eq('mode', 'business').gte('date', yearStart).lte('date', yearEnd).then(r => r.data),
+      fetchAll('personal'),
+      fetchAll('business'),
     ]);
     const sumTaxable = (rows: any[] | null) => (rows || []).filter(r => r.taxable_status === 'taxable').reduce((s, r) => s + Number(r.amount || 0), 0);
-    const sumDed = (rows: any[] | null) => (rows || []).reduce((s, r) => s + Math.abs(Number(r.amount || 0)), 0);
+    // Deductible if explicitly flagged OR effective category is in the
+    // deductible set for the row's mode. Partial categories (meals, entertainment)
+    // get the standard 50% Schedule C haircut. requires_review still counts at full
+    // for the projection but is surfaced separately in the breakdown.
+    const sumDeductible = (rows: any[], mode: 'personal' | 'business') => {
+      let total = 0;
+      for (const r of rows) {
+        const cat = (r.final_category || r.predicted_category || '') as string;
+        const hint = deductibilityHint(mode, cat);
+        if (hint === 'none' && !r.counts_as_tax_deduction) continue;
+        const amt = Math.abs(Number(r.amount || 0));
+        if (hint === 'partial') total += amt * 0.5;
+        else total += amt;
+      }
+      return total;
+    };
     setProjection({
-      personal: { taxable: sumTaxable(incPersonal), deductions: sumDed(dedPersonal) },
-      business: { taxable: sumTaxable(incBusiness), deductions: sumDed(dedBusiness) },
+      personal: { taxable: sumTaxable(incPersonal), deductions: sumDeductible(txPersonal, 'personal') },
+      business: { taxable: sumTaxable(incBusiness), deductions: sumDeductible(txBusiness, 'business') },
     });
   }
 
@@ -157,34 +204,49 @@ export default function Tax() {
   }
 
   async function loadDeductions() {
-    let q = supabase
-      .from('transactions_uploaded')
-      .select('final_category, amount, review_status')
-      .eq('owner_id', user!.id)
-      .eq('counts_as_tax_deduction', true)
-      .eq('is_split_parent', false)
-      .in('review_status', ['approved', 'auto_categorized', 'edited'])
-      .gte('date', yearStart)
-      .lte('date', yearEnd);
-    if (scope !== 'all') q = q.eq('transaction_mode', scope);
-    const { data } = await q;
-    setDeductionRows((data as DeductionRow[]) || []);
+    // Pull every categorized expense in scope (broad statuses), decide
+    // deductibility client-side. This way confirmed AND high-confidence
+    // predicted rows both surface in the breakdown.
+    const reportingStatuses = ['approved', 'auto_categorized', 'edited', 'suggested', 'ai_suggested'];
+    let from = 0;
+    const pageSize = 1000;
+    let all: any[] = [];
+    let hasMore = true;
+    while (hasMore) {
+      let q = supabase
+        .from('transactions_uploaded')
+        .select('final_category, predicted_category, amount, review_status, transaction_mode, counts_as_tax_deduction')
+        .eq('owner_id', user!.id)
+        .eq('is_split_parent', false)
+        .in('review_status', reportingStatuses)
+        .gte('date', yearStart)
+        .lte('date', yearEnd)
+        .range(from, from + pageSize - 1);
+      if (scope !== 'all') q = q.eq('transaction_mode', scope);
+      const { data } = await q;
+      if (data) all = [...all, ...data];
+      hasMore = (data?.length ?? 0) === pageSize;
+      from += pageSize;
+    }
+    // Keep only rows that look deductible (flag set OR category is in the
+    // deductible set for the row's mode).
+    const filtered: DeductionRow[] = all.filter(r => {
+      if (r.counts_as_tax_deduction) return true;
+      const cat = r.final_category || r.predicted_category || '';
+      return deductibilityHint(r.transaction_mode, cat) !== 'none';
+    });
+    setDeductionRows(filtered);
 
-    // Count + sum unreviewed business transactions in scope. These are the
-    // rows that haven't been categorized yet, so they CAN'T be flagged as
-    // deductions (the flag is set at categorize-time). The whole pile is
-    // potential additional deductions.
+    // Count + sum truly unreviewed business spend (still un-categorized).
     let cq = supabase
       .from('transactions_uploaded')
       .select('amount', { count: 'exact' })
       .eq('owner_id', user!.id)
       .eq('is_split_parent', false)
       .eq('is_transfer', false)
-      .in('review_status', ['needs_review', 'suggested', 'ai_suggested'])
+      .eq('review_status', 'needs_review')
       .gte('date', yearStart)
       .lte('date', yearEnd);
-    // Only ever count business spend as "potential deductions" — most personal
-    // spend isn't deductible so it'd be misleading.
     if (scope === 'business' || scope === 'all') {
       cq = cq.eq('transaction_mode', 'business');
     } else {
@@ -256,9 +318,33 @@ export default function Tax() {
       .reduce((s, r) => s + (r.amount || 0), 0);
   }, [incomeRows]);
 
-  const totalDeductions = useMemo(() => {
-    return deductionRows.reduce((s, r) => s + Math.abs(r.amount || 0), 0);
+  // Per-row deductible amount with NY/Schedule C-aware haircut.
+  // Meals & entertainment → 50% (§274). Everything else → 100% of the
+  // expense. `requires_review` (e.g. personal Schedule A items) is
+  // counted at full but visually flagged in the breakdown.
+  const deductibleAmount = (r: DeductionRow): { amount: number; hint: DeductibilityHint; bucket: 'confirmed' | 'predicted' | 'review' } => {
+    const cat = r.final_category || r.predicted_category || '';
+    const hint = deductibilityHint(r.transaction_mode, cat);
+    const raw = Math.abs(r.amount || 0);
+    const amount = hint === 'partial' ? raw * 0.5 : raw;
+    const isConfirmed = ['approved', 'edited', 'auto_categorized'].includes(r.review_status) && !!r.final_category;
+    const bucket: 'confirmed' | 'predicted' | 'review' =
+      hint === 'requires_review' ? 'review' : isConfirmed ? 'confirmed' : 'predicted';
+    return { amount, hint, bucket };
+  };
+
+  const deductionBreakdown = useMemo(() => {
+    let confirmed = 0, predicted = 0, review = 0;
+    for (const r of deductionRows) {
+      const { amount, bucket } = deductibleAmount(r);
+      if (bucket === 'confirmed') confirmed += amount;
+      else if (bucket === 'predicted') predicted += amount;
+      else review += amount;
+    }
+    return { confirmed, predicted, review, total: confirmed + predicted + review };
   }, [deductionRows]);
+
+  const totalDeductions = deductionBreakdown.total;
 
   const taxPaymentsTotal = useMemo(() => {
     return taxPayments.reduce((s, r) => s + Math.abs(r.amount || 0), 0);
@@ -294,14 +380,20 @@ export default function Tax() {
     return Object.entries(map).sort((a, b) => (b[1].taxable + b[1].excluded) - (a[1].taxable + a[1].excluded));
   }, [incomeRows]);
 
-  // Deductions grouped by category
+  // Deductions grouped by effective category (final_category preferred, else predicted)
+  // Each row contributes its haircut-adjusted amount.
   const deductionsByCategory = useMemo(() => {
-    const map: Record<string, number> = {};
+    const map: Record<string, { amount: number; hint: DeductibilityHint }> = {};
     deductionRows.forEach(r => {
-      const key = r.final_category || 'Uncategorized';
-      map[key] = (map[key] || 0) + Math.abs(r.amount || 0);
+      const key = effectiveCategory(r) || 'Uncategorized';
+      const { amount, hint } = deductibleAmount(r);
+      if (!map[key]) map[key] = { amount: 0, hint };
+      map[key].amount += amount;
+      // promote hint priority: full > partial > requires_review > none
+      const rank = (h: DeductibilityHint) => h === 'full' ? 3 : h === 'partial' ? 2 : h === 'requires_review' ? 1 : 0;
+      if (rank(hint) > rank(map[key].hint)) map[key].hint = hint;
     });
-    return Object.entries(map).sort((a, b) => b[1] - a[1]);
+    return Object.entries(map).sort((a, b) => b[1].amount - a[1].amount);
   }, [deductionRows]);
 
   if (loading) {
@@ -480,10 +572,24 @@ export default function Tax() {
 
         {/* Adjusted income context */}
         <Card>
-          <CardContent className="pt-6">
+          <CardContent className="pt-6 space-y-3">
             <div className="grid grid-cols-3 gap-6 text-sm">
               <div><span className="text-muted-foreground">Taxable Income YTD</span><p className="text-lg font-semibold text-foreground">{fmt(taxableIncome)}</p></div>
-              <div><span className="text-muted-foreground">Estimated Deductions YTD</span><p className="text-lg font-semibold text-foreground">−{fmt(totalDeductions)}</p></div>
+              <div>
+                <span className="text-muted-foreground">Estimated Deductions YTD</span>
+                <p className="text-lg font-semibold text-foreground">−{fmt(totalDeductions)}</p>
+                {(deductionBreakdown.predicted > 0 || deductionBreakdown.review > 0) && (
+                  <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-muted-foreground">
+                    <span><span className="text-foreground/80 font-medium">{fmt(deductionBreakdown.confirmed)}</span> confirmed</span>
+                    {deductionBreakdown.predicted > 0 && (
+                      <span><span className="text-primary font-medium">{fmt(deductionBreakdown.predicted)}</span> predicted</span>
+                    )}
+                    {deductionBreakdown.review > 0 && (
+                      <span><span className="text-warning font-medium">{fmt(deductionBreakdown.review)}</span> needs review</span>
+                    )}
+                  </div>
+                )}
+              </div>
               <div><span className="text-muted-foreground">Est. Adjusted Income</span><p className="text-lg font-semibold text-foreground">{fmt(adjustedIncome)}</p></div>
             </div>
           </CardContent>
@@ -547,18 +653,26 @@ export default function Tax() {
                     <TableHeader>
                       <TableRow>
                         <TableHead>Category</TableHead>
+                        <TableHead>Treatment</TableHead>
                         <TableHead className="text-right">Amount</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {deductionsByCategory.map(([cat, amt]) => (
+                      {deductionsByCategory.map(([cat, info]) => (
                         <TableRow key={cat}>
                           <TableCell>{cat}</TableCell>
-                          <TableCell className="text-right">{fmt(amt)}</TableCell>
+                          <TableCell className="text-xs text-muted-foreground">
+                            {info.hint === 'full' && 'Full Schedule C'}
+                            {info.hint === 'partial' && '50% (meals/entertainment §274)'}
+                            {info.hint === 'requires_review' && 'Itemizable — subject to limits'}
+                            {info.hint === 'none' && 'Manually flagged'}
+                          </TableCell>
+                          <TableCell className="text-right">{fmt(info.amount)}</TableCell>
                         </TableRow>
                       ))}
                       <TableRow className="font-semibold">
                         <TableCell>Total</TableCell>
+                        <TableCell />
                         <TableCell className="text-right">{fmt(totalDeductions)}</TableCell>
                       </TableRow>
                     </TableBody>

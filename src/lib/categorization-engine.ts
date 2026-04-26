@@ -6,48 +6,126 @@ import { detectRecurrence } from './recurrence-detector';
 export type RecurringHistoryMap = Map<string, { date: string; amount: number }[]>;
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Tax-deduction auto-flagging
+// Tax-deduction auto-flagging  (NY-aware, Schedule C-aware, creative-friendly)
 //
 // Determines whether a categorized transaction should default to
 // `counts_as_tax_deduction = true`. The user can always override per-row in
 // the detail drawer; this just gives us a sane non-zero starting point so the
 // Tax page doesn't perpetually show $0 deductions.
 //
-// Sets are intentionally narrow & lower-cased for fuzzy comparison.
+// Sets are lower-cased for fuzzy comparison.
+//
+// `deductibilityHint` is the richer signal used by the Tax page UI to
+// distinguish "fully deductible business expense" from "partially deductible /
+// requires-review personal expense". `isDeductibleCategory` is the boolean
+// shortcut still used by the import pipeline & inline edits.
 // ──────────────────────────────────────────────────────────────────────────────
-const BUSINESS_DEDUCTIBLE_CATEGORIES = new Set<string>([
+
+// Schedule C lines + ordinary-and-necessary business expenses. Includes the
+// user's actual chart of accounts (Apartment/Office, Label Royalties,
+// Entertainment, Charity-as-business-promotion, custom client tags).
+const BUSINESS_DEDUCTIBLE_FULL = new Set<string>([
   'vendor payment', 'subscriptions', 'software', 'equipment', 'office supplies',
-  'travel', 'dining', 'meals', 'marketing', 'advertising', 'insurance',
+  'travel', 'marketing', 'advertising', 'insurance',
   'fees', 'bank fees', 'commission', 'payroll', 'contractor',
-  'professional services', 'rent', 'utilities', 'phone', 'internet',
-  'shipping', 'education', 'business',
+  'professional services', 'rent', 'apartment/office', 'utilities',
+  'phone', 'internet', 'shipping', 'education', 'business',
+  'label royalties', 'taxes',
+  // User-defined client/project categories — clearly business activity.
+  'clipscale', 'cure97', 'ddi',
 ]);
 
-// Personal categories that are commonly itemizable (kept narrow on purpose —
-// most personal spend is NOT deductible).
-const PERSONAL_DEDUCTIBLE_CATEGORIES = new Set<string>([
-  'health', 'medical', 'health/medical', 'charity', 'charitable',
+// Business expenses that are partially deductible (e.g., meals are typically
+// 50% under §274). We still surface the full amount but tag it as 'partial'
+// so the Tax page can apply the haircut.
+const BUSINESS_DEDUCTIBLE_PARTIAL = new Set<string>([
+  'dining', 'meals', 'entertainment',
+]);
+
+// Charity paid by an LLC/sole-prop is generally NOT a Sch C deduction (it
+// flows to the owner's Schedule A). We still flag it as deductible-with-review
+// so it's not silently dropped.
+const BUSINESS_DEDUCTIBLE_REVIEW = new Set<string>([
+  'charity', 'charitable',
+]);
+
+// Personal categories that are commonly itemizable on Schedule A (subject to
+// AGI thresholds & SALT cap — surfaced with a "review" hint so the Tax page
+// doesn't promise dollar-for-dollar deductions).
+const PERSONAL_DEDUCTIBLE_REVIEW = new Set<string>([
+  'health', 'medical', 'health/medical', 'health & personal care',
+  'charity', 'charitable',
   'mortgage interest', 'state taxes', 'property tax', 'property taxes',
+  'taxes',
+  // Home-office portion only — flagged for split, not auto-100%.
+  'apartment/office',
 ]);
 
 // Categories that should NEVER be auto-flagged regardless of mode (they are
-// transfers / capital movements / tax payments themselves).
+// transfers / capital movements / refunds / tax payments themselves).
 const NEVER_DEDUCTIBLE = new Set<string>([
   'cc payment', 'transfer', 'investment', 'tax payment', 'owner draw',
   'distribution', 'capital contribution', 'loan payment',
+  'refund', 'debit',
 ]);
+
+export type DeductibilityHint = 'full' | 'partial' | 'requires_review' | 'none';
+
+export function deductibilityHint(
+  mode: 'personal' | 'business' | string | null | undefined,
+  category: string | null | undefined,
+): DeductibilityHint {
+  if (!category) return 'none';
+  const c = category.trim().toLowerCase();
+  if (!c || NEVER_DEDUCTIBLE.has(c)) return 'none';
+  if (mode === 'business') {
+    if (BUSINESS_DEDUCTIBLE_FULL.has(c)) return 'full';
+    if (BUSINESS_DEDUCTIBLE_PARTIAL.has(c)) return 'partial';
+    if (BUSINESS_DEDUCTIBLE_REVIEW.has(c)) return 'requires_review';
+    return 'none';
+  }
+  if (mode === 'personal') {
+    if (PERSONAL_DEDUCTIBLE_REVIEW.has(c)) return 'requires_review';
+    return 'none';
+  }
+  return 'none';
+}
 
 export function isDeductibleCategory(
   mode: 'personal' | 'business' | string | null | undefined,
   category: string | null | undefined,
 ): boolean {
-  if (!category) return false;
-  const c = category.trim().toLowerCase();
-  if (!c) return false;
-  if (NEVER_DEDUCTIBLE.has(c)) return false;
-  if (mode === 'business') return BUSINESS_DEDUCTIBLE_CATEGORIES.has(c);
-  if (mode === 'personal') return PERSONAL_DEDUCTIBLE_CATEGORIES.has(c);
-  return false;
+  // Anything that has any deductible signal at all gets flagged true; the Tax
+  // page is responsible for applying haircuts via `deductibilityHint`.
+  return deductibilityHint(mode, category) !== 'none';
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Reporting helpers (used by Insights & Tax pages)
+// ──────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Returns the best-known category for a transaction — confirmed if available,
+ * otherwise the prediction. This is what the Expenses table already shows, so
+ * Insights & Tax should agree.
+ */
+export function effectiveCategory<T extends { final_category?: string | null; predicted_category?: string | null }>(
+  tx: T,
+): string | null {
+  return tx.final_category || tx.predicted_category || null;
+}
+
+/**
+ * Review statuses that should be counted in dashboards & tax estimates.
+ * High-confidence "suggested" rows are included so users don't have to
+ * mass-approve before the numbers reflect reality.
+ */
+export const COUNTED_FOR_REPORTING_STATUSES = new Set<string>([
+  'approved', 'auto_categorized', 'edited', 'suggested', 'ai_suggested',
+]);
+
+export function isCountedForReporting(reviewStatus: string | null | undefined): boolean {
+  return !!reviewStatus && COUNTED_FOR_REPORTING_STATUSES.has(reviewStatus);
 }
 
 interface MerchantMemoryRecord {

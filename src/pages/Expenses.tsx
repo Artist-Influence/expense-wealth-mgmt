@@ -125,13 +125,11 @@ export default function Expenses() {
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [showPreview, setShowPreview] = useState(false);
 
-  // Cross-mode totals so the comparative summary strip always shows Personal vs Business
-  // side-by-side regardless of which mode tab the spreadsheet is on.
-  const [crossModeTotals, setCrossModeTotals] = useState<{
-    personalCashOut: number; businessCashOut: number;
-    truePersonal: number; trueBusiness: number;
-    pendingReimbursable: number;
-  }>({ personalCashOut: 0, businessCashOut: 0, truePersonal: 0, trueBusiness: 0, pendingReimbursable: 0 });
+  // NOTE: cross-mode totals are now derived from the loaded `transactions`
+  // set + the active date range via `useMemo` below. The previous
+  // `loadCrossModeTotals` paginated re-fetch was wasteful (data is already
+  // loaded by `loadTransactions`) and — more importantly — couldn't react to
+  // the date filter, so the summary cards were stale.
 
   const isProcessing = fileQueue.some(f => !['done', 'error'].includes(f.status));
   const totalFiles = fileQueue.length;
@@ -142,7 +140,7 @@ export default function Expenses() {
   const categoryMode = mode === 'reimbursable_work' ? 'personal' : mode;
 
   useEffect(() => {
-    if (user) { loadTransactions(); loadCategories(); loadCrossModeTotals(); }
+    if (user) { loadTransactions(); loadCategories(); loadAllModeTransactions(); }
   }, [user, mode]);
 
   // Apply incoming URL params (e.g. linked from Allocations review warning).
@@ -178,41 +176,37 @@ export default function Expenses() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Lightweight aggregate fetch — we only need the math fields, not the full row.
-  // Pulls every txn (paged) once, computes all 5 aggregates client-side.
-  const loadCrossModeTotals = async () => {
+  // All-mode transaction snapshot — needed because `loadTransactions` is
+  // already scoped to the active mode tab, but the summary strip compares
+  // Personal vs Business side-by-side. We keep this slim (only the math
+  // fields) and re-fetch only on user/mode change.
+  type AllModeRow = {
+    amount: number | null; transaction_mode: string | null; mode: string | null;
+    is_split_parent: boolean | null; is_transfer: boolean | null;
+    exclude_from_expense_totals: boolean | null; is_non_expense_cash_movement: boolean | null;
+    parse_status: string | null; counts_toward_true_personal_spend: boolean | null;
+    counts_toward_true_business_spend: boolean | null; is_reimbursable: boolean | null;
+    reimbursement_status: string | null; date: string | null;
+  };
+  const [allModeRows, setAllModeRows] = useState<AllModeRow[]>([]);
+
+  const loadAllModeTransactions = async () => {
     if (!user) return;
     let from = 0;
     const pageSize = 1000;
-    type Row = { amount: number | null; transaction_mode: string | null; mode: string | null;
-      is_split_parent: boolean | null; is_transfer: boolean | null;
-      exclude_from_expense_totals: boolean | null; is_non_expense_cash_movement: boolean | null;
-      parse_status: string | null; counts_toward_true_personal_spend: boolean | null;
-      counts_toward_true_business_spend: boolean | null; is_reimbursable: boolean | null;
-      reimbursement_status: string | null; };
-    let all: Row[] = [];
+    let all: AllModeRow[] = [];
     let hasMore = true;
     while (hasMore) {
       const { data } = await supabase
         .from('transactions_uploaded')
-        .select('amount, transaction_mode, mode, is_split_parent, is_transfer, exclude_from_expense_totals, is_non_expense_cash_movement, parse_status, counts_toward_true_personal_spend, counts_toward_true_business_spend, is_reimbursable, reimbursement_status')
+        .select('amount, transaction_mode, mode, is_split_parent, is_transfer, exclude_from_expense_totals, is_non_expense_cash_movement, parse_status, counts_toward_true_personal_spend, counts_toward_true_business_spend, is_reimbursable, reimbursement_status, date')
         .eq('owner_id', user.id)
         .range(from, from + pageSize - 1);
-      if (data) all = [...all, ...(data as unknown as Row[])];
+      if (data) all = [...all, ...(data as unknown as AllModeRow[])];
       hasMore = (data?.length ?? 0) === pageSize;
       from += pageSize;
     }
-    const active = all.filter(r => !r.is_split_parent && r.parse_status !== 'parse_error');
-    const isOutflow = (r: Row) => !r.is_non_expense_cash_movement && !r.is_transfer && !r.exclude_from_expense_totals;
-    const sum = (rows: Row[]) => rows.reduce((s, r) => s + Math.abs(Number(r.amount) || 0), 0);
-
-    setCrossModeTotals({
-      personalCashOut: sum(active.filter(r => (r.transaction_mode || r.mode) === 'personal' && isOutflow(r))),
-      businessCashOut: sum(active.filter(r => (r.transaction_mode || r.mode) === 'business' && isOutflow(r))),
-      truePersonal: sum(active.filter(r => r.counts_toward_true_personal_spend)),
-      trueBusiness: sum(active.filter(r => r.counts_toward_true_business_spend)),
-      pendingReimbursable: sum(active.filter(r => r.is_reimbursable && r.reimbursement_status !== 'reimbursed')),
-    });
+    setAllModeRows(all);
   };
 
   const loadCategories = async () => {
@@ -373,32 +367,106 @@ export default function Expenses() {
   };
   const dateActive = !!(dateFrom || dateTo);
 
-  // Summary stats — V2
+  // Date predicate shared by both summary memos so the cards mirror the table.
+  const inDateRange = (d: string | null | undefined) => {
+    if (!d) return !dateFrom && !dateTo; // a row with no date only counts when no range is active
+    if (dateFrom && d < dateFrom) return false;
+    if (dateTo && d > dateTo) return false;
+    return true;
+  };
+
+  // Cross-mode summary strip — Personal vs Business at a glance, scoped to the
+  // active date range so the cards actually move when you pick "March 2026"
+  // or "Year to Date".
+  const crossModeTotals = useMemo(() => {
+    const active = allModeRows.filter(r =>
+      !r.is_split_parent && r.parse_status !== 'parse_error' && inDateRange(r.date)
+    );
+    const isOutflow = (r: AllModeRow) => !r.is_non_expense_cash_movement && !r.is_transfer && !r.exclude_from_expense_totals;
+    const sum = (rows: AllModeRow[]) => rows.reduce((s, r) => s + Math.abs(Number(r.amount) || 0), 0);
+    return {
+      personalCashOut: sum(active.filter(r => (r.transaction_mode || r.mode) === 'personal' && isOutflow(r))),
+      businessCashOut: sum(active.filter(r => (r.transaction_mode || r.mode) === 'business' && isOutflow(r))),
+      truePersonal: sum(active.filter(r => r.counts_toward_true_personal_spend)),
+      trueBusiness: sum(active.filter(r => r.counts_toward_true_business_spend)),
+      pendingReimbursable: sum(active.filter(r => r.is_reimbursable && r.reimbursement_status !== 'reimbursed')),
+    };
+  }, [allModeRows, dateFrom, dateTo]);
+
+  // Summary stats — V3 (date-filter aware + richer metrics)
   const stats = useMemo(() => {
-    // Exclude split parents from all stats — child rows carry the real amounts
-    const activeTxns = transactions.filter(t => !t.is_split_parent);
+    // Mode-scoped, exclude split parents, exclude parse errors, scope to date range.
+    const activeTxns = transactions.filter(t =>
+      !t.is_split_parent && t.parse_status !== 'parse_error' && inDateRange(t.date)
+    );
     const needsReview = activeTxns.filter(t => t.review_status === 'needs_review' || t.review_status === 'suggested' || t.review_status === 'ai_suggested').length;
     const uncategorized = activeTxns.filter(t => !t.final_category && !t.predicted_category).length;
-    const transfersExcluded = transactions.filter(t => t.exclude_from_expense_totals).length;
+    const transfersExcluded = transactions.filter(t => t.exclude_from_expense_totals && inDateRange(t.date)).length;
 
-    const totalCashOut = activeTxns
-      .filter(t => t.parse_status !== 'parse_error' && !t.is_non_expense_cash_movement && !t.is_transfer && !t.exclude_from_expense_totals)
-      .reduce((sum, t) => sum + Math.abs(t.amount || 0), 0);
+    const cashOutTxns = activeTxns.filter(t =>
+      !t.is_non_expense_cash_movement && !t.is_transfer && !t.exclude_from_expense_totals
+    );
+
+    const totalCashOut = cashOutTxns.reduce((sum, t) => sum + Math.abs(t.amount || 0), 0);
 
     const truePersonalSpend = activeTxns
-      .filter(t => t.counts_toward_true_personal_spend && t.parse_status !== 'parse_error')
+      .filter(t => t.counts_toward_true_personal_spend)
       .reduce((sum, t) => sum + Math.abs(t.amount || 0), 0);
 
     const trueBusinessSpend = activeTxns
-      .filter(t => t.counts_toward_true_business_spend && t.parse_status !== 'parse_error')
+      .filter(t => t.counts_toward_true_business_spend)
       .reduce((sum, t) => sum + Math.abs(t.amount || 0), 0);
 
     const pendingReimbursable = activeTxns
       .filter(t => t.is_reimbursable && t.reimbursement_status !== 'reimbursed')
       .reduce((sum, t) => sum + Math.abs(t.amount || 0), 0);
 
-    return { total: transactions.length, needsReview, uncategorized, transfersExcluded, totalCashOut, truePersonalSpend, trueBusinessSpend, pendingReimbursable };
-  }, [transactions]);
+    // Largest single expense in the period (excluding transfers/parse errors)
+    let largest: { amount: number; description: string; date: string | null } | null = null;
+    for (const t of cashOutTxns) {
+      const amt = Math.abs(t.amount || 0);
+      if (!largest || amt > largest.amount) {
+        largest = { amount: amt, description: (t.description_raw || t.description_normalized || 'Unknown').slice(0, 60), date: t.date };
+      }
+    }
+
+    // Unique merchants in period
+    const merchants = new Set<string>();
+    cashOutTxns.forEach(t => {
+      const key = (t.description_normalized || t.description_raw || '').trim().toUpperCase();
+      if (key) merchants.add(key.slice(0, 40));
+    });
+
+    // Avg per day across the active range (or full data span when no range set)
+    const dates = cashOutTxns.map(t => t.date).filter(Boolean) as string[];
+    let spanDays = 1;
+    if (dateFrom && dateTo) {
+      const from = new Date(dateFrom).getTime();
+      const to = new Date(dateTo).getTime();
+      spanDays = Math.max(1, Math.round((to - from) / 86400000) + 1);
+    } else if (dates.length > 0) {
+      const sorted = [...dates].sort();
+      const from = new Date(sorted[0]).getTime();
+      const to = new Date(sorted[sorted.length - 1]).getTime();
+      spanDays = Math.max(1, Math.round((to - from) / 86400000) + 1);
+    }
+    const avgPerDay = totalCashOut / spanDays;
+
+    return {
+      total: transactions.filter(t => inDateRange(t.date)).length,
+      needsReview,
+      uncategorized,
+      transfersExcluded,
+      totalCashOut,
+      truePersonalSpend,
+      trueBusinessSpend,
+      pendingReimbursable,
+      largest,
+      uniqueMerchants: merchants.size,
+      avgPerDay,
+      spanDays,
+    };
+  }, [transactions, dateFrom, dateTo]);
 
   const handleSort = (col: string) => {
     if (sortCol === col) setSortAsc(!sortAsc);
@@ -1508,6 +1576,16 @@ export default function Expenses() {
         </div>
 
         {/* Comparative Summary — Personal vs Business at a glance, regardless of active tab */}
+        <div className="flex items-center justify-between mb-1.5">
+          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
+            Summary <span className="text-foreground/70 font-mono">· {dateLabel}</span>
+            {dateActive && (
+              <span className="ml-2 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm bg-primary/15 text-primary text-[9px] font-medium">
+                Filtered
+              </span>
+            )}
+          </p>
+        </div>
         <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mb-2">
           <div className="glass-panel-sm p-2.5">
             <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Personal Cash Out</p>
@@ -1530,6 +1608,33 @@ export default function Expenses() {
           <div className="glass-panel-sm p-2.5">
             <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Pending Reimbursable</p>
             <p className="text-sm font-mono font-semibold text-warning mt-0.5">{fmtMoney(crossModeTotals.pendingReimbursable)}</p>
+          </div>
+        </div>
+
+        {/* Period insight tiles — Avg / day, Largest expense, Unique merchants */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mb-2">
+          <div className="glass-panel-sm p-2.5">
+            <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Avg / day</p>
+            <p className="text-sm font-mono font-semibold text-foreground mt-0.5">{fmtMoney(stats.avgPerDay)}</p>
+            <p className="text-[9px] text-muted-foreground">over {stats.spanDays} day{stats.spanDays === 1 ? '' : 's'}</p>
+          </div>
+          <div className="glass-panel-sm p-2.5">
+            <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Largest expense</p>
+            {stats.largest ? (
+              <>
+                <p className="text-sm font-mono font-semibold text-foreground mt-0.5">{fmtMoney(stats.largest.amount)}</p>
+                <p className="text-[9px] text-muted-foreground truncate" title={stats.largest.description}>
+                  {stats.largest.description}{stats.largest.date ? ` · ${stats.largest.date}` : ''}
+                </p>
+              </>
+            ) : (
+              <p className="text-sm font-mono font-semibold text-muted-foreground mt-0.5">—</p>
+            )}
+          </div>
+          <div className="glass-panel-sm p-2.5">
+            <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Unique merchants</p>
+            <p className="text-sm font-mono font-semibold text-foreground mt-0.5">{stats.uniqueMerchants}</p>
+            <p className="text-[9px] text-muted-foreground">distinct payees in period</p>
           </div>
         </div>
 
