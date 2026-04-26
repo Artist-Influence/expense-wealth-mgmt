@@ -639,18 +639,26 @@ export default function Tax() {
                     <TableHeader>
                       <TableRow>
                         <TableHead>Category</TableHead>
+                        <TableHead>Treatment</TableHead>
                         <TableHead className="text-right">Amount</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {deductionsByCategory.map(([cat, amt]) => (
+                      {deductionsByCategory.map(([cat, info]) => (
                         <TableRow key={cat}>
                           <TableCell>{cat}</TableCell>
-                          <TableCell className="text-right">{fmt(amt)}</TableCell>
+                          <TableCell className="text-xs text-muted-foreground">
+                            {info.hint === 'full' && 'Full Schedule C'}
+                            {info.hint === 'partial' && '50% (meals/entertainment §274)'}
+                            {info.hint === 'requires_review' && 'Itemizable — subject to limits'}
+                            {info.hint === 'none' && 'Manually flagged'}
+                          </TableCell>
+                          <TableCell className="text-right">{fmt(info.amount)}</TableCell>
                         </TableRow>
                       ))}
                       <TableRow className="font-semibold">
                         <TableCell>Total</TableCell>
+                        <TableCell />
                         <TableCell className="text-right">{fmt(totalDeductions)}</TableCell>
                       </TableRow>
                     </TableBody>
