@@ -1,96 +1,45 @@
-# Data Health Check (14h auto-sweep) + Income Duplicate Resolver
+# Fix Personal Cash-Out Math
 
-## What you'll get
+## Root cause
 
-A new **Health Check** system that automatically scans your data for duplicates and integrity issues, and gives you one-click cleanup tools.
+After investigation, the **$88,690 "Personal Cash Out" is not a duplicate or numeric overflow issue** — it's a classification problem. There are **zero exact-duplicate expense rows**. The total is being inflated by money movements that should not count as spending:
 
-### 1. Auto-run every 14 hours
-- On app load, if it's been ≥14 hours since the last health check (or it's never run), the app silently runs a sweep in the background.
-- A subtle **status pill in the top nav** turns amber/red when issues are found ("3 issues — Review"). Click it to open the Health Check panel.
-- A "Run Now" button always available so you can force a sweep on demand.
-- Last-run timestamp is stored per-user in `app_settings`.
+| Category | Amount | Why it's wrong |
+|---|---|---|
+| Amex card payments (10 rows) | **$24,639** | Paying off Amex ≠ spending. The original purchases are already counted on Amex statements. |
+| Brokerage transfers (Wealthfront / Gemini / DUB) | **$17,600** | Money moving into investment accounts — net worth shift, not spend. |
+| Zelle / bank transfers | **$1,390** | Inter-account movement. |
+| **Total over-count** | **~$43,629** | |
+| **True personal spend after fix** | **~$45,062** | (down from $88,690) |
 
-### 2. What gets checked
+The transfer detector in `src/lib/transfer-detector.ts` doesn't recognize `AMERICAN EXPRESS DES:ACH PMT` (BoA's format for Amex payments) or any brokerage transfer patterns, so every new import will keep mis-classifying them.
 
-**Duplicates**
-- **Income duplicates** (the issue you're seeing now — 15 clusters detected, including doubled Deel deposits, Zelle payments from Artist Influence, etc.).
-- **Expense duplicates** (exact + near-duplicates, same engine you already have).
-- **Cross-mode duplicates** (same charge in both Personal & Business).
+## What I'll do
 
-**Integrity issues**
-- Income rows with `taxable_status = 'unknown'` AND `status = 'needs_review'` (need your review).
-- Expenses with no category AND no predicted category (orphan rows).
-- Transactions older than 7 days still stuck in `needs_review`.
-- Expense rows with `parse_status = 'error'`.
+### 1. One-time data cleanup (SQL)
+Re-classify the existing mis-categorized rows in `transactions_uploaded` so they're excluded from spend totals but preserved for audit:
 
-### 3. Income duplicate resolver (NEW)
-The existing `DuplicateResolverDialog` only handles expenses. We'll generalize it to also resolve income clusters:
-- "Keep oldest, delete others" (income table has no `archived` status — uses hard delete with a confirmation).
-- "Mark as not duplicates" (sets a flag so the cluster won't reappear).
-- Shows source file, amount, date, type for each row.
+- **Amex payments** (`description_raw ILIKE '%AMERICAN EXPRESS%'`) → mark `is_transfer=true`, `transfer_type='card_payment'`, `exclude_from_expense_totals=true`, `counts_toward_true_personal_spend=false`, `is_non_expense_cash_movement=true`, set category to "Card Payment".
+- **Brokerage transfers** (Wealthfront, Gemini, DUB, Robinhood, Coinbase, Fidelity, Schwab, Vanguard) → same flags with `transfer_type='investment_transfer'`, category "Investment".
+- **Zelle / inter-bank transfers** that aren't already flagged → `transfer_type='bank_transfer'`, excluded from spend.
 
-### 4. Health Check panel
-A new dialog (or `/health` mini-route) with sections:
-- **Duplicates** — opens the resolver with all duplicate clusters across income + expenses.
-- **Needs Review** — count + jump links to Expenses/Income filtered to those rows.
-- **Stale Reviews** — rows untouched >7 days.
-- **Parse Errors** — bad CSV imports needing attention.
+### 2. Harden `src/lib/transfer-detector.ts` so future imports auto-detect these
+Add high-confidence patterns:
+- `AMERICAN\s*EXPRESS\s*DES:?\s*ACH\s*PMT` → `credit_card_payment`
+- `CHASE\s*CREDIT\s*CRD\s*(?:EPAY|AUTOPAY)` → `credit_card_payment`  
+- `(?:DISCOVER|CITI|CAPITAL\s*ONE)\s*(?:CARD\s*)?(?:PMT|PAYMENT)` → `credit_card_payment`
+- `(?:WEALTHFRONT|BETTERMENT|ROBINHOOD|COINBASE|GEMINI\s*TRUST|DUB\s*\(ECFI\)|FIDELITY|VANGUARD|SCHWAB)` → new type `brokerage_transfer`
+- Add `'brokerage_transfer'` to the `transferType` union and route it through the same exclusion logic that handles `account_transfer`.
 
-Each section shows the count, a one-line description, and a primary action button.
+### 3. Verify
+Re-query personal spend and confirm it lands near **$45k**, then refresh the Insights / Personal Cash Out card.
 
-## Technical changes
+## Files affected
+- **Database**: ~26 row updates in `transactions_uploaded` (Amex + brokerage + transfers — no rows deleted, just re-flagged so the audit trail is preserved).
+- **Code**: `src/lib/transfer-detector.ts` — add ~5 new regex patterns and one new `transferType` value.
+- Wherever `transferType` is consumed (router/expense exclusion logic) — add the new `brokerage_transfer` to any switch statements treating transfers as non-expense.
 
-### DB migration (1 small change)
-```sql
-ALTER TABLE app_settings 
-  ADD COLUMN last_health_check_at timestamptz,
-  ADD COLUMN last_health_check_summary jsonb;
-
-ALTER TABLE income_transactions 
-  ADD COLUMN duplicate_status text NOT NULL DEFAULT 'unique',
-  ADD COLUMN duplicate_of_income_id uuid;
-```
-(The `duplicate_status` mirrors what `transactions_uploaded` already has, so the resolver can mark income pairs as "not duplicates" persistently.)
-
-### New file: `src/lib/health-check.ts`
-Pure function that runs all checks and returns a structured summary:
-```ts
-export interface HealthCheckSummary {
-  ranAt: string;
-  income: { exactClusters: DuplicateCluster[]; rowIndex: Map<string, ...> };
-  expenses: { exactClusters; nearClusters; crossModePairs; rowIndex };
-  needsReview: { incomeCount: number; expenseCount: number };
-  staleReviews: { count: number; oldestDate: string | null };
-  parseErrors: { count: number };
-  totalIssues: number;
-}
-export async function runHealthCheck(userId: string): Promise<HealthCheckSummary>;
-```
-Reuses `findExactClusters` / `findNearClusters` from `duplicate-detector.ts` — no algorithm changes.
-
-### New file: `src/components/HealthCheckPanel.tsx`
-Dialog with the sections above; embeds the duplicate resolver.
-
-### Update: `src/components/DuplicateResolverDialog.tsx`
-- Add an `incomeClusters` prop + new tab "Income Duplicates".
-- Resolver actions for income: hard-delete losers (income rows are simpler; no archive concept) OR mark all as unique.
-
-### Update: `src/components/AppNav.tsx`
-- Add a small `HealthStatusPill` (icon + count badge) that opens the panel.
-- Color: green ✓ (no issues), amber ⚠ (1–5), red 🔴 (>5).
-
-### Update: `src/App.tsx` (or a top-level effect)
-- On mount, check `app_settings.last_health_check_at`. If `> 14 hours` ago (or null), call `runHealthCheck`, store summary in state + persist `last_health_check_at` and `last_health_check_summary`.
-- No background polling — just on-load + manual "Run Now".
-
-### What we will NOT do
-- No edge function / pg_cron — the user is single-tenant, so a client-side check on app load is simpler, free, and equally effective.
-- No auto-deletion. Cleanup is always one-click but user-initiated, to avoid accidental data loss.
-
-## Files touched
-- `src/lib/health-check.ts` (new)
-- `src/components/HealthCheckPanel.tsx` (new)
-- `src/components/DuplicateResolverDialog.tsx` (extend with income tab)
-- `src/components/AppNav.tsx` (add status pill)
-- `src/App.tsx` (auto-run hook)
-- DB migration: 2 columns on `app_settings`, 2 columns on `income_transactions`
+## What I'll NOT change
+- No schema migration needed — `amount` is already `numeric`, no overflow.
+- No income changes — those duplicates were already cleaned.
+- I won't hard-delete the mis-classified rows; flagging them keeps the audit history intact and makes it reversible if any are actual spend.
