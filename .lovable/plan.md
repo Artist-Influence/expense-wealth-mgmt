@@ -1,32 +1,81 @@
-# Show each Bank of America account separately in Payment Methods
+## Goal
+
+Surface money routed to brokerage / investment accounts (Wealthfront, Gemini, Dub, Coinbase, Robinhood, Fidelity, Vanguard, Schwab, Betterment, Kraken, Binance, Collectr) as **true savings** in the Year-over-Year Comparison on the Income & Savings tab — so personal "Net Saved" reflects what actually moved into wealth, not just income minus expenses.
 
 ## What's wrong now
 
-The `effectiveMethod` helper I added in the previous round collapses every BoA-prefixed method into a single `"Bank of America"` slice. The data actually has four distinct BoA entries that should each be their own slice:
+The YoY table currently shows:
 
-| Method (raw) | Rows |
-|---|---|
-| Amex Platinum | 387 |
-| BoA 5563 | 28 |
-| BoA Credit Card | 16 |
-| BoA 5592 | 13 |
-| BoA 5373 | 5 |
-| Amex | 1 |
+| Metric | 2025 | 2026 | Change |
+|---|---|---|---|
+| Income | … | … | % |
+| Expenses | … | … | % |
+| Net Saved | income − expenses | income − expenses | — |
 
-So the pie should have **5 slices** (1 Amex + 4 BoA accounts), not 2.
+Brokerage transfers (currently 7 Wealthfront, 6 Gemini, 3 Dub rows = ~$17.6K in 2026) are correctly excluded from expenses (`is_transfer=true`, `transfer_type='brokerage_transfer'`) — but they're invisible. There's no row that shows "you actually moved $X into wealth this year."
 
 ## Fix
 
-Update `effectiveMethod` in `src/pages/Insights.tsx` so it preserves per-account detail for BoA while keeping Amex consolidated (only one Amex card):
+Add an **"Invested / Saved to Wealth"** row to the YoY Comparison table (personal mode only, since the data only matters there), with a per-destination breakdown shown inline.
 
-- `Amex …` → `"Amex"` (single card, keep collapsed)
-- `BoA <digits>` (e.g. `BoA 5592`) → `"BoA •5592"` (bullet makes it read like a card last-4)
-- `BoA <text>` (e.g. `BoA Credit Card`) → `"BoA Credit Card"` (passthrough)
-- Bare `BoA` / `Bank of America` → `"Bank of America"`
-- Anything else → unchanged
+### New YoY table layout (personal mode)
 
-No other changes — the pie, labels, and Category Trends section stay as they are. The legend will now naturally show 5 slices with their dollar totals.
+| Metric | 2025 | 2026 | Change |
+|---|---|---|---|
+| Income | … | … | % |
+| Expenses | … | … | % |
+| **Invested / Saved to Wealth** | $X | $Y | % |
+|   ↳ Wealthfront | $… | $… | |
+|   ↳ Gemini | $… | $… | |
+|   ↳ Dub | $… | $… | |
+|   ↳ (other detected destinations) | $… | $… | |
+| Net Saved (Income − Expenses) | … | … | — |
+| **True Savings Rate** | (Saved to Wealth ÷ Income)% | … | — |
 
-## Files affected
+Sub-rows render as small indented entries under the parent row. Only destinations with non-zero totals in either year show.
 
-- `src/pages/Insights.tsx` — only the `effectiveMethod` helper function (~10 lines).
+In **business mode**, the new rows are hidden — table stays as-is.
+
+## Technical changes (single file: `src/pages/Insights.tsx`)
+
+1. **Extend `loadExpenses` SELECT**: add `transfer_type` to the column list so we can filter brokerage transfers without re-querying.
+
+2. **Add destination detector** alongside `effectiveMethod`:
+   ```ts
+   const WEALTH_DESTINATIONS: [RegExp, string][] = [
+     [/wealthfront/i, 'Wealthfront'],
+     [/gemini/i, 'Gemini'],
+     [/\bdub\b/i, 'Dub'],
+     [/coinbase/i, 'Coinbase'],
+     [/robinhood/i, 'Robinhood'],
+     [/fidelity/i, 'Fidelity'],
+     [/vanguard/i, 'Vanguard'],
+     [/schwab/i, 'Schwab'],
+     [/betterment/i, 'Betterment'],
+     [/kraken/i, 'Kraken'],
+     [/binance/i, 'Binance'],
+     [/collectr/i, 'Collectr'],
+   ];
+   const wealthDestination = (desc: string): string | null => { … };
+   ```
+   Source description from `description_normalized || description_raw`.
+
+3. **Extend `yoyComparison` useMemo**: walk the raw `transactions` array (not `allExpenses`, since brokerage transfers are excluded there), match rows where `transfer_type === 'brokerage_transfer'` OR description matches `wealthDestination`, bucket by year + destination. Output:
+   ```ts
+   {
+     thisYear: { income, expenses, savedToWealth, byDestination: { Wealthfront: $, Gemini: $, … } },
+     lastYear: { … same shape },
+     incomeChange, expenseChange, savedChange,
+     trueSavingsRate: { thisYear: %, lastYear: % }
+   }
+   ```
+
+4. **Render**: insert new rows in the YoY `<table>` between Expenses and Net Saved, gated on `mode === 'personal'`. Sub-rows use a smaller font + left padding (`pl-6`) and a `↳` glyph; sort destinations by current-year total descending.
+
+5. **No schema / no backend changes**. Rule of thumb: rely on existing `transfer_type` flag first, fall back to description regex for any brokerage transfers that weren't auto-tagged.
+
+## Out of scope
+
+- No change to the Net Savings Rate card to its left (keeps existing income−expenses math).
+- No change to Expenses calculation, charts, or any other tab.
+- Business mode stays unchanged.

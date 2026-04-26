@@ -38,6 +38,31 @@ const effectiveMethod = (t: { final_method: string | null; predicted_method: str
   return raw;
 };
 
+// Personal wealth destinations: outbound transfers that count as "saved into wealth"
+// rather than spent. Order matters — first match wins.
+const WEALTH_DESTINATIONS: [RegExp, string][] = [
+  [/wealthfront/i, 'Wealthfront'],
+  [/gemini/i, 'Gemini'],
+  [/\bdub\b/i, 'Dub'],
+  [/coinbase/i, 'Coinbase'],
+  [/robinhood/i, 'Robinhood'],
+  [/betterment/i, 'Betterment'],
+  [/fidelity/i, 'Fidelity'],
+  [/vanguard/i, 'Vanguard'],
+  [/(?:charles\s*)?schwab/i, 'Schwab'],
+  [/kraken/i, 'Kraken'],
+  [/binance/i, 'Binance'],
+  [/collectr/i, 'Collectr'],
+];
+const wealthDestination = (t: { description_normalized: string | null; description_raw: string | null }): string | null => {
+  const desc = (t.description_normalized || t.description_raw || '').trim();
+  if (!desc) return null;
+  for (const [pattern, label] of WEALTH_DESTINATIONS) {
+    if (pattern.test(desc)) return label;
+  }
+  return null;
+};
+
 interface Transaction {
   date: string | null;
   description_raw: string | null;
@@ -49,6 +74,7 @@ interface Transaction {
   predicted_method: string | null;
   review_status: string;
   is_transfer: boolean;
+  transfer_type: string | null;
   exclude_from_expense_totals: boolean;
   parse_status: string;
   is_split_parent: boolean;
@@ -161,7 +187,7 @@ export default function Insights() {
     while (hasMore) {
       const { data } = await supabase
         .from('transactions_uploaded')
-        .select('date, description_raw, description_normalized, amount, final_category, predicted_category, final_method, predicted_method, review_status, is_transfer, exclude_from_expense_totals, parse_status, is_split_parent')
+        .select('date, description_raw, description_normalized, amount, final_category, predicted_category, final_method, predicted_method, review_status, is_transfer, transfer_type, exclude_from_expense_totals, parse_status, is_split_parent')
         .eq('owner_id', user!.id).eq('mode', mode).neq('parse_status', 'parse_error')
         .range(from, from + pageSize - 1);
       if (data) allData = [...allData, ...(data as Transaction[])];
@@ -455,15 +481,42 @@ export default function Insights() {
       if (t.date.startsWith(lastYear)) lastYearExpenses += Math.abs(t.amount || 0);
     });
 
+    // Saved-to-Wealth: walk the FULL transactions array (brokerage transfers
+    // are excluded from allExpenses, so we have to look at the raw set).
+    // Match if (a) it's already flagged as a brokerage_transfer, or
+    // (b) the description matches a known wealth destination.
+    const thisYearByDest: Record<string, number> = {};
+    const lastYearByDest: Record<string, number> = {};
+    transactions.forEach(t => {
+      if (!t.date) return;
+      const dest = wealthDestination(t) || (t.transfer_type === 'brokerage_transfer' ? 'Other Brokerage' : null);
+      if (!dest) return;
+      const amt = Math.abs(t.amount || 0);
+      if (t.date.startsWith(thisYear)) thisYearByDest[dest] = (thisYearByDest[dest] || 0) + amt;
+      if (t.date.startsWith(lastYear)) lastYearByDest[dest] = (lastYearByDest[dest] || 0) + amt;
+    });
+    const thisYearSaved = Object.values(thisYearByDest).reduce((s, v) => s + v, 0);
+    const lastYearSaved = Object.values(lastYearByDest).reduce((s, v) => s + v, 0);
+
+    // Sorted destination list (by current-year total desc, then last-year)
+    const destNames = Array.from(new Set([...Object.keys(thisYearByDest), ...Object.keys(lastYearByDest)]))
+      .sort((a, b) => (thisYearByDest[b] || 0) - (thisYearByDest[a] || 0) || (lastYearByDest[b] || 0) - (lastYearByDest[a] || 0));
+
     const pctChange = (curr: number, prev: number) => prev > 0 ? ((curr - prev) / prev) * 100 : 0;
 
     return {
-      thisYear: { income: thisYearIncome, expenses: thisYearExpenses },
-      lastYear: { income: lastYearIncome, expenses: lastYearExpenses },
+      thisYear: { income: thisYearIncome, expenses: thisYearExpenses, savedToWealth: thisYearSaved, byDestination: thisYearByDest },
+      lastYear: { income: lastYearIncome, expenses: lastYearExpenses, savedToWealth: lastYearSaved, byDestination: lastYearByDest },
+      destinations: destNames,
       incomeChange: pctChange(thisYearIncome, lastYearIncome),
       expenseChange: pctChange(thisYearExpenses, lastYearExpenses),
+      savedChange: pctChange(thisYearSaved, lastYearSaved),
+      trueSavingsRate: {
+        thisYear: thisYearIncome > 0 ? (thisYearSaved / thisYearIncome) * 100 : 0,
+        lastYear: lastYearIncome > 0 ? (lastYearSaved / lastYearIncome) * 100 : 0,
+      },
     };
-  }, [allExpenses, earnedIncomeAll]);
+  }, [allExpenses, earnedIncomeAll, transactions]);
 
   // ─── TRENDS TAB DATA ───
   const categoryTrends = useMemo(() => {
@@ -1243,12 +1296,43 @@ export default function Insights() {
                             {yoyComparison.expenseChange >= 0 ? '+' : ''}{yoyComparison.expenseChange.toFixed(1)}%
                           </td>
                         </tr>
-                        <tr>
-                          <td className="px-3 py-2.5 text-foreground font-medium">Net Saved</td>
+                        {mode === 'personal' && (
+                          <>
+                            <tr className="border-b border-border/10 bg-primary/5">
+                              <td className="px-3 py-2.5 text-foreground font-semibold flex items-center gap-1.5">
+                                <PiggyBank className="h-3.5 w-3.5 text-primary" />
+                                Invested / Saved to Wealth
+                              </td>
+                              <td className="px-3 py-2.5 text-right font-mono text-foreground font-semibold">{fmt(yoyComparison.lastYear.savedToWealth)}</td>
+                              <td className="px-3 py-2.5 text-right font-mono text-foreground font-semibold">{fmt(yoyComparison.thisYear.savedToWealth)}</td>
+                              <td className={`px-3 py-2.5 text-right font-mono font-semibold ${yoyComparison.savedChange >= 0 ? 'text-success' : 'text-destructive'}`}>
+                                {yoyComparison.lastYear.savedToWealth > 0 ? `${yoyComparison.savedChange >= 0 ? '+' : ''}${yoyComparison.savedChange.toFixed(1)}%` : '—'}
+                              </td>
+                            </tr>
+                            {yoyComparison.destinations.map(dest => (
+                              <tr key={dest} className="border-b border-border/5">
+                                <td className="px-3 py-1.5 pl-8 text-[11px] text-muted-foreground">↳ {dest}</td>
+                                <td className="px-3 py-1.5 text-right font-mono text-[11px] text-muted-foreground">{fmt(yoyComparison.lastYear.byDestination[dest] || 0)}</td>
+                                <td className="px-3 py-1.5 text-right font-mono text-[11px] text-muted-foreground">{fmt(yoyComparison.thisYear.byDestination[dest] || 0)}</td>
+                                <td className="px-3 py-1.5 text-right font-mono text-[11px] text-muted-foreground/60">—</td>
+                              </tr>
+                            ))}
+                          </>
+                        )}
+                        <tr className="border-b border-border/10">
+                          <td className="px-3 py-2.5 text-foreground font-medium">Net Saved (Income − Expenses)</td>
                           <td className="px-3 py-2.5 text-right font-mono text-foreground">{fmt(yoyComparison.lastYear.income - yoyComparison.lastYear.expenses)}</td>
                           <td className="px-3 py-2.5 text-right font-mono text-foreground">{fmt(yoyComparison.thisYear.income - yoyComparison.thisYear.expenses)}</td>
                           <td className="px-3 py-2.5 text-right font-mono text-muted-foreground">—</td>
                         </tr>
+                        {mode === 'personal' && (
+                          <tr>
+                            <td className="px-3 py-2.5 text-foreground font-medium">True Savings Rate <span className="text-[10px] text-muted-foreground">(Saved ÷ Income)</span></td>
+                            <td className="px-3 py-2.5 text-right font-mono text-foreground">{yoyComparison.lastYear.income > 0 ? `${yoyComparison.trueSavingsRate.lastYear.toFixed(1)}%` : '—'}</td>
+                            <td className="px-3 py-2.5 text-right font-mono text-foreground">{yoyComparison.thisYear.income > 0 ? `${yoyComparison.trueSavingsRate.thisYear.toFixed(1)}%` : '—'}</td>
+                            <td className="px-3 py-2.5 text-right font-mono text-muted-foreground">—</td>
+                          </tr>
+                        )}
                       </tbody>
                     </table>
                   </div>
