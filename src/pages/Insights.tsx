@@ -1336,33 +1336,77 @@ export default function Insights() {
                   ) : <p className="text-sm text-muted-foreground text-center py-10">No data yet</p>}
                 </div>
 
-                {/* Category Sparklines */}
+                {/* Category Trends — multi-line chart with totals */}
                 <div className="glass-panel p-4">
-                  <h3 className="text-sm font-medium text-foreground mb-3">Category Trends (Top 6)</h3>
-                  {categoryTrends.length > 0 ? (
-                    <div className="grid grid-cols-2 gap-3">
-                      {categoryTrends.map((ct, idx) => (
-                        <div key={ct.category} className="p-2 rounded-lg bg-secondary/30 border border-border/20">
-                          <p className="text-[11px] font-medium text-foreground truncate mb-1">{ct.category}</p>
-                          <ResponsiveContainer width="100%" height={50}>
-                            <LineChart data={ct.data}>
-                              <Line
-                                type="monotone"
-                                dataKey="amount"
-                                stroke={CHART_COLORS[idx % CHART_COLORS.length]}
-                                strokeWidth={1.5}
-                                dot={false}
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-sm font-medium text-foreground">Category Trends (Top 6)</h3>
+                    <span className="text-[10px] text-muted-foreground">
+                      Total: <span className="text-foreground font-semibold font-mono">
+                        {fmt(categoryTrends.categories
+                          .filter(c => !hiddenTrendCats.has(c.name))
+                          .reduce((s, c) => s + c.total, 0))}
+                      </span>
+                    </span>
+                  </div>
+                  {categoryTrends.rows.length > 0 ? (
+                    <>
+                      <ResponsiveContainer width="100%" height={300}>
+                        <LineChart data={categoryTrends.rows} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                          <CartesianGrid strokeDasharray="2 4" stroke="hsl(var(--border))" opacity={0.5} />
+                          <XAxis dataKey="label" tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} />
+                          <YAxis
+                            tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
+                            tickFormatter={(v: number) => v >= 1000 ? `$${Math.round(v / 1000)}k` : `$${v}`}
+                          />
+                          <Tooltip
+                            contentStyle={tooltipStyle}
+                            formatter={(value: number, name: string) => [fmt(Number(value) || 0), name]}
+                          />
+                          {categoryTrends.categories.map(c => (
+                            <Line
+                              key={c.name}
+                              type="monotone"
+                              dataKey={c.name}
+                              stroke={c.color}
+                              strokeWidth={2}
+                              dot={{ r: 3 }}
+                              activeDot={{ r: 5 }}
+                              connectNulls
+                              hide={hiddenTrendCats.has(c.name)}
+                            />
+                          ))}
+                        </LineChart>
+                      </ResponsiveContainer>
+                      <div className="flex flex-wrap items-center gap-1.5 mt-2 pt-2 border-t border-border/50">
+                        {categoryTrends.categories.map(c => {
+                          const off = hiddenTrendCats.has(c.name);
+                          return (
+                            <button
+                              key={c.name}
+                              type="button"
+                              onClick={() => setHiddenTrendCats(prev => {
+                                const next = new Set(prev);
+                                if (next.has(c.name)) next.delete(c.name); else next.add(c.name);
+                                return next;
+                              })}
+                              className={`flex items-center gap-1.5 text-[10px] px-2 py-0.5 rounded-full border transition-all ${
+                                off
+                                  ? 'border-border/40 text-muted-foreground/60 line-through'
+                                  : 'border-border/60 text-foreground hover:border-foreground/40'
+                              }`}
+                              title={off ? 'Click to show' : 'Click to hide'}
+                            >
+                              <span
+                                className="h-2 w-2 rounded-full"
+                                style={{ background: off ? 'hsl(var(--muted))' : c.color }}
                               />
-                              <Tooltip
-                                contentStyle={tooltipStyle}
-                                formatter={(value: number) => [fmt(value), ct.category]}
-                                labelFormatter={(label) => label}
-                              />
-                            </LineChart>
-                          </ResponsiveContainer>
-                        </div>
-                      ))}
-                    </div>
+                              {c.name}
+                              <span className="text-muted-foreground font-mono">{fmt(c.total)}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </>
                   ) : <p className="text-sm text-muted-foreground text-center py-10">No data yet</p>}
                 </div>
               </div>
