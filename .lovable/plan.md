@@ -1,94 +1,43 @@
-## Three issues, one root cause for two of them
+## Goal
 
-### Issue 1 — Top summary cards ignore the date filter
+Make payment method a first-class way to slice the Expenses list so you can hunt down the mystery rows showing up in Insights buckets but feeling invisible in the table.
 
-The "Personal Cash Out / Business Cash Out / True Personal / True Business / Pending Reimbursable" strip and the secondary stats row in `src/pages/Expenses.tsx` are computed from `transactions` (all-time), not `filtered`. So you can pick "Year to Date" or "March 2026" and the numbers above don't move at all. That's the bug.
+## What's there today
 
-### Issue 2 — "Spend by Category" shows a huge Uncategorized slice that doesn't exist on Expenses
+- The Expenses table has a **Method** column but it's not sortable and there's no filter for it.
+- Methods come from two places: `final_method`/`predicted_method` (free-text, e.g. "Amex Platinum", "Chase Checking") and `source_account_name` (auto-set on upload from the filename, e.g. "Chase 5592").
+- The toolbar already has Status, Filter, Category, and Date filters — we'll add Method right after Category.
 
-Verified in your data: 415 personal 2026 transactions are in `review_status = 'suggested'` with a confident `predicted_category` (Dining, Travel, Apartment/Office, Health & Personal Care, etc., 78–96% confidence). The Expenses table happily renders them as categorized (it falls back to `predicted_category`). But Insights and Tax both insist on `final_category` and the `approved/auto_categorized/edited` review status — so 415 categorized-looking rows get either filtered out completely or bucketed into "Uncategorized". Same root cause as Issue 3.
+## Plan
 
-### Issue 3 — Tax deductions still feel anemic
+### 1. Add a Method dropdown filter
+Add a new filter `Select` in the toolbar between **Category** and the **Date** picker:
+- Options: `All Methods`, `(No method)`, then a deduped, alphabetized list of every method seen in the loaded transactions (uses `final_method || predicted_method || source_account_name`).
+- Selecting one filters the table to only rows matching that method (case-insensitive exact match).
+- Updates live with the current mode (Personal/Business/Reimbursable).
 
-Two reasons:
+### 2. Make the Method column header sortable
+Convert the plain `<th>Method</th>` into the existing `SortHeader` component so clicking it sorts ascending/descending by method name. Sort uses the same `final_method || predicted_method || source_account_name` fallback so blank-method rows cluster together.
 
-1. **The deductible category list is too narrow** — your account is "hella creative" (your words), but the helper I built last round didn't include several legit Schedule C lines that match your actual categories: `Entertainment` (50% meals & entertainment), `Apartment/Office` (rent / home office under §280A), `Charity` (when paid by an LLC/sole-prop it's a deductible business expense, not an itemized personal deduction), `Label Royalties`, plus your custom client categories (`Clipscale`, `CURE97`, `ddi`).
+### 3. Show source account when no method
+In the Method cell, if the row has no `final_method` and no `predicted_method`, fall back to displaying `source_account_name` in muted text (e.g. "Chase 5592"). This way the rows from your 5592 upload are immediately visible even if they were never categorized.
 
-2. **The Tax page only counts `approved/auto_categorized/edited`** — same `final_category`-and-`review_status` problem as Issue 2. Your 571 business `suggested` rows ($235k of high-confidence predictions) are completely excluded from the deduction total, even when their predicted category is something obviously deductible like "Vendor Payment".
+### 4. URL deep-link support
+Add `?method=<name>` to the same URL-param handler that already supports `?month=`, `?scope=`, `?review=`. This lets us link from Insights tiles straight into "show me Chase 5592 Apartment/Office personal rows" later — sets up the next step of fixing the Insights mystery.
 
-## Fix plan
+## Technical details
 
-### Fix A — Wire the date filter into the summary cards
+**File:** `src/pages/Expenses.tsx`
+- Add `methodFilter` state (default `'all'`).
+- Compute `availableMethods` via `useMemo` from `transactions` (dedupe with a `Set`, sorted A→Z).
+- Extend the `filtered` `useMemo` to apply `methodFilter` and add `'method'` to the `sortCol` switch.
+- Add the new `<Select>` between the existing Category select and the Date popover.
+- Swap the Method `<th>` for `<SortHeader col="method" label="Method" />`.
+- Update the Method cell render (~line 1770) to fall back to `source_account_name` with a muted style when other method fields are empty.
+- Extend the URL-param effect to read `?method=` and set `methodFilter`.
 
-`src/pages/Expenses.tsx`:
+**No DB or RLS changes.** No edge function changes. Pure UI/state work, ships in one file.
 
-- Compute `crossModeTotals` (the 5-card strip) from a derived `dateScopedAll` set — same logic as today but constrained by `dateFrom/dateTo`. Currently it loads all rows once into state; rebuild it as a `useMemo` over `transactions` + the date range. Drop the `loadCrossModeTotals` paginated fetch entirely (the data's already loaded by `loadTransactions`, the duplicate fetch is wasteful).
-- Update `stats` to also respect `dateFrom/dateTo` and the active `categoryFilter / extraFilter / search` — basically use `filtered` (or a slimmer "active in current view" set) instead of the raw `transactions` array.
-- Add a small "(filtered)" badge next to the cards when a date or other filter is active, so it's obvious the numbers reflect the current view.
-- Add two new cards/numbers since you asked for "more info":
-  - **Avg/day** for the period (period total ÷ days in range)
-  - **Largest single expense** in the period (description + amount, click to scroll-to)
-  - **Number of unique merchants** in the period
+## Why this helps the rent investigation
 
-### Fix B — Treat predicted-but-not-yet-approved as categorized everywhere
-
-Introduce one tiny helper in `src/lib/categorization-engine.ts`:
-
-```ts
-export function effectiveCategory(tx: { final_category?: string | null; predicted_category?: string | null }): string | null {
-  return tx.final_category || tx.predicted_category || null;
-}
-export const COUNTED_FOR_REPORTING_STATUSES = new Set([
-  'approved', 'auto_categorized', 'edited', 'suggested', 'ai_suggested'
-]);
-```
-
-Then rewire:
-- `src/pages/Insights.tsx` — every place that does `t.final_category || 'Uncategorized'` becomes `effectiveCategory(t) || 'Uncategorized'`. The `isCounted(...)` filter expands to include `suggested/ai_suggested` so they're not silently dropped from the chart.
-- `src/pages/Tax.tsx` — `loadDeductions` and `loadProjection` switch from `.in('review_status', ['approved','auto_categorized','edited'])` to including the suggested statuses too, and the deduction-flag check becomes "if `counts_as_tax_deduction = true` OR (`final_category IS NULL` AND `predicted_category` is in deductible set)".
-- Add a soft visual distinction: in the Insights category bar chart, the part of each bar from `suggested` rows gets a slightly more transparent fill so power users can see "these are predicted, not confirmed". Hover tooltip: "X of Y predicted, Z confirmed."
-
-### Fix C — Expand the deductible-category set (NY-aware, creative-friendly)
-
-Update `BUSINESS_DEDUCTIBLE_CATEGORIES` in `src/lib/categorization-engine.ts` to match your actual chart of accounts and Schedule C / NY ordinary-and-necessary standards:
-
-Add: `entertainment`, `apartment/office`, `charity`, `label royalties`, `taxes` (state/local taxes are deductible business expenses on Sch C line 23 if not federal income tax), and treat unknown user-defined custom client categories (`clipscale`, `cure97`, `ddi`) as deductible-by-default since these are clearly client/project tags for an active business.
-
-Keep blocked (never deductible): `cc payment`, `transfer`, `investment`, `owner draw`, `distribution`, `refund`, `debit` (these are cash movements / capital, not P&L).
-
-Personal mode stays narrow but expand slightly to NY-relevant itemizables:
-- Add: `health & personal care` (medical portion may itemize over 7.5% AGI), `apartment/office` (only the home-office portion if business use — flagged for review, not auto-deducted at 100%), `taxes` (SALT cap $10k — partially deductible).
-- Note: most personal deductions are subject to AGI thresholds. Auto-flag them but visually mark in the Tax page as "Itemizable — subject to limits" rather than treating as full Schedule C dollar-for-dollar.
-
-A refined helper signature:
-```ts
-export type DeductibilityHint = 'full' | 'partial' | 'requires_review' | 'none';
-export function deductibilityHint(mode, category): DeductibilityHint
-```
-
-Tax page uses this to show a third number alongside "Estimated Deductions YTD":
-- **Confirmed deductions** (`full` matches in approved rows)
-- **Predicted deductions** (`full` matches in suggested rows — counted but flagged)
-- **Needs review** (`partial`/`requires_review` matches — shown but with caveat)
-
-### Fix D — One-shot backfill for the new categories
-
-Re-run an UPDATE on `transactions_uploaded` that sets `counts_as_tax_deduction = true` for the newly-included deductible categories (entertainment, apartment/office, charity, label royalties, taxes, the user-custom client tags). Same guardrails as last time (not transfers/CC/investments/refunds).
-
-## What you'll see after
-
-**Expenses page**: pick "March 2026" or "Year to Date" — the top 5 cards and the secondary stats row reflect that range. Three new fields appear (avg/day, largest expense, unique merchants).
-
-**Insights "Spend by Category"**: the Uncategorized slice shrinks dramatically because your 415 high-confidence personal predictions now show up under Dining / Travel / Apartment/Office / Health & Personal Care etc. A tooltip badge tells you which slices are confirmed vs predicted.
-
-**Tax page**: business deductions jump from $51,708 to roughly $80k–$100k+ once entertainment, apartment/office, charity, label royalties, and your custom client categories are folded in — plus another big jump when the 571 suggested business rows ($235k potential) start counting at their predicted category. The Reserve Gap drops accordingly. A new line shows "Predicted (not yet reviewed)" so you know exactly how much is high-confidence-but-unconfirmed.
-
-## Files touched
-
-- `src/lib/categorization-engine.ts` — expand category sets, add `effectiveCategory()` and `deductibilityHint()` helpers, export `COUNTED_FOR_REPORTING_STATUSES`.
-- `src/pages/Expenses.tsx` — replace stale `crossModeTotals` fetch with a date-aware `useMemo`, rewire `stats` to respect filters, add three new metric tiles.
-- `src/pages/Insights.tsx` — use `effectiveCategory()` and the expanded counted-statuses everywhere a category map is built; tooltip badge for predicted slices.
-- `src/pages/Tax.tsx` — relaxed review-status filter, "Confirmed / Predicted / Needs Review" deduction breakdown, hint-aware footnotes.
-- One-time data backfill (insert tool) — flip `counts_as_tax_deduction` for newly-included categories.
-
-No schema changes, no RLS changes.
+Once shipped, you can: switch to Personal mode → filter Method = "Chase 5592" (or whichever account) → filter Category = "Apartment/Office" → instantly see every row contributing to that bucket and confirm whether they're hidden behind a different account, an unreviewed status, or excluded from the table you've been looking at.
