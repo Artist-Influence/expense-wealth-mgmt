@@ -170,18 +170,33 @@ export default function Tax() {
     const { data } = await q;
     setDeductionRows((data as DeductionRow[]) || []);
 
-    // Also count unreviewed deductions for warning
+    // Count + sum unreviewed business transactions in scope. These are the
+    // rows that haven't been categorized yet, so they CAN'T be flagged as
+    // deductions (the flag is set at categorize-time). The whole pile is
+    // potential additional deductions.
     let cq = supabase
       .from('transactions_uploaded')
-      .select('id', { count: 'exact', head: true })
+      .select('amount', { count: 'exact' })
       .eq('owner_id', user!.id)
-      .eq('counts_as_tax_deduction', true)
+      .eq('is_split_parent', false)
+      .eq('is_transfer', false)
       .in('review_status', ['needs_review', 'suggested', 'ai_suggested'])
       .gte('date', yearStart)
       .lte('date', yearEnd);
-    if (scope !== 'all') cq = cq.eq('transaction_mode', scope);
-    const { count } = await cq;
+    // Only ever count business spend as "potential deductions" — most personal
+    // spend isn't deductible so it'd be misleading.
+    if (scope === 'business' || scope === 'all') {
+      cq = cq.eq('transaction_mode', 'business');
+    } else {
+      cq = cq.eq('transaction_mode', 'personal');
+    }
+    const { data: unreviewedRows, count } = await cq;
     setUnreviewedDeductionCount(count || 0);
+    const total = (unreviewedRows || []).reduce(
+      (s: number, r: any) => s + Math.abs(Number(r.amount || 0)),
+      0,
+    );
+    setPotentialDeductions({ count: count || 0, total });
   }
 
   async function loadTaxPayments() {
