@@ -368,6 +368,25 @@ export default function Income() {
     }
   };
 
+  // Mark as personal repayment / transfer (excludes from income everywhere via NON_EARNING_TYPES)
+  const markAsRepayment = async (ids: string[]) => {
+    if (ids.length === 0) return;
+    const { error } = await supabase
+      .from('income_transactions')
+      .update({
+        income_type: 'personal_repayment',
+        taxable_status: 'non_taxable',
+        status: 'approved',
+      } as never)
+      .in('id', ids);
+    if (error) { toast.error('Failed to mark as repayment'); return; }
+    setTransactions(prev => prev.map(t => ids.includes(t.id)
+      ? { ...t, income_type: 'personal_repayment', taxable_status: 'non_taxable', status: 'approved' }
+      : t));
+    setSelectedIds(new Set());
+    toast.success(`Marked ${ids.length} as repayment — excluded from income totals`);
+  };
+
   const bulkDelete = async () => {
     if (selectedIds.size === 0) return;
     if (!confirm(`Delete ${selectedIds.size} income transaction(s)? This cannot be undone.`)) return;
