@@ -1,42 +1,96 @@
-# Exclude personal repayments (Zelle from a friend, etc.) from income totals
+# Data Health Check (14h auto-sweep) + Income Duplicate Resolver
 
 ## What you'll get
 
-A new income type — **"Personal Transfer / Repayment"** — that you can assign to any income row (e.g., a friend Zelles you back $40 they owed). Anything tagged with this type is automatically excluded from every income/earned/tax/allocation calculation across the app, but stays visible in the Income ledger as an audit trail.
+A new **Health Check** system that automatically scans your data for duplicates and integrity issues, and gives you one-click cleanup tools.
 
-You'll also get:
-- A one-click action on each row (and bulk action) to **"Mark as Repayment / Transfer (don't count)"**.
-- A clear visual badge so these rows are obvious in the table.
-- A dedicated summary card on the Income page showing total "Repayments / Personal Transfers" so you can see what's been excluded.
+### 1. Auto-run every 14 hours
+- On app load, if it's been ≥14 hours since the last health check (or it's never run), the app silently runs a sweep in the background.
+- A subtle **status pill in the top nav** turns amber/red when issues are found ("3 issues — Review"). Click it to open the Health Check panel.
+- A "Run Now" button always available so you can force a sweep on demand.
+- Last-run timestamp is stored per-user in `app_settings`.
 
-## How it will work
+### 2. What gets checked
 
-The codebase already has a centralized `NON_EARNING_TYPES` list in `src/lib/income-classifier.ts`. Every page that calculates earned income (Insights, Tax, Allocations, Accountant exports, CloseMonth) already filters out anything in that list. We'll add a new type to that list, so exclusion propagates everywhere automatically with zero per-page changes.
+**Duplicates**
+- **Income duplicates** (the issue you're seeing now — 15 clusters detected, including doubled Deel deposits, Zelle payments from Artist Influence, etc.).
+- **Expense duplicates** (exact + near-duplicates, same engine you already have).
+- **Cross-mode duplicates** (same charge in both Personal & Business).
 
-### Technical changes
+**Integrity issues**
+- Income rows with `taxable_status = 'unknown'` AND `status = 'needs_review'` (need your review).
+- Expenses with no category AND no predicted category (orphan rows).
+- Transactions older than 7 days still stuck in `needs_review`.
+- Expense rows with `parse_status = 'error'`.
 
-1. **`src/lib/income-classifier.ts`**
-   - Add `'personal_repayment'` to `NON_EARNING_TYPES`.
-   - Add `{ value: 'personal_repayment', label: 'Personal Repayment / Transfer' }` to `INCOME_TYPE_OPTIONS`.
-   - Default `taxable_status` for this type is `'non_taxable'`.
+### 3. Income duplicate resolver (NEW)
+The existing `DuplicateResolverDialog` only handles expenses. We'll generalize it to also resolve income clusters:
+- "Keep oldest, delete others" (income table has no `archived` status — uses hard delete with a confirmation).
+- "Mark as not duplicates" (sets a flag so the cluster won't reappear).
+- Shows source file, amount, date, type for each row.
 
-2. **`src/pages/Income.tsx`**
-   - Add a badge style for `personal_repayment` in `INCOME_TYPE_BADGE` (muted gray, similar to `transfer`).
-   - Add a new summary card "Repayments / Transfers" showing the total (so you can see the bucket).
-   - Add a row-level quick action button (in the actions column / drawer) and a bulk-action option: **"Mark as Repayment (exclude from income)"** that sets `income_type='personal_repayment'` + `taxable_status='non_taxable'` + `status='approved'` in one update.
-   - The existing income-type dropdown on each row will also let you pick it manually.
+### 4. Health Check panel
+A new dialog (or `/health` mini-route) with sections:
+- **Duplicates** — opens the resolver with all duplicate clusters across income + expenses.
+- **Needs Review** — count + jump links to Expenses/Income filtered to those rows.
+- **Stale Reviews** — rows untouched >7 days.
+- **Parse Errors** — bad CSV imports needing attention.
 
-3. **No DB migration needed** — `income_type` is already a free-form text column with no CHECK constraint, so the new value just works.
+Each section shows the count, a one-line description, and a primary action button.
 
-4. **No changes needed to Insights / Tax / Allocations / Accountant / CloseMonth** — they already exclude anything in `NON_EARNING_TYPES`.
+## Technical changes
 
-### How rows get tagged
+### DB migration (1 small change)
+```sql
+ALTER TABLE app_settings 
+  ADD COLUMN last_health_check_at timestamptz,
+  ADD COLUMN last_health_check_summary jsonb;
 
-- **Manually**: pick "Personal Repayment / Transfer" from the income-type dropdown on the row, or use the new "Mark as Repayment" quick action.
-- **Bulk**: select multiple rows → bulk action → "Mark as Repayment".
-- **Auto-detected (optional, light heuristic)**: We will NOT auto-classify Zelle/Venmo as repayments, because they're often legitimate revenue. Those will continue to land as `'other'` with `taxable_status='unknown'` so you review them — and now you have a one-click way to push them into the repayment bucket.
+ALTER TABLE income_transactions 
+  ADD COLUMN duplicate_status text NOT NULL DEFAULT 'unique',
+  ADD COLUMN duplicate_of_income_id uuid;
+```
+(The `duplicate_status` mirrors what `transactions_uploaded` already has, so the resolver can mark income pairs as "not duplicates" persistently.)
+
+### New file: `src/lib/health-check.ts`
+Pure function that runs all checks and returns a structured summary:
+```ts
+export interface HealthCheckSummary {
+  ranAt: string;
+  income: { exactClusters: DuplicateCluster[]; rowIndex: Map<string, ...> };
+  expenses: { exactClusters; nearClusters; crossModePairs; rowIndex };
+  needsReview: { incomeCount: number; expenseCount: number };
+  staleReviews: { count: number; oldestDate: string | null };
+  parseErrors: { count: number };
+  totalIssues: number;
+}
+export async function runHealthCheck(userId: string): Promise<HealthCheckSummary>;
+```
+Reuses `findExactClusters` / `findNearClusters` from `duplicate-detector.ts` — no algorithm changes.
+
+### New file: `src/components/HealthCheckPanel.tsx`
+Dialog with the sections above; embeds the duplicate resolver.
+
+### Update: `src/components/DuplicateResolverDialog.tsx`
+- Add an `incomeClusters` prop + new tab "Income Duplicates".
+- Resolver actions for income: hard-delete losers (income rows are simpler; no archive concept) OR mark all as unique.
+
+### Update: `src/components/AppNav.tsx`
+- Add a small `HealthStatusPill` (icon + count badge) that opens the panel.
+- Color: green ✓ (no issues), amber ⚠ (1–5), red 🔴 (>5).
+
+### Update: `src/App.tsx` (or a top-level effect)
+- On mount, check `app_settings.last_health_check_at`. If `> 14 hours` ago (or null), call `runHealthCheck`, store summary in state + persist `last_health_check_at` and `last_health_check_summary`.
+- No background polling — just on-load + manual "Run Now".
+
+### What we will NOT do
+- No edge function / pg_cron — the user is single-tenant, so a client-side check on app load is simpler, free, and equally effective.
+- No auto-deletion. Cleanup is always one-click but user-initiated, to avoid accidental data loss.
 
 ## Files touched
-
-- `src/lib/income-classifier.ts` — add type to constants
-- `src/pages/Income.tsx` — add badge, summary card, row + bulk "Mark as Repayment" action
+- `src/lib/health-check.ts` (new)
+- `src/components/HealthCheckPanel.tsx` (new)
+- `src/components/DuplicateResolverDialog.tsx` (extend with income tab)
+- `src/components/AppNav.tsx` (add status pill)
+- `src/App.tsx` (auto-run hook)
+- DB migration: 2 columns on `app_settings`, 2 columns on `income_transactions`

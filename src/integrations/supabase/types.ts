@@ -151,6 +151,8 @@ export type Database = {
           exclude_transfers_from_totals: boolean
           flag_possible_duplicates: boolean
           id: string
+          last_health_check_at: string | null
+          last_health_check_summary: Json | null
           owner_id: string
           passcode_enabled: boolean
           passcode_hash: string | null
@@ -169,6 +171,8 @@ export type Database = {
           exclude_transfers_from_totals?: boolean
           flag_possible_duplicates?: boolean
           id?: string
+          last_health_check_at?: string | null
+          last_health_check_summary?: Json | null
           owner_id: string
           passcode_enabled?: boolean
           passcode_hash?: string | null
@@ -187,6 +191,8 @@ export type Database = {
           exclude_transfers_from_totals?: boolean
           flag_possible_duplicates?: boolean
           id?: string
+          last_health_check_at?: string | null
+          last_health_check_summary?: Json | null
           owner_id?: string
           passcode_enabled?: boolean
           passcode_hash?: string | null
@@ -276,6 +282,8 @@ export type Database = {
           date: string | null
           description_normalized: string | null
           description_raw: string | null
+          duplicate_of_income_id: string | null
+          duplicate_status: string
           id: string
           income_type: string
           linked_expense_id: string | null
@@ -296,6 +304,8 @@ export type Database = {
           date?: string | null
           description_normalized?: string | null
           description_raw?: string | null
+          duplicate_of_income_id?: string | null
+          duplicate_status?: string
           id?: string
           income_type?: string
           linked_expense_id?: string | null
@@ -316,6 +326,8 @@ export type Database = {
           date?: string | null
           description_normalized?: string | null
           description_raw?: string | null
+          duplicate_of_income_id?: string | null
+          duplicate_status?: string
           id?: string
           income_type?: string
           linked_expense_id?: string | null
