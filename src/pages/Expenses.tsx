@@ -444,6 +444,15 @@ export default function Expenses() {
       review_status: (!values.category && values._keepNeedsReview) ? 'needs_review' : 'edited',
     };
 
+    // Auto-recompute tax-deduction flag from (mode, category) unless the user
+    // explicitly toggled it in the drawer (values.counts_as_tax_deduction set).
+    if (values.counts_as_tax_deduction !== undefined) {
+      updatePayload.counts_as_tax_deduction = values.counts_as_tax_deduction;
+    } else if (values.category !== undefined) {
+      const mode = values.transaction_mode || transactions.find(t => t.id === id)?.transaction_mode;
+      updatePayload.counts_as_tax_deduction = isDeductibleCategory(mode as any, values.category);
+    }
+
     if (values.transaction_mode !== undefined) updatePayload.transaction_mode = values.transaction_mode;
     if (values.economic_owner !== undefined) updatePayload.economic_owner = values.economic_owner;
     if (values.treatment_type !== undefined) updatePayload.treatment_type = values.treatment_type;
