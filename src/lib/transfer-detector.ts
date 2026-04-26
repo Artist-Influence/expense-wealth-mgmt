@@ -56,7 +56,7 @@ const LOW_CONFIDENCE_PATTERNS: [RegExp, string][] = [
 
 export interface TransferDetectionResult {
   isTransfer: boolean;
-  transferType: 'credit_card_payment' | 'account_transfer' | 'possible_transfer' | 'unknown_transfer' | null;
+  transferType: 'credit_card_payment' | 'account_transfer' | 'brokerage_transfer' | 'possible_transfer' | 'unknown_transfer' | null;
   transferConfidence: TransferConfidence | null;
 }
 
