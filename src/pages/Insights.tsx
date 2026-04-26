@@ -268,7 +268,7 @@ export default function Insights() {
     const approvedScoped = expenses.filter(t => isCounted(t.review_status));
     const catMap = new Map<string, number>();
     approvedScoped.forEach(t => {
-      const cat = t.final_category || 'Uncategorized';
+      const cat = effectiveCategory(t) || 'Uncategorized';
       catMap.set(cat, (catMap.get(cat) || 0) + Math.abs(t.amount || 0));
     });
     const topCategory = [...catMap.entries()].sort((a, b) => b[1] - a[1])[0];
@@ -297,7 +297,7 @@ export default function Insights() {
   const categoryData = useMemo(() => {
     const catMap = new Map<string, number>();
     approvedExpenses.forEach(t => {
-      const cat = t.final_category || 'Uncategorized';
+      const cat = effectiveCategory(t) || 'Uncategorized';
       catMap.set(cat, (catMap.get(cat) || 0) + Math.abs(t.amount || 0));
     });
     return [...catMap.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12).map(([name, total]) => ({ name, total: Math.round(total * 100) / 100 }));
@@ -451,7 +451,7 @@ export default function Insights() {
     const catMonthMap = new Map<string, Map<string, number>>();
     approvedExpenses.forEach(t => {
       if (!t.date) return;
-      const cat = t.final_category || 'Uncategorized';
+      const cat = effectiveCategory(t) || 'Uncategorized';
       const month = t.date.substring(0, 7);
       if (!catMonthMap.has(cat)) catMonthMap.set(cat, new Map());
       const monthMap = catMonthMap.get(cat)!;
@@ -614,7 +614,7 @@ export default function Insights() {
     // 2. Discretionary overspend (top 3 categories above 6mo baseline)
     const catCurrentMonthly = new Map<string, number>();
     approvedExpenses.forEach(t => {
-      const cat = t.final_category || 'Uncategorized';
+      const cat = effectiveCategory(t) || 'Uncategorized';
       if (!DISCRETIONARY.has(cat)) return;
       catCurrentMonthly.set(cat, (catCurrentMonthly.get(cat) || 0) + Math.abs(t.amount || 0));
     });
@@ -628,7 +628,7 @@ export default function Insights() {
       .filter(t => isCounted(t.review_status))
       .filter(t => t.date && t.date >= baselineCutoff)
       .forEach(t => {
-        const cat = t.final_category || 'Uncategorized';
+        const cat = effectiveCategory(t) || 'Uncategorized';
         if (!DISCRETIONARY.has(cat)) return;
         catBaselineTotals.set(cat, (catBaselineTotals.get(cat) || 0) + Math.abs(t.amount || 0));
         if (t.date) baselineMonthSet.add(t.date.slice(0, 7));
