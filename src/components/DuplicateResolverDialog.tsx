@@ -63,25 +63,32 @@ export function DuplicateResolverDialog({
   nearClusters,
   crossModePairs,
   rowIndex,
+  incomeClusters = [],
+  incomeRowIndex,
   onResolved,
 }: DuplicateResolverDialogProps) {
-  const [tab, setTab] = useState<'exact' | 'near' | 'cross'>('exact');
+  const [tab, setTab] = useState<'exact' | 'near' | 'cross' | 'income'>('exact');
   const [page, setPage] = useState(0);
   const [busyId, setBusyId] = useState<string | null>(null);
 
-  // Reset state when reopening
+  // Reset state when reopening — pick first non-empty tab
   useEffect(() => {
     if (open) {
       setPage(0);
-      // Pick first non-empty tab
-      if (exactClusters.length === 0 && nearClusters.length > 0) setTab('near');
-      else if (exactClusters.length === 0 && nearClusters.length === 0 && crossModePairs.length > 0) setTab('cross');
+      if (exactClusters.length > 0) setTab('exact');
+      else if (incomeClusters.length > 0) setTab('income');
+      else if (nearClusters.length > 0) setTab('near');
+      else if (crossModePairs.length > 0) setTab('cross');
       else setTab('exact');
     }
-  }, [open, exactClusters.length, nearClusters.length, crossModePairs.length]);
+  }, [open, exactClusters.length, nearClusters.length, crossModePairs.length, incomeClusters.length]);
 
   const activeList: { rowIds: string[] }[] =
-    tab === 'exact' ? exactClusters : tab === 'near' ? nearClusters : crossModePairs;
+    tab === 'exact' ? exactClusters
+    : tab === 'near' ? nearClusters
+    : tab === 'cross' ? crossModePairs
+    : incomeClusters;
+  const activeRowIndex = tab === 'income' ? incomeRowIndex : rowIndex;
 
   const pageCount = Math.max(1, Math.ceil(activeList.length / PAGE_SIZE));
   const visible = useMemo(() => activeList.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE), [activeList, page]);
