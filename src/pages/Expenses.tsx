@@ -1211,7 +1211,7 @@ export default function Expenses() {
         transfers_detected: 0, parse_errors: parseErrorRows.length, owner_id: user.id,
         detected_headers: detectedHeaders || null,
         mapped_columns: mapping as any,
-        parse_details: { total_raw_rows: parsed.length, filtered_artifacts: parsed.length - validRows.length - parseErrorRows.length, valid_rows: validRows.length, parse_error_count: parseErrorRows.length, exact_duplicates: exactDupCount, possible_duplicates: possibleDupCount } as any,
+        parse_details: { total_raw_rows: parsed.length, filtered_artifacts: parsed.length - validRows.length - parseErrorRows.length, valid_rows: validRows.length, parse_error_count: parseErrorRows.length, exact_duplicates: exactDupCount, possible_duplicates: possibleDupCount, exact_duplicates_detail: exactSkippedDetail } as any,
       } as any).select().single();
       if (batchError) throw batchError;
 
