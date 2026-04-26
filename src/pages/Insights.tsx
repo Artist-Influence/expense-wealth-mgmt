@@ -1322,7 +1322,7 @@ export default function Insights() {
                           innerRadius={60}
                           outerRadius={100}
                           paddingAngle={2}
-                          label={({ name, percent }) => `${name} (${(percent * 100).toFixed(0)}%)`}
+                          label={({ name, percent, value }: any) => `${name} · $${Math.round(Number(value) || 0).toLocaleString()} (${(percent * 100).toFixed(0)}%)`}
                           labelLine={{ stroke: 'hsl(var(--muted-foreground))' }}
                           fontSize={10}
                         >
