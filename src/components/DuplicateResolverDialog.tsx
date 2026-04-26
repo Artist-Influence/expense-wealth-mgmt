@@ -31,8 +31,17 @@ interface DuplicateResolverDialogProps {
   exactClusters: DuplicateCluster[];
   nearClusters: DuplicateCluster[];
   crossModePairs: { rowIds: string[] }[];
-  rowIndex: Map<string, DupClusterRow>;
+  rowIndex: Map<string, DupClusterRow> | Record<string, DupClusterRow>;
+  // NEW — optional income duplicates
+  incomeClusters?: DuplicateCluster[];
+  incomeRowIndex?: Map<string, DupClusterRow> | Record<string, DupClusterRow>;
   onResolved: () => void; // refresh after change
+}
+
+function getRow(idx: Map<string, DupClusterRow> | Record<string, DupClusterRow> | undefined, id: string): DupClusterRow | undefined {
+  if (!idx) return undefined;
+  if (idx instanceof Map) return idx.get(id);
+  return (idx as Record<string, DupClusterRow>)[id];
 }
 
 const PAGE_SIZE = 10;
