@@ -1296,12 +1296,43 @@ export default function Insights() {
                             {yoyComparison.expenseChange >= 0 ? '+' : ''}{yoyComparison.expenseChange.toFixed(1)}%
                           </td>
                         </tr>
-                        <tr>
-                          <td className="px-3 py-2.5 text-foreground font-medium">Net Saved</td>
+                        {mode === 'personal' && (
+                          <>
+                            <tr className="border-b border-border/10 bg-primary/5">
+                              <td className="px-3 py-2.5 text-foreground font-semibold flex items-center gap-1.5">
+                                <PiggyBank className="h-3.5 w-3.5 text-primary" />
+                                Invested / Saved to Wealth
+                              </td>
+                              <td className="px-3 py-2.5 text-right font-mono text-foreground font-semibold">{fmt(yoyComparison.lastYear.savedToWealth)}</td>
+                              <td className="px-3 py-2.5 text-right font-mono text-foreground font-semibold">{fmt(yoyComparison.thisYear.savedToWealth)}</td>
+                              <td className={`px-3 py-2.5 text-right font-mono font-semibold ${yoyComparison.savedChange >= 0 ? 'text-success' : 'text-destructive'}`}>
+                                {yoyComparison.lastYear.savedToWealth > 0 ? `${yoyComparison.savedChange >= 0 ? '+' : ''}${yoyComparison.savedChange.toFixed(1)}%` : '—'}
+                              </td>
+                            </tr>
+                            {yoyComparison.destinations.map(dest => (
+                              <tr key={dest} className="border-b border-border/5">
+                                <td className="px-3 py-1.5 pl-8 text-[11px] text-muted-foreground">↳ {dest}</td>
+                                <td className="px-3 py-1.5 text-right font-mono text-[11px] text-muted-foreground">{fmt(yoyComparison.lastYear.byDestination[dest] || 0)}</td>
+                                <td className="px-3 py-1.5 text-right font-mono text-[11px] text-muted-foreground">{fmt(yoyComparison.thisYear.byDestination[dest] || 0)}</td>
+                                <td className="px-3 py-1.5 text-right font-mono text-[11px] text-muted-foreground/60">—</td>
+                              </tr>
+                            ))}
+                          </>
+                        )}
+                        <tr className="border-b border-border/10">
+                          <td className="px-3 py-2.5 text-foreground font-medium">Net Saved (Income − Expenses)</td>
                           <td className="px-3 py-2.5 text-right font-mono text-foreground">{fmt(yoyComparison.lastYear.income - yoyComparison.lastYear.expenses)}</td>
                           <td className="px-3 py-2.5 text-right font-mono text-foreground">{fmt(yoyComparison.thisYear.income - yoyComparison.thisYear.expenses)}</td>
                           <td className="px-3 py-2.5 text-right font-mono text-muted-foreground">—</td>
                         </tr>
+                        {mode === 'personal' && (
+                          <tr>
+                            <td className="px-3 py-2.5 text-foreground font-medium">True Savings Rate <span className="text-[10px] text-muted-foreground">(Saved ÷ Income)</span></td>
+                            <td className="px-3 py-2.5 text-right font-mono text-foreground">{yoyComparison.lastYear.income > 0 ? `${yoyComparison.trueSavingsRate.lastYear.toFixed(1)}%` : '—'}</td>
+                            <td className="px-3 py-2.5 text-right font-mono text-foreground">{yoyComparison.thisYear.income > 0 ? `${yoyComparison.trueSavingsRate.thisYear.toFixed(1)}%` : '—'}</td>
+                            <td className="px-3 py-2.5 text-right font-mono text-muted-foreground">—</td>
+                          </tr>
+                        )}
                       </tbody>
                     </table>
                   </div>
