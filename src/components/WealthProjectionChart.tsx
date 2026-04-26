@@ -292,12 +292,15 @@ export function WealthProjectionChart({
     const startYear = new Date().getFullYear();
 
     // Per-account month-by-month balances at three rate scenarios.
-    const sim = (rateOffset: number) => {
+    // rateOffsetFn lets us asymmetrically cap the high band so already-aggressive
+    // rates (e.g. 15% crypto) don't run away to absurd values.
+    const sim = (rateOffsetFn: (baseRate: number) => number) => {
       const balances: Record<string, number[]> = {};
       for (const a of accounts) {
         const ass = assumptions[a.id];
         if (!ass) continue;
-        const monthlyRate = ((ass.annual_rate_pct + rateOffset) / 100) / 12;
+        const effectiveAnnual = rateOffsetFn(ass.annual_rate_pct);
+        const monthlyRate = (effectiveAnnual / 100) / 12;
         const monthsContributing = Math.max(0, (ass.stop_age - age) * 12);
         let bal = Number(a.current_balance) || 0;
         const arr: number[] = [bal];
@@ -311,9 +314,11 @@ export function WealthProjectionChart({
       return balances;
     };
 
-    const expected = sim(0);
-    const low = sim(-3);
-    const high = sim(+3);
+    const expected = sim((r) => r);
+    const low      = sim((r) => Math.max(0, r - 3));
+    // Cap the optimistic band so a 15% rate can't balloon to 18% (which over
+    // 40 years is the difference between $5M and $20M+).
+    const high     = sim((r) => Math.min(r + 3, r * 1.25));
 
     // Sample at year boundaries for a clean axis.
     const rows: any[] = [];
