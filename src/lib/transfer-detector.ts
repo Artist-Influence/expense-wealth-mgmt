@@ -6,10 +6,13 @@ const HIGH_CONFIDENCE_PATTERNS: [RegExp, string][] = [
   [/AUTOPAY\s*PAYMENT/i, 'credit_card_payment'],
   [/AUTO\s*PAY\s*(?:PAYMENT|PMT)/i, 'credit_card_payment'],
   [/AMEX\s*(?:EPAYMENT|PAYMENT)/i, 'credit_card_payment'],
+  [/AMERICAN\s*EXPRESS\s*DES:?\s*ACH\s*P(?:M|Y)?T/i, 'credit_card_payment'],
+  [/CHASE\s*CREDIT\s*(?:CRD|CARD)\s*(?:EPAY|AUTOPAY|PMT|PAYMENT)/i, 'credit_card_payment'],
+  [/(?:DISCOVER|CITI(?:CARDS|BANK)?|CAPITAL\s*ONE|BARCLAY(?:CARD)?|US\s*BANK\s*CARD)\s*(?:CARD\s*)?(?:DES:?\s*)?(?:ACH\s*)?(?:PMT|PAYMENT|EPAY|AUTOPAY)/i, 'credit_card_payment'],
   [/(?:^|\s)(?:PMT|PYMT)\s*(?:RECEIVED|THANK|REC'?D)/i, 'credit_card_payment'],
   [/PAYMENT\s*RECEIVED\s*-?\s*THANK/i, 'credit_card_payment'],
   [/TO\s*CREDIT\s*CARD/i, 'credit_card_payment'],
-  
+
   [/PAYMENT\s*TO\s*.*CARD\s*ENDING/i, 'credit_card_payment'],
   [/ONLINE\s*PAYMENT\s*-?\s*THANK/i, 'credit_card_payment'],
 
@@ -19,6 +22,20 @@ const HIGH_CONFIDENCE_PATTERNS: [RegExp, string][] = [
   [/SAVINGS\s*TRANSFER/i, 'account_transfer'],
   [/ONLINE\s*BANKING\s*TRANSFER\s*(?:TO|FROM)/i, 'account_transfer'],
   [/TRANSFER\s*(?:TO|FROM)\s*(?:SAVINGS|CHECKING|CHK|SAV|(?:X|XXXX?\d{4}))/i, 'account_transfer'],
+
+  // Brokerage / investment transfers — money movement into wealth, not spend
+  [/\bWEALTHFRONT\b/i, 'brokerage_transfer'],
+  [/\bBETTERMENT\b/i, 'brokerage_transfer'],
+  [/\bROBINHOOD\b/i, 'brokerage_transfer'],
+  [/\bCOINBASE\b/i, 'brokerage_transfer'],
+  [/GEMINI\s*TRUST/i, 'brokerage_transfer'],
+  [/\bDUB\s*\(?ECFI\)?/i, 'brokerage_transfer'],
+  [/\bFIDELITY\b/i, 'brokerage_transfer'],
+  [/\bVANGUARD\b/i, 'brokerage_transfer'],
+  [/(?:CHARLES\s*)?SCHWAB/i, 'brokerage_transfer'],
+  [/\bE\*?TRADE\b/i, 'brokerage_transfer'],
+  [/\bKRAKEN\b/i, 'brokerage_transfer'],
+  [/\bBINANCE\b/i, 'brokerage_transfer'],
 ];
 
 const MEDIUM_CONFIDENCE_PATTERNS: [RegExp, string][] = [
