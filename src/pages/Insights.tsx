@@ -469,28 +469,45 @@ export default function Insights() {
       monthMap.set(month, (monthMap.get(month) || 0) + Math.abs(t.amount || 0));
     });
 
-    // Get top 6 categories by total
-    const catTotals = [...catMonthMap.entries()].map(([cat, months]) => ({
-      cat,
-      total: [...months.values()].reduce((s, v) => s + v, 0),
-      months,
-    })).sort((a, b) => b.total - a.total).slice(0, 6);
+    // Top 6 categories by total spend
+    const catTotals = [...catMonthMap.entries()]
+      .map(([cat, months]) => ({
+        cat,
+        total: [...months.values()].reduce((s, v) => s + v, 0),
+        months,
+      }))
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 6);
 
-    // Get all months sorted
+    // Union of months across the top 6, last 12 only
     const allMonths = new Set<string>();
     catTotals.forEach(c => c.months.forEach((_, m) => allMonths.add(m)));
     const sortedMonths = [...allMonths].sort().slice(-12);
 
-    return catTotals.map(c => ({
-      category: c.cat,
-      data: sortedMonths.map(m => ({ month: m, amount: Math.round((c.months.get(m) || 0) * 100) / 100 })),
+    // Reshape into one row per month with one key per category for a multi-line chart
+    const rows = sortedMonths.map(m => {
+      const [y, mo] = m.split('-').map(Number);
+      const label = new Date(y, mo - 1, 1).toLocaleString('en-US', { month: 'short', year: '2-digit' });
+      const row: Record<string, number | string> = { month: m, label };
+      catTotals.forEach(c => {
+        row[c.cat] = Math.round((c.months.get(m) || 0) * 100) / 100;
+      });
+      return row;
+    });
+
+    const categories = catTotals.map((c, i) => ({
+      name: c.cat,
+      total: Math.round(c.total * 100) / 100,
+      color: CHART_COLORS[i % CHART_COLORS.length],
     }));
+
+    return { rows, categories };
   }, [approvedExpenses]);
 
   const methodBreakdown = useMemo(() => {
     const methodMap = new Map<string, number>();
     approvedExpenses.forEach(t => {
-      const method = t.final_method || 'Unknown';
+      const method = effectiveMethod(t);
       methodMap.set(method, (methodMap.get(method) || 0) + Math.abs(t.amount || 0));
     });
     return [...methodMap.entries()]
