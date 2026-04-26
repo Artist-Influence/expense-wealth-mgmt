@@ -318,9 +318,33 @@ export default function Tax() {
       .reduce((s, r) => s + (r.amount || 0), 0);
   }, [incomeRows]);
 
-  const totalDeductions = useMemo(() => {
-    return deductionRows.reduce((s, r) => s + Math.abs(r.amount || 0), 0);
+  // Per-row deductible amount with NY/Schedule C-aware haircut.
+  // Meals & entertainment → 50% (§274). Everything else → 100% of the
+  // expense. `requires_review` (e.g. personal Schedule A items) is
+  // counted at full but visually flagged in the breakdown.
+  const deductibleAmount = (r: DeductionRow): { amount: number; hint: DeductibilityHint; bucket: 'confirmed' | 'predicted' | 'review' } => {
+    const cat = r.final_category || r.predicted_category || '';
+    const hint = deductibilityHint(r.transaction_mode, cat);
+    const raw = Math.abs(r.amount || 0);
+    const amount = hint === 'partial' ? raw * 0.5 : raw;
+    const isConfirmed = ['approved', 'edited', 'auto_categorized'].includes(r.review_status) && !!r.final_category;
+    const bucket: 'confirmed' | 'predicted' | 'review' =
+      hint === 'requires_review' ? 'review' : isConfirmed ? 'confirmed' : 'predicted';
+    return { amount, hint, bucket };
+  };
+
+  const deductionBreakdown = useMemo(() => {
+    let confirmed = 0, predicted = 0, review = 0;
+    for (const r of deductionRows) {
+      const { amount, bucket } = deductibleAmount(r);
+      if (bucket === 'confirmed') confirmed += amount;
+      else if (bucket === 'predicted') predicted += amount;
+      else review += amount;
+    }
+    return { confirmed, predicted, review, total: confirmed + predicted + review };
   }, [deductionRows]);
+
+  const totalDeductions = deductionBreakdown.total;
 
   const taxPaymentsTotal = useMemo(() => {
     return taxPayments.reduce((s, r) => s + Math.abs(r.amount || 0), 0);
@@ -356,14 +380,20 @@ export default function Tax() {
     return Object.entries(map).sort((a, b) => (b[1].taxable + b[1].excluded) - (a[1].taxable + a[1].excluded));
   }, [incomeRows]);
 
-  // Deductions grouped by category
+  // Deductions grouped by effective category (final_category preferred, else predicted)
+  // Each row contributes its haircut-adjusted amount.
   const deductionsByCategory = useMemo(() => {
-    const map: Record<string, number> = {};
+    const map: Record<string, { amount: number; hint: DeductibilityHint }> = {};
     deductionRows.forEach(r => {
-      const key = r.final_category || 'Uncategorized';
-      map[key] = (map[key] || 0) + Math.abs(r.amount || 0);
+      const key = effectiveCategory(r) || 'Uncategorized';
+      const { amount, hint } = deductibleAmount(r);
+      if (!map[key]) map[key] = { amount: 0, hint };
+      map[key].amount += amount;
+      // promote hint priority: full > partial > requires_review > none
+      const rank = (h: DeductibilityHint) => h === 'full' ? 3 : h === 'partial' ? 2 : h === 'requires_review' ? 1 : 0;
+      if (rank(hint) > rank(map[key].hint)) map[key].hint = hint;
     });
-    return Object.entries(map).sort((a, b) => b[1] - a[1]);
+    return Object.entries(map).sort((a, b) => b[1].amount - a[1].amount);
   }, [deductionRows]);
 
   if (loading) {
