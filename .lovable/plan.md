@@ -1,45 +1,53 @@
-# Fix Personal Cash-Out Math
+# Fix Insights → Payment Methods + upgrade Category Trends
 
-## Root cause
+## Root cause: Payment Methods pie
 
-After investigation, the **$88,690 "Personal Cash Out" is not a duplicate or numeric overflow issue** — it's a classification problem. There are **zero exact-duplicate expense rows**. The total is being inflated by money movements that should not count as spending:
+The pie reads only `final_method`, but on the personal dataset almost every approved row has `final_method = NULL` (the categorizer fills `predicted_method` instead). Confirmed via DB:
 
-| Category | Amount | Why it's wrong |
-|---|---|---|
-| Amex card payments (10 rows) | **$24,639** | Paying off Amex ≠ spending. The original purchases are already counted on Amex statements. |
-| Brokerage transfers (Wealthfront / Gemini / DUB) | **$17,600** | Money moving into investment accounts — net worth shift, not spend. |
-| Zelle / bank transfers | **$1,390** | Inter-account movement. |
-| **Total over-count** | **~$43,629** | |
-| **True personal spend after fix** | **~$45,062** | (down from $88,690) |
+| final_method | predicted_method | rows | spend |
+|---|---|---|---|
+| `NULL` | Amex Platinum | 387 | $26,505 |
+| `NULL` | BoA 5592 | 13 | $14,898 |
+| `NULL` | BoA 5563 | 27 | $1,993 |
+| `NULL` | BoA Credit Card | 16 | $875 |
+| `NULL` | BoA 5373 | 5 | $540 |
+| Amex | Amex Platinum | 1 | $34 |
 
-The transfer detector in `src/lib/transfer-detector.ts` doesn't recognize `AMERICAN EXPRESS DES:ACH PMT` (BoA's format for Amex payments) or any brokerage transfer patterns, so every new import will keep mis-classifying them.
+So the chart effectively renders a single "Unknown" slice. This is the same `final_* vs predicted_*` pattern that `effectiveCategory()` already solves for categories.
 
-## What I'll do
+## Fix #1 — Payment Methods chart
 
-### 1. One-time data cleanup (SQL)
-Re-classify the existing mis-categorized rows in `transactions_uploaded` so they're excluded from spend totals but preserved for audit:
+In `src/pages/Insights.tsx`:
 
-- **Amex payments** (`description_raw ILIKE '%AMERICAN EXPRESS%'`) → mark `is_transfer=true`, `transfer_type='card_payment'`, `exclude_from_expense_totals=true`, `counts_toward_true_personal_spend=false`, `is_non_expense_cash_movement=true`, set category to "Card Payment".
-- **Brokerage transfers** (Wealthfront, Gemini, DUB, Robinhood, Coinbase, Fidelity, Schwab, Vanguard) → same flags with `transfer_type='investment_transfer'`, category "Investment".
-- **Zelle / inter-bank transfers** that aren't already flagged → `transfer_type='bank_transfer'`, excluded from spend.
+1. Add a small helper `effectiveMethod(t) = t.final_method || t.predicted_method || 'Unknown'` (mirrors `effectiveCategory`).
+2. Update the `methodBreakdown` memo to use `effectiveMethod(t)` instead of `t.final_method`.
+3. Normalize obvious aliases so the pie isn't fragmented:
+   - Any method matching `/^Amex/i` → `"Amex"`
+   - Any method matching `/^BoA/i` → `"Bank of America"`
+   - Anything else → keep as-is, falling back to `"Unknown"` only when both fields are null.
+4. Keep the pie, but add the dollar amount next to each label so the user can read totals at a glance:
+   - `label={({ name, percent, value }) => \`${name} · $${Math.round(value).toLocaleString()} (${(percent*100).toFixed(0)}%)\`}`
 
-### 2. Harden `src/lib/transfer-detector.ts` so future imports auto-detect these
-Add high-confidence patterns:
-- `AMERICAN\s*EXPRESS\s*DES:?\s*ACH\s*PMT` → `credit_card_payment`
-- `CHASE\s*CREDIT\s*CRD\s*(?:EPAY|AUTOPAY)` → `credit_card_payment`  
-- `(?:DISCOVER|CITI|CAPITAL\s*ONE)\s*(?:CARD\s*)?(?:PMT|PAYMENT)` → `credit_card_payment`
-- `(?:WEALTHFRONT|BETTERMENT|ROBINHOOD|COINBASE|GEMINI\s*TRUST|DUB\s*\(ECFI\)|FIDELITY|VANGUARD|SCHWAB)` → new type `brokerage_transfer`
-- Add `'brokerage_transfer'` to the `transferType` union and route it through the same exclusion logic that handles `account_transfer`.
+## Fix #2 — Category Trends section
 
-### 3. Verify
-Re-query personal spend and confirm it lands near **$45k**, then refresh the Insights / Personal Cash Out card.
+Today this is six tiny sparklines with no axes, no totals, no dots — hard to read. Replace it with a single combined chart that shows every top-6 category as its own line, plus a category legend with dollar totals.
+
+In `src/pages/Insights.tsx`:
+
+1. Reshape `categoryTrends` into a single rows array suitable for one Recharts `LineChart`:
+   ```ts
+   // [{ month: 'Jan 26', Groceries: 412, Dining: 183, ... }, ...]
+   ```
+   Keep the existing top-6-by-total selection. Compute and expose `categoryTotals: { name, total, color }[]` for the legend.
+2. Replace the 2-column sparkline grid with:
+   - One `ResponsiveContainer` (height 300) holding a `LineChart` with `CartesianGrid`, `XAxis` (formatted `MMM YY`), `YAxis` (`$Nk`), one `<Line>` per category (`type="monotone"`, `strokeWidth={2}`, `dot={{ r: 3 }}`, `activeDot={{ r: 5 }}`), and a styled `Tooltip` showing all six categories for the hovered month.
+   - A clickable legend below the chart (same pattern as `CombinedWealthChart`) where each chip shows the category name, its color dot, **its period total** (e.g. `Groceries · $1,842`), and toggling hides/shows that line.
+3. Reuse `CHART_COLORS` and the existing tooltip styling (`tooltipStyle`) so it matches the rest of the page.
 
 ## Files affected
-- **Database**: ~26 row updates in `transactions_uploaded` (Amex + brokerage + transfers — no rows deleted, just re-flagged so the audit trail is preserved).
-- **Code**: `src/lib/transfer-detector.ts` — add ~5 new regex patterns and one new `transferType` value.
-- Wherever `transferType` is consumed (router/expense exclusion logic) — add the new `brokerage_transfer` to any switch statements treating transfers as non-expense.
 
-## What I'll NOT change
-- No schema migration needed — `amount` is already `numeric`, no overflow.
-- No income changes — those duplicates were already cleaned.
-- I won't hard-delete the mis-classified rows; flagging them keeps the audit history intact and makes it reversible if any are actual spend.
+- `src/pages/Insights.tsx` — add `effectiveMethod` helper, fix `methodBreakdown`, restructure `categoryTrends` memo, replace the Category Trends JSX block (~lines 1310–1338) with the new combined LineChart + clickable legend.
+
+## Out of scope
+
+No DB changes. No edits to other pages or to the categorization engine — the underlying data is already correct, only the Insights presentation is fixed.

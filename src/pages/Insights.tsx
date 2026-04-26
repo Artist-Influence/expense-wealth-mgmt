@@ -20,6 +20,17 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { NON_EARNING_TYPES } from '@/lib/income-classifier';
 import { effectiveCategory } from '@/lib/categorization-engine';
 
+// Mirror of effectiveCategory: prefer the user-confirmed value, fall back to the
+// engine's prediction. Most rows have predicted_method populated but final_method
+// still null, so reading only final_method makes the chart look like "Unknown 100%".
+const effectiveMethod = (t: { final_method: string | null; predicted_method: string | null }) => {
+  const raw = (t.final_method || t.predicted_method || '').trim();
+  if (!raw) return 'Unknown';
+  if (/^amex/i.test(raw)) return 'Amex';
+  if (/^boa/i.test(raw) || /bank of america/i.test(raw)) return 'Bank of America';
+  return raw;
+};
+
 interface Transaction {
   date: string | null;
   description_raw: string | null;
