@@ -367,32 +367,106 @@ export default function Expenses() {
   };
   const dateActive = !!(dateFrom || dateTo);
 
-  // Summary stats — V2
+  // Date predicate shared by both summary memos so the cards mirror the table.
+  const inDateRange = (d: string | null | undefined) => {
+    if (!d) return !dateFrom && !dateTo; // a row with no date only counts when no range is active
+    if (dateFrom && d < dateFrom) return false;
+    if (dateTo && d > dateTo) return false;
+    return true;
+  };
+
+  // Cross-mode summary strip — Personal vs Business at a glance, scoped to the
+  // active date range so the cards actually move when you pick "March 2026"
+  // or "Year to Date".
+  const crossModeTotals = useMemo(() => {
+    const active = allModeRows.filter(r =>
+      !r.is_split_parent && r.parse_status !== 'parse_error' && inDateRange(r.date)
+    );
+    const isOutflow = (r: AllModeRow) => !r.is_non_expense_cash_movement && !r.is_transfer && !r.exclude_from_expense_totals;
+    const sum = (rows: AllModeRow[]) => rows.reduce((s, r) => s + Math.abs(Number(r.amount) || 0), 0);
+    return {
+      personalCashOut: sum(active.filter(r => (r.transaction_mode || r.mode) === 'personal' && isOutflow(r))),
+      businessCashOut: sum(active.filter(r => (r.transaction_mode || r.mode) === 'business' && isOutflow(r))),
+      truePersonal: sum(active.filter(r => r.counts_toward_true_personal_spend)),
+      trueBusiness: sum(active.filter(r => r.counts_toward_true_business_spend)),
+      pendingReimbursable: sum(active.filter(r => r.is_reimbursable && r.reimbursement_status !== 'reimbursed')),
+    };
+  }, [allModeRows, dateFrom, dateTo]);
+
+  // Summary stats — V3 (date-filter aware + richer metrics)
   const stats = useMemo(() => {
-    // Exclude split parents from all stats — child rows carry the real amounts
-    const activeTxns = transactions.filter(t => !t.is_split_parent);
+    // Mode-scoped, exclude split parents, exclude parse errors, scope to date range.
+    const activeTxns = transactions.filter(t =>
+      !t.is_split_parent && t.parse_status !== 'parse_error' && inDateRange(t.date)
+    );
     const needsReview = activeTxns.filter(t => t.review_status === 'needs_review' || t.review_status === 'suggested' || t.review_status === 'ai_suggested').length;
     const uncategorized = activeTxns.filter(t => !t.final_category && !t.predicted_category).length;
-    const transfersExcluded = transactions.filter(t => t.exclude_from_expense_totals).length;
+    const transfersExcluded = transactions.filter(t => t.exclude_from_expense_totals && inDateRange(t.date)).length;
 
-    const totalCashOut = activeTxns
-      .filter(t => t.parse_status !== 'parse_error' && !t.is_non_expense_cash_movement && !t.is_transfer && !t.exclude_from_expense_totals)
-      .reduce((sum, t) => sum + Math.abs(t.amount || 0), 0);
+    const cashOutTxns = activeTxns.filter(t =>
+      !t.is_non_expense_cash_movement && !t.is_transfer && !t.exclude_from_expense_totals
+    );
+
+    const totalCashOut = cashOutTxns.reduce((sum, t) => sum + Math.abs(t.amount || 0), 0);
 
     const truePersonalSpend = activeTxns
-      .filter(t => t.counts_toward_true_personal_spend && t.parse_status !== 'parse_error')
+      .filter(t => t.counts_toward_true_personal_spend)
       .reduce((sum, t) => sum + Math.abs(t.amount || 0), 0);
 
     const trueBusinessSpend = activeTxns
-      .filter(t => t.counts_toward_true_business_spend && t.parse_status !== 'parse_error')
+      .filter(t => t.counts_toward_true_business_spend)
       .reduce((sum, t) => sum + Math.abs(t.amount || 0), 0);
 
     const pendingReimbursable = activeTxns
       .filter(t => t.is_reimbursable && t.reimbursement_status !== 'reimbursed')
       .reduce((sum, t) => sum + Math.abs(t.amount || 0), 0);
 
-    return { total: transactions.length, needsReview, uncategorized, transfersExcluded, totalCashOut, truePersonalSpend, trueBusinessSpend, pendingReimbursable };
-  }, [transactions]);
+    // Largest single expense in the period (excluding transfers/parse errors)
+    let largest: { amount: number; description: string; date: string | null } | null = null;
+    for (const t of cashOutTxns) {
+      const amt = Math.abs(t.amount || 0);
+      if (!largest || amt > largest.amount) {
+        largest = { amount: amt, description: (t.description_raw || t.description_normalized || 'Unknown').slice(0, 60), date: t.date };
+      }
+    }
+
+    // Unique merchants in period
+    const merchants = new Set<string>();
+    cashOutTxns.forEach(t => {
+      const key = (t.description_normalized || t.description_raw || '').trim().toUpperCase();
+      if (key) merchants.add(key.slice(0, 40));
+    });
+
+    // Avg per day across the active range (or full data span when no range set)
+    const dates = cashOutTxns.map(t => t.date).filter(Boolean) as string[];
+    let spanDays = 1;
+    if (dateFrom && dateTo) {
+      const from = new Date(dateFrom).getTime();
+      const to = new Date(dateTo).getTime();
+      spanDays = Math.max(1, Math.round((to - from) / 86400000) + 1);
+    } else if (dates.length > 0) {
+      const sorted = [...dates].sort();
+      const from = new Date(sorted[0]).getTime();
+      const to = new Date(sorted[sorted.length - 1]).getTime();
+      spanDays = Math.max(1, Math.round((to - from) / 86400000) + 1);
+    }
+    const avgPerDay = totalCashOut / spanDays;
+
+    return {
+      total: transactions.filter(t => inDateRange(t.date)).length,
+      needsReview,
+      uncategorized,
+      transfersExcluded,
+      totalCashOut,
+      truePersonalSpend,
+      trueBusinessSpend,
+      pendingReimbursable,
+      largest,
+      uniqueMerchants: merchants.size,
+      avgPerDay,
+      spanDays,
+    };
+  }, [transactions, dateFrom, dateTo]);
 
   const handleSort = (col: string) => {
     if (sortCol === col) setSortAsc(!sortAsc);
