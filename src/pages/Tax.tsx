@@ -572,10 +572,24 @@ export default function Tax() {
 
         {/* Adjusted income context */}
         <Card>
-          <CardContent className="pt-6">
+          <CardContent className="pt-6 space-y-3">
             <div className="grid grid-cols-3 gap-6 text-sm">
               <div><span className="text-muted-foreground">Taxable Income YTD</span><p className="text-lg font-semibold text-foreground">{fmt(taxableIncome)}</p></div>
-              <div><span className="text-muted-foreground">Estimated Deductions YTD</span><p className="text-lg font-semibold text-foreground">−{fmt(totalDeductions)}</p></div>
+              <div>
+                <span className="text-muted-foreground">Estimated Deductions YTD</span>
+                <p className="text-lg font-semibold text-foreground">−{fmt(totalDeductions)}</p>
+                {(deductionBreakdown.predicted > 0 || deductionBreakdown.review > 0) && (
+                  <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-muted-foreground">
+                    <span><span className="text-foreground/80 font-medium">{fmt(deductionBreakdown.confirmed)}</span> confirmed</span>
+                    {deductionBreakdown.predicted > 0 && (
+                      <span><span className="text-primary font-medium">{fmt(deductionBreakdown.predicted)}</span> predicted</span>
+                    )}
+                    {deductionBreakdown.review > 0 && (
+                      <span><span className="text-warning font-medium">{fmt(deductionBreakdown.review)}</span> needs review</span>
+                    )}
+                  </div>
+                )}
+              </div>
               <div><span className="text-muted-foreground">Est. Adjusted Income</span><p className="text-lg font-semibold text-foreground">{fmt(adjustedIncome)}</p></div>
             </div>
           </CardContent>
