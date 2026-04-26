@@ -51,6 +51,7 @@ const INCOME_TYPE_BADGE: Record<string, { class: string }> = {
   interest: { class: 'bg-accent/15 text-accent border-accent/25' },
   tax_refund: { class: 'bg-success/15 text-success border-success/25' },
   transfer: { class: 'bg-muted text-muted-foreground border-border' },
+  personal_repayment: { class: 'bg-muted text-muted-foreground border-border italic' },
   owner_contribution: { class: 'bg-secondary text-secondary-foreground border-border' },
   loan_proceeds: { class: 'bg-secondary text-secondary-foreground border-border' },
   other: { class: 'bg-muted text-muted-foreground border-border' },
