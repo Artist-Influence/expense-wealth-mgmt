@@ -481,15 +481,42 @@ export default function Insights() {
       if (t.date.startsWith(lastYear)) lastYearExpenses += Math.abs(t.amount || 0);
     });
 
+    // Saved-to-Wealth: walk the FULL transactions array (brokerage transfers
+    // are excluded from allExpenses, so we have to look at the raw set).
+    // Match if (a) it's already flagged as a brokerage_transfer, or
+    // (b) the description matches a known wealth destination.
+    const thisYearByDest: Record<string, number> = {};
+    const lastYearByDest: Record<string, number> = {};
+    transactions.forEach(t => {
+      if (!t.date) return;
+      const dest = wealthDestination(t) || (t.transfer_type === 'brokerage_transfer' ? 'Other Brokerage' : null);
+      if (!dest) return;
+      const amt = Math.abs(t.amount || 0);
+      if (t.date.startsWith(thisYear)) thisYearByDest[dest] = (thisYearByDest[dest] || 0) + amt;
+      if (t.date.startsWith(lastYear)) lastYearByDest[dest] = (lastYearByDest[dest] || 0) + amt;
+    });
+    const thisYearSaved = Object.values(thisYearByDest).reduce((s, v) => s + v, 0);
+    const lastYearSaved = Object.values(lastYearByDest).reduce((s, v) => s + v, 0);
+
+    // Sorted destination list (by current-year total desc, then last-year)
+    const destNames = Array.from(new Set([...Object.keys(thisYearByDest), ...Object.keys(lastYearByDest)]))
+      .sort((a, b) => (thisYearByDest[b] || 0) - (thisYearByDest[a] || 0) || (lastYearByDest[b] || 0) - (lastYearByDest[a] || 0));
+
     const pctChange = (curr: number, prev: number) => prev > 0 ? ((curr - prev) / prev) * 100 : 0;
 
     return {
-      thisYear: { income: thisYearIncome, expenses: thisYearExpenses },
-      lastYear: { income: lastYearIncome, expenses: lastYearExpenses },
+      thisYear: { income: thisYearIncome, expenses: thisYearExpenses, savedToWealth: thisYearSaved, byDestination: thisYearByDest },
+      lastYear: { income: lastYearIncome, expenses: lastYearExpenses, savedToWealth: lastYearSaved, byDestination: lastYearByDest },
+      destinations: destNames,
       incomeChange: pctChange(thisYearIncome, lastYearIncome),
       expenseChange: pctChange(thisYearExpenses, lastYearExpenses),
+      savedChange: pctChange(thisYearSaved, lastYearSaved),
+      trueSavingsRate: {
+        thisYear: thisYearIncome > 0 ? (thisYearSaved / thisYearIncome) * 100 : 0,
+        lastYear: lastYearIncome > 0 ? (lastYearSaved / lastYearIncome) * 100 : 0,
+      },
     };
-  }, [allExpenses, earnedIncomeAll]);
+  }, [allExpenses, earnedIncomeAll, transactions]);
 
   // ─── TRENDS TAB DATA ───
   const categoryTrends = useMemo(() => {
