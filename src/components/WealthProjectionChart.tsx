@@ -122,10 +122,27 @@ async function fetchLiveRate(symbolOrBasket: string): Promise<{ cagr_10y: number
 
 const fmtUsd = (n: number) => {
   const abs = Math.abs(n);
-  if (abs >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`;
-  if (abs >= 1_000) return `$${(n / 1_000).toFixed(0)}k`;
+  if (abs >= 1e12) return `$${(n / 1e12).toFixed(2)}T`;
+  if (abs >= 1e9)  return `$${(n / 1e9).toFixed(2)}B`;
+  if (abs >= 1e6)  return `$${(n / 1e6).toFixed(2)}M`;
+  if (abs >= 1e3)  return `$${(n / 1e3).toFixed(0)}k`;
   return `$${Math.round(n).toLocaleString()}`;
 };
+
+// Cap unrealistically high auto-seeded rates for long-horizon projections.
+// Live 10y CAGR for crypto can be 60%+ — extrapolating that for 40 years is
+// nonsensical. User can still manually override to anything.
+function clampSeededRate(acc: ProjAccount, rawRate: number): { rate: number; capped: boolean } {
+  const basket = resolveBasket(acc);
+  const name = (acc.account_name + ' ' + (acc.platform || '')).toLowerCase();
+  let cap = 12; // broad equities default
+  if (acc.account_type === 'crypto' || name.includes('gemini') || basket.label.toLowerCase().includes('mix')) {
+    cap = 15;
+  }
+  if (basket.source === 'static') return { rate: rawRate, capped: false };
+  if (rawRate > cap) return { rate: cap, capped: true };
+  return { rate: rawRate, capped: false };
+}
 
 export function WealthProjectionChart({
   accounts,
