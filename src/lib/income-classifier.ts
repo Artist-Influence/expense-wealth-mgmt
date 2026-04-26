@@ -14,6 +14,7 @@ export const NON_EARNING_TYPES = [
   'loan_proceeds',
   'owner_contribution',
   'tax_refund',
+  'personal_repayment', // Friend/family paying you back; not income.
 ] as const;
 
 export function isEarnedIncome(income_type: string | null | undefined): boolean {
