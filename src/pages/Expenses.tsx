@@ -424,6 +424,7 @@ export default function Expenses() {
     tax_treatment?: string; is_reimbursable?: boolean; reimbursable_to?: string;
     reimbursement_status?: string; business_purpose?: string;
     counts_toward_true_personal_spend?: boolean; counts_toward_true_business_spend?: boolean;
+    counts_as_tax_deduction?: boolean;
     client_or_project_tag?: string;
     _keepNeedsReview?: boolean;
   }) => {
