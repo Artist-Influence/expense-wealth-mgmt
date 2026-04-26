@@ -29,6 +29,8 @@ const navItems = [
 export function AppNav() {
   const location = useLocation();
   const { user, signOut } = useAuth();
+  const [healthOpen, setHealthOpen] = useState(false);
+  const [healthSummary, setHealthSummary] = useState<HealthCheckSummary | null>(null);
 
   // Fetch needs_review count for badge
   const { data: reviewCount = 0 } = useQuery({
@@ -44,6 +46,45 @@ export function AppNav() {
     enabled: !!user,
     refetchInterval: 30000,
   });
+
+  // Load last persisted health summary, then auto-run if >14h old
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await supabase
+          .from('app_settings')
+          .select('last_health_check_at, last_health_check_summary')
+          .eq('owner_id', user.id)
+          .maybeSingle();
+        if (!cancelled && data?.last_health_check_summary) {
+          setHealthSummary({
+            ranAt: data.last_health_check_at || new Date().toISOString(),
+            income: { exactClusters: [], rowIndex: {} },
+            expenses: { exactClusters: [], nearClusters: [], crossModePairs: [], rowIndex: {} },
+            needsReview: { incomeCount: 0, expenseCount: 0 },
+            staleReviews: { count: 0, oldestDate: null },
+            parseErrors: { count: 0 },
+            totalIssues: (data.last_health_check_summary as any)?.totalIssues || 0,
+          } as HealthCheckSummary);
+        }
+        const due = await shouldAutoRun(user.id);
+        if (due && !cancelled) {
+          const fresh = await runHealthCheck(user.id);
+          if (!cancelled) setHealthSummary(fresh);
+        }
+      } catch {/* silent */}
+    })();
+    return () => { cancelled = true; };
+  }, [user?.id]);
+
+  const totalIssues = healthSummary?.totalIssues ?? 0;
+  const healthTone = totalIssues === 0
+    ? 'text-success border-success/30 bg-success/5 hover:bg-success/10'
+    : totalIssues <= 5
+      ? 'text-warning border-warning/40 bg-warning/10 hover:bg-warning/15'
+      : 'text-destructive border-destructive/40 bg-destructive/10 hover:bg-destructive/15';
 
   return (
     <nav className="sticky top-0 z-50 glass-panel rounded-none border-x-0 border-t-0">
