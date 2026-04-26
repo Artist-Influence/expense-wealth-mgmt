@@ -9,6 +9,7 @@ import { ImportPreviewDialog, type FilePreviewInfo } from '@/components/ImportPr
 import { TransactionDetailDrawer } from '@/components/TransactionDetailDrawer';
 import { SplitTransactionDialog } from '@/components/SplitTransactionDialog';
 import { AddCategoryDialog } from '@/components/AddCategoryDialog';
+import { DuplicateResolverDialog, type DupClusterRow } from '@/components/DuplicateResolverDialog';
 import { previewCsvFile, parseCsvFileWithMapping, type ParsePreview, type ColumnMapping } from '@/lib/csv-parser';
 import { categorizeTransactions, categorizeWithAI, updateMerchantMemory, isDeductibleCategory } from '@/lib/categorization-engine';
 import { detectMethodFromFilename } from '@/lib/method-detector';
