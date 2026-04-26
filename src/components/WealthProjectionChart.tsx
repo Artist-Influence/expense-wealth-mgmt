@@ -122,10 +122,27 @@ async function fetchLiveRate(symbolOrBasket: string): Promise<{ cagr_10y: number
 
 const fmtUsd = (n: number) => {
   const abs = Math.abs(n);
-  if (abs >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`;
-  if (abs >= 1_000) return `$${(n / 1_000).toFixed(0)}k`;
+  if (abs >= 1e12) return `$${(n / 1e12).toFixed(2)}T`;
+  if (abs >= 1e9)  return `$${(n / 1e9).toFixed(2)}B`;
+  if (abs >= 1e6)  return `$${(n / 1e6).toFixed(2)}M`;
+  if (abs >= 1e3)  return `$${(n / 1e3).toFixed(0)}k`;
   return `$${Math.round(n).toLocaleString()}`;
 };
+
+// Cap unrealistically high auto-seeded rates for long-horizon projections.
+// Live 10y CAGR for crypto can be 60%+ — extrapolating that for 40 years is
+// nonsensical. User can still manually override to anything.
+function clampSeededRate(acc: ProjAccount, rawRate: number): { rate: number; capped: boolean } {
+  const basket = resolveBasket(acc);
+  const name = (acc.account_name + ' ' + (acc.platform || '')).toLowerCase();
+  let cap = 12; // broad equities default
+  if (acc.account_type === 'crypto' || name.includes('gemini') || basket.label.toLowerCase().includes('mix')) {
+    cap = 15;
+  }
+  if (basket.source === 'static') return { rate: rawRate, capped: false };
+  if (rawRate > cap) return { rate: cap, capped: true };
+  return { rate: rawRate, capped: false };
+}
 
 export function WealthProjectionChart({
   accounts,
@@ -143,6 +160,10 @@ export function WealthProjectionChart({
   const [overrides, setOverrides] = useState<Set<string>>(() => loadOverrides());
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [showSettings, setShowSettings] = useState(false);
+  const [yScale, setYScale] = useState<'linear' | 'log'>('log');
+  // Track which auto-seeded rates were clamped down from a higher live value,
+  // purely for transparency in the assumptions panel.
+  const [cappedFrom, setCappedFrom] = useState<Record<string, number>>({});
 
   // Seed defaults for any account that's missing assumptions.
   // Use the basket resolver so Gemini/Dub/etc start on the right symbol.
@@ -204,18 +225,25 @@ export function WealthProjectionChart({
 
   // Seed the projection rate from live data when it arrives,
   // unless the user has marked this account as manually overridden.
+  // Auto-seeded rates are clamped to a sane long-horizon ceiling
+  // (crypto 15%, equities 12%) so a 60%+ 10y CAGR doesn't compound the
+  // chart into the quadrillions over a 40-year horizon.
   useEffect(() => {
     let changed = false;
     const next = { ...assumptions };
+    const nextCapped = { ...cappedFrom };
     for (const a of accounts) {
       if (overrides.has(a.id)) continue;
       const live = liveRateByAccount[a.id];
       if (live?.rate == null) continue;
       const cur = next[a.id];
       if (!cur) continue;
-      const newRate = Number(live.rate.toFixed(2));
-      if (Math.abs(cur.annual_rate_pct - newRate) > 0.01) {
-        next[a.id] = { ...cur, annual_rate_pct: newRate };
+      const rawLive = Number(live.rate.toFixed(2));
+      const { rate: clamped, capped } = clampSeededRate(a, rawLive);
+      if (capped) nextCapped[a.id] = rawLive;
+      else delete nextCapped[a.id];
+      if (Math.abs(cur.annual_rate_pct - clamped) > 0.01) {
+        next[a.id] = { ...cur, annual_rate_pct: clamped };
         changed = true;
       }
     }
@@ -223,6 +251,7 @@ export function WealthProjectionChart({
       setAssumptions(next);
       saveAssumptions(next);
     }
+    setCappedFrom(nextCapped);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [liveRateByAccount]);
 
@@ -263,12 +292,15 @@ export function WealthProjectionChart({
     const startYear = new Date().getFullYear();
 
     // Per-account month-by-month balances at three rate scenarios.
-    const sim = (rateOffset: number) => {
+    // rateOffsetFn lets us asymmetrically cap the high band so already-aggressive
+    // rates (e.g. 15% crypto) don't run away to absurd values.
+    const sim = (rateOffsetFn: (baseRate: number) => number) => {
       const balances: Record<string, number[]> = {};
       for (const a of accounts) {
         const ass = assumptions[a.id];
         if (!ass) continue;
-        const monthlyRate = ((ass.annual_rate_pct + rateOffset) / 100) / 12;
+        const effectiveAnnual = rateOffsetFn(ass.annual_rate_pct);
+        const monthlyRate = (effectiveAnnual / 100) / 12;
         const monthsContributing = Math.max(0, (ass.stop_age - age) * 12);
         let bal = Number(a.current_balance) || 0;
         const arr: number[] = [bal];
@@ -282,9 +314,11 @@ export function WealthProjectionChart({
       return balances;
     };
 
-    const expected = sim(0);
-    const low = sim(-3);
-    const high = sim(+3);
+    const expected = sim((r) => r);
+    const low      = sim((r) => Math.max(0, r - 3));
+    // Cap the optimistic band so a 15% rate can't balloon to 18% (which over
+    // 40 years is the difference between $5M and $20M+).
+    const high     = sim((r) => Math.min(r + 3, r * 1.25));
 
     // Sample at year boundaries for a clean axis.
     const rows: any[] = [];
@@ -375,6 +409,20 @@ export function WealthProjectionChart({
               onChange={e => setAge(Math.max(18, Math.min(64, Number(e.target.value) || 30)))}
               className="h-6 w-14 text-xs px-1.5"
             />
+          </div>
+          <div className="inline-flex items-center rounded-md border border-border/60 overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setYScale('linear')}
+              className={`text-[10px] px-2 py-1 transition-colors ${yScale === 'linear' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+              title="Linear scale — emphasizes late-year totals"
+            >Linear</button>
+            <button
+              type="button"
+              onClick={() => setYScale('log')}
+              className={`text-[10px] px-2 py-1 transition-colors border-l border-border/60 ${yScale === 'log' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+              title="Log scale — makes early-year growth visible across long horizons"
+            >Log</button>
           </div>
           <Button
             variant="ghost"
@@ -488,7 +536,15 @@ export function WealthProjectionChart({
                     ) : liveRate != null ? (
                       <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-emerald-500/30 bg-emerald-500/5 text-emerald-500/90">
                         <Zap className="h-2.5 w-2.5" />
-                        auto · {liveRate.toFixed(1)}% ({live.label} 10y)
+                        auto · {ass.annual_rate_pct.toFixed(1)}% ({live.label} 10y)
+                        {cappedFrom[a.id] != null && (
+                          <span
+                            className="ml-1 text-amber-500/90"
+                            title={`Live 10y CAGR is ${cappedFrom[a.id].toFixed(1)}% — capped to a sane long-horizon ceiling so 40-year projections stay realistic. Click the rate field to override.`}
+                          >
+                            (capped from {cappedFrom[a.id].toFixed(1)}%)
+                          </span>
+                        )}
                       </span>
                     ) : live?.label ? (
                       <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-border/40">
@@ -529,7 +585,11 @@ export function WealthProjectionChart({
               />
               <YAxis
                 tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
-                tickFormatter={(v) => v >= 1_000_000 ? `$${(v / 1_000_000).toFixed(1)}M` : v >= 1000 ? `$${Math.round(v / 1000)}k` : `$${v}`}
+                tickFormatter={(v) => fmtUsd(Number(v))}
+                scale={yScale === 'log' ? 'log' : 'auto'}
+                domain={yScale === 'log' ? [1, 'auto'] : [0, 'auto']}
+                allowDataOverflow={false}
+                width={60}
               />
               <Tooltip
                 contentStyle={{

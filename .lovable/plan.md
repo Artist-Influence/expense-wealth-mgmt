@@ -1,47 +1,60 @@
-## Problem
+## Why the chart looks dead-flat
 
-Looking at the screenshot, the x-axis shows `Nov 25` and `Dec 25` even though every snapshot in the database starts on `2026-01-01` (verified via DB query — earliest snapshot is Jan 2026, 16 rows total spanning Jan→Apr 2026).
+Three compounding issues are all firing at once:
 
-The chart isn't actually plotting Nov/Dec 2025 data — it's a **timezone bug in the label formatter**. The month keys (`'2026-01-01'`, `'2026-02-01'`, …) are passed to `new Date(m)`, which parses bare `YYYY-MM-DD` strings as **UTC midnight**. When `toLocaleString('en-US', { month: 'short', year: '2-digit' })` then renders in the browser's local timezone (UTC-5/-8 in the Americas), it shifts back by hours and lands on the previous day:
+1. **Crypto is using a 40-year horizon at ~65% annual growth.** Live 10-year CAGRs for the BTC/XRP/ETH/SOL basket are valid as a benchmark *today*, but extrapolating 64.68%/yr over 40 years produces $1+ quadrillion totals that visually annihilate every other account.
+2. **The ±3% optimistic band is calculated off that absurd base**, pushing the y-axis ceiling into the trillions. The actual "expected" line then sits at less than 0.1% of the chart height for most of the timeline.
+3. **`fmtUsd` is double-stacking suffixes** — values >= 1M get the "M" suffix, but no cap above that, so a $1.04Q balance renders as `$1044859278.38M`. That headline number is meaningless.
 
-- `new Date('2026-01-01')` → UTC midnight Jan 1 → local Dec 31 2025 → label `"Dec 25"`
-- `new Date('2026-02-01')` → UTC midnight Feb 1 → local Jan 31 2026 → label `"Jan 26"`
-- …and so on
+## Fix plan
 
-So every month label is off by one. The Jan 2026 data point is mis-labeled `Dec 25`, the Feb point reads `Jan 26`, etc. There is no real Nov/Dec data to remove — we just need to fix the labels.
+Edit only `src/components/WealthProjectionChart.tsx`.
 
-## Fix
+### 1. Cap unrealistic long-horizon rates (the main fix)
 
-**File: `src/components/CombinedWealthChart.tsx`**
+Long-term equity returns mean-revert. Sustained 60%+ annual growth for 40 years is impossible at scale. Add a sanity ceiling **only when seeding rates from live CAGR data**:
 
-Parse the `YYYY-MM-DD` month keys as **local dates** so the label matches the actual month. Replace any `new Date(m).toLocaleString(...)` calls with a small helper:
+- For crypto / volatile baskets: clamp seeded rate to **15%/yr max** for the projection (still aggressive, but defensible long-run).
+- For broad equities (S&P, Nasdaq): clamp to **12%/yr max**.
+- For static-rate assets (collectibles, HYSA): unchanged.
+- The user can still manually override to anything they want — clamp only applies to auto-seeded values.
+
+Show a small "capped from X%" hint in the assumptions panel so the behavior is transparent.
+
+### 2. Fix the headline & axis number formatting
+
+Extend `fmtUsd` to handle billions and trillions:
 
 ```ts
-const labelForMonth = (yyyymmdd: string) => {
-  const [y, mo] = yyyymmdd.split('-').map(Number);
-  // Construct in local TZ (month is 0-indexed)
-  return new Date(y, mo - 1, 1).toLocaleString('en-US', {
-    month: 'short',
-    year: '2-digit',
-  });
+const fmtUsd = (n: number) => {
+  const abs = Math.abs(n);
+  if (abs >= 1e12) return `$${(n / 1e12).toFixed(2)}T`;
+  if (abs >= 1e9)  return `$${(n / 1e9).toFixed(2)}B`;
+  if (abs >= 1e6)  return `$${(n / 1e6).toFixed(2)}M`;
+  if (abs >= 1e3)  return `$${(n / 1e3).toFixed(0)}k`;
+  return `$${Math.round(n).toLocaleString()}`;
 };
 ```
 
-Apply it where the row label is built (currently line 94):
-```ts
-const label = labelForMonth(m);
-```
+Apply the same scale to the YAxis tickFormatter so axis labels read `$1.2B` instead of `$1200.0M`.
 
-Same treatment for any other place that does `new Date(<YYYY-MM-DD>)` for display in this file (verify line 71's `new Date(effectiveStart)` — that one is used only for month iteration arithmetic, not display, but switch it to `new Date(y, mo-1, 1)` too so the loop isn't off-by-a-day either).
+### 3. Tame the projection band so the line is visible
 
-After the fix, the x-axis will read `Jan 26, Feb 26, Mar 26, Apr 26, Today` — starting at January as expected, with no phantom Nov/Dec 2025 ticks.
+Change the ±3% rate band to an **asymmetric, capped** band:
 
-## Out of scope
+- Low scenario: `rate − 3` (floored at 0%)
+- High scenario: `min(rate + 3, rate × 1.25)` — prevents the high band from running away on already-aggressive rates.
 
-- No DB changes (no Nov/Dec snapshots exist).
-- No changes to `WealthProjectionChart` (separate component, separate axis).
-- No change to the `startDate="2026-01-01"` prop — it's already correct; only the label rendering was wrong.
+Also: switch the YAxis to **log scale** (`scale="log"` with `domain={['auto', 'auto']}`) when the max value > 100× the min value. Log scale is the standard fix for long-horizon compound charts — early-year growth becomes visible while still showing the late-year explosion. Add a tiny "Linear / Log" toggle next to the Assumptions button so you can flip if you prefer.
 
-## Files
+### What you'll see after the fix
 
-- `src/components/CombinedWealthChart.tsx` — fix `new Date(YYYY-MM-DD)` parsing for month labels and the iteration cursor.
+- Headline reads something realistic like `At age 65: $4.2M · Range: $1.8M – $9.5M` instead of quadrillions.
+- The Gemini line stays steep but no longer flattens every other account into the x-axis.
+- With log scale on (default for >100× spread), you'll see actual year-over-year growth from 2026 onward instead of a flatline until 2058.
+
+### Files touched
+
+- `src/components/WealthProjectionChart.tsx` — formatter, rate-clamping in the live-rate seed effect, projection band math, YAxis scale toggle.
+
+No DB or other component changes needed.
