@@ -2197,6 +2197,21 @@ export default function Expenses() {
         onCancel={handlePreviewCancel}
         filePreviews={filePreviews}
       />
+
+      {/* Duplicate Resolver Dialog */}
+      <DuplicateResolverDialog
+        open={resolverOpen}
+        onClose={() => setResolverOpen(false)}
+        exactClusters={exactClusters}
+        nearClusters={nearClusters}
+        crossModePairs={crossModePairs}
+        rowIndex={clusterRowIndex}
+        onResolved={async () => {
+          // Re-run the sweep silently to refresh cluster lists after a resolution.
+          await loadTransactions();
+          await runDuplicateSweep();
+        }}
+      />
     </div>
   );
 }
