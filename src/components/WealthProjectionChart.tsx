@@ -536,7 +536,15 @@ export function WealthProjectionChart({
                     ) : liveRate != null ? (
                       <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-emerald-500/30 bg-emerald-500/5 text-emerald-500/90">
                         <Zap className="h-2.5 w-2.5" />
-                        auto · {liveRate.toFixed(1)}% ({live.label} 10y)
+                        auto · {ass.annual_rate_pct.toFixed(1)}% ({live.label} 10y)
+                        {cappedFrom[a.id] != null && (
+                          <span
+                            className="ml-1 text-amber-500/90"
+                            title={`Live 10y CAGR is ${cappedFrom[a.id].toFixed(1)}% — capped to a sane long-horizon ceiling so 40-year projections stay realistic. Click the rate field to override.`}
+                          >
+                            (capped from {cappedFrom[a.id].toFixed(1)}%)
+                          </span>
+                        )}
                       </span>
                     ) : live?.label ? (
                       <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-border/40">
