@@ -99,6 +99,12 @@ export default function Expenses() {
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [methodFilter, setMethodFilter] = useState<string>('all');
   const [scanningRecurring, setScanningRecurring] = useState(false);
+  const [sweepingDuplicates, setSweepingDuplicates] = useState(false);
+  const [resolverOpen, setResolverOpen] = useState(false);
+  const [exactClusters, setExactClusters] = useState<DuplicateCluster[]>([]);
+  const [nearClusters, setNearClusters] = useState<DuplicateCluster[]>([]);
+  const [crossModePairs, setCrossModePairs] = useState<{ rowIds: string[] }[]>([]);
+  const [clusterRowIndex, setClusterRowIndex] = useState<Map<string, DupClusterRow>>(new Map());
   const [dateFrom, setDateFrom] = useState<string | null>(null);
   const [dateTo, setDateTo] = useState<string | null>(null);
   const [dateLabel, setDateLabel] = useState<string>('All Dates');
