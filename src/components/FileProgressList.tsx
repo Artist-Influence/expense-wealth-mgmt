@@ -135,7 +135,18 @@ export function FileProgressList({ items, mode }: FileProgressListProps) {
               {item.result.skipped > 0 && (
                 <>
                   <span className="text-muted-foreground">Exact duplicates skipped</span>
-                  <span className="text-muted-foreground text-right">{item.result.skipped}</span>
+                  <span className="text-right">
+                    {item.result.batchId ? (
+                      <button
+                        onClick={() => openSkipped(item.result!.batchId)}
+                        className="text-warning hover:text-warning/80 underline-offset-2 hover:underline inline-flex items-center gap-1"
+                      >
+                        <Copy className="h-3 w-3" /> {item.result.skipped} (view)
+                      </button>
+                    ) : (
+                      <span className="text-muted-foreground">{item.result.skipped}</span>
+                    )}
+                  </span>
                 </>
               )}
               {(item.result.possibleDuplicates ?? 0) > 0 && (
