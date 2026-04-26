@@ -1753,6 +1753,32 @@ export default function Expenses() {
             </Button>
           )}
 
+          {selectedIds.size === 0 && user && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 gap-1 text-xs glass-input"
+              disabled={sweepingDuplicates}
+              onClick={runDuplicateSweep}
+              title="Scan for duplicate rows already in the database"
+            >
+              <Copy className={`h-3 w-3 ${sweepingDuplicates ? 'animate-pulse' : ''}`} />
+              {sweepingDuplicates ? 'Scanning…' : 'Find duplicates'}
+            </Button>
+          )}
+
+          {(exactClusters.length > 0 || nearClusters.length > 0 || crossModePairs.length > 0) && selectedIds.size === 0 && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 gap-1 text-xs border-warning/40 text-warning hover:bg-warning/10"
+              onClick={() => setResolverOpen(true)}
+            >
+              <AlertTriangle className="h-3 w-3" />
+              Resolve {exactClusters.length + nearClusters.length + crossModePairs.length}
+            </Button>
+          )}
+
           {selectedIds.size === 0 && (() => {
             const suggestedCount = filtered.filter(t => ['suggested', 'ai_suggested', 'auto_categorized'].includes(t.review_status) && (t.final_category || t.predicted_category)).length;
             return suggestedCount > 0 ? (
