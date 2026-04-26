@@ -1734,7 +1734,7 @@ export default function Expenses() {
                   <SortHeader col="description" label="Description" />
                   <SortHeader col="amount" label="Amount" className="text-right" />
                   <SortHeader col="category" label="Category" />
-                  <th className="px-2 py-2 text-left text-[11px] font-medium text-muted-foreground">Method</th>
+                  <SortHeader col="method" label="Method" />
                   <th className="px-2 py-2 text-left text-[11px] font-medium text-muted-foreground">Owner</th>
                   <SortHeader col="confidence" label="Conf" />
                   <th className="px-2 py-2 text-left text-[11px] font-medium text-muted-foreground">Status</th>
