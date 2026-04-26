@@ -38,6 +38,31 @@ const effectiveMethod = (t: { final_method: string | null; predicted_method: str
   return raw;
 };
 
+// Personal wealth destinations: outbound transfers that count as "saved into wealth"
+// rather than spent. Order matters — first match wins.
+const WEALTH_DESTINATIONS: [RegExp, string][] = [
+  [/wealthfront/i, 'Wealthfront'],
+  [/gemini/i, 'Gemini'],
+  [/\bdub\b/i, 'Dub'],
+  [/coinbase/i, 'Coinbase'],
+  [/robinhood/i, 'Robinhood'],
+  [/betterment/i, 'Betterment'],
+  [/fidelity/i, 'Fidelity'],
+  [/vanguard/i, 'Vanguard'],
+  [/(?:charles\s*)?schwab/i, 'Schwab'],
+  [/kraken/i, 'Kraken'],
+  [/binance/i, 'Binance'],
+  [/collectr/i, 'Collectr'],
+];
+const wealthDestination = (t: { description_normalized: string | null; description_raw: string | null }): string | null => {
+  const desc = (t.description_normalized || t.description_raw || '').trim();
+  if (!desc) return null;
+  for (const [pattern, label] of WEALTH_DESTINATIONS) {
+    if (pattern.test(desc)) return label;
+  }
+  return null;
+};
+
 interface Transaction {
   date: string | null;
   description_raw: string | null;
