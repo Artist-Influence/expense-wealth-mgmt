@@ -26,8 +26,15 @@ import { effectiveCategory } from '@/lib/categorization-engine';
 const effectiveMethod = (t: { final_method: string | null; predicted_method: string | null }) => {
   const raw = (t.final_method || t.predicted_method || '').trim();
   if (!raw) return 'Unknown';
+  // Amex: collapse "Amex Platinum" / "Amex" — single card
   if (/^amex/i.test(raw)) return 'Amex';
-  if (/^boa/i.test(raw) || /bank of america/i.test(raw)) return 'Bank of America';
+  // Bank of America: keep per-account distinction (last-4 or label) so each card is its own slice
+  const boa = raw.match(/^boa\s*(.+)$/i) || raw.match(/^bank of america\s*(.+)$/i);
+  if (boa) {
+    const tail = boa[1].trim();
+    return /^\d{3,}$/.test(tail) ? `BoA •${tail}` : `BoA ${tail}`;
+  }
+  if (/^boa$|^bank of america$/i.test(raw)) return 'Bank of America';
   return raw;
 };
 
