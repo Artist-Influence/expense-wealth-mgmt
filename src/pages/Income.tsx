@@ -639,6 +639,14 @@ export default function Income() {
               <Button variant="outline" size="sm" onClick={() => bulkUpdate('status', 'approved')}>
                 <Check className="h-4 w-4 mr-1" /> Approve
               </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => markAsRepayment(Array.from(selectedIds))}
+                title="Mark as personal repayment / owed back — excludes from all income & tax totals"
+              >
+                <ShieldOff className="h-4 w-4 mr-1" /> Mark Repayment
+              </Button>
               <Button variant="destructive" size="sm" onClick={bulkDelete}>
                 <Trash2 className="h-4 w-4 mr-1" /> Delete
               </Button>
