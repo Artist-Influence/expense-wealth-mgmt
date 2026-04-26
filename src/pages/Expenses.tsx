@@ -2041,7 +2041,8 @@ function InlineMethodCell({ tx, onCommit }: { tx: Transaction; onCommit: (value:
         if (e.key === 'Enter') { e.preventDefault(); (e.target as HTMLInputElement).blur(); }
         else if (e.key === 'Escape') { setValue(initial); (e.target as HTMLInputElement).blur(); }
       }}
-      placeholder="—"
+      placeholder={tx.source_account_name || '—'}
+      title={tx.source_account_name ? `Source account from upload: ${tx.source_account_name}` : undefined}
       className="h-6 px-1.5 text-xs border-transparent bg-transparent hover:bg-secondary/40 focus:bg-secondary/60 focus:border-border text-muted-foreground placeholder:text-muted-foreground/50"
     />
   );
