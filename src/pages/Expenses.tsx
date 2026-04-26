@@ -1113,6 +1113,13 @@ export default function Expenses() {
             treatment_type: isCcPayment ? 'credit_card_payment' : isRefund ? 'refund' : isHighConfTransfer ? 'transfer' : 'expense',
             counts_toward_true_personal_spend: (isHighConfTransfer || isCcPayment || isRefund) ? false : modeDefaults.counts_toward_true_personal_spend,
             counts_toward_true_business_spend: (isHighConfTransfer || isCcPayment || isRefund) ? false : modeDefaults.counts_toward_true_business_spend,
+            // Auto-flag tax deductibility based on (mode, category). Never flags
+            // transfers / CC payments / refunds. User can override per-row in the
+            // detail drawer. Without this the Tax page perpetually shows $0.
+            counts_as_tax_deduction:
+              (isHighConfTransfer || isCcPayment || isRefund)
+                ? false
+                : isDeductibleCategory(mode, finalCat || predictedCat),
           };
         });
         const { error: txError } = await supabase.from('transactions_uploaded').insert(chunk);
