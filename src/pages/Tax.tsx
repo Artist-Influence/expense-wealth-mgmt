@@ -121,18 +121,61 @@ export default function Tax() {
 
   // Projection always pulls personal+business splits independent of `scope` so the
   // "Income vs Expenses" projection card can show side-by-side personal vs business.
+  //
+  // We no longer require `counts_as_tax_deduction = true` — instead we pull every
+  // categorized expense in the year and decide deductibility client-side via
+  // `deductibilityHint`, so high-confidence predicted-but-not-yet-approved rows
+  // count toward the projection (matches what the user sees on Expenses).
   async function loadProjection() {
-    const [{ data: incPersonal }, { data: incBusiness }, { data: dedPersonal }, { data: dedBusiness }] = await Promise.all([
-      supabase.from('income_transactions').select('amount, taxable_status').eq('owner_id', user!.id).eq('mode', 'personal').gte('date', yearStart).lte('date', yearEnd),
-      supabase.from('income_transactions').select('amount, taxable_status').eq('owner_id', user!.id).eq('mode', 'business').gte('date', yearStart).lte('date', yearEnd),
-      supabase.from('transactions_uploaded').select('amount').eq('owner_id', user!.id).eq('transaction_mode', 'personal').eq('counts_as_tax_deduction', true).eq('is_split_parent', false).in('review_status', ['approved', 'auto_categorized', 'edited']).gte('date', yearStart).lte('date', yearEnd),
-      supabase.from('transactions_uploaded').select('amount').eq('owner_id', user!.id).eq('transaction_mode', 'business').eq('counts_as_tax_deduction', true).eq('is_split_parent', false).in('review_status', ['approved', 'auto_categorized', 'edited']).gte('date', yearStart).lte('date', yearEnd),
+    const reportingStatuses = ['approved', 'auto_categorized', 'edited', 'suggested', 'ai_suggested'];
+    const fetchAll = async (m: 'personal' | 'business') => {
+      let from = 0;
+      const pageSize = 1000;
+      let all: any[] = [];
+      let hasMore = true;
+      while (hasMore) {
+        const { data } = await supabase
+          .from('transactions_uploaded')
+          .select('amount, final_category, predicted_category, counts_as_tax_deduction, review_status')
+          .eq('owner_id', user!.id)
+          .eq('transaction_mode', m)
+          .eq('is_split_parent', false)
+          .in('review_status', reportingStatuses)
+          .gte('date', yearStart)
+          .lte('date', yearEnd)
+          .range(from, from + pageSize - 1);
+        if (data) all = [...all, ...data];
+        hasMore = (data?.length ?? 0) === pageSize;
+        from += pageSize;
+      }
+      return all;
+    };
+    const [incPersonal, incBusiness, txPersonal, txBusiness] = await Promise.all([
+      supabase.from('income_transactions').select('amount, taxable_status').eq('owner_id', user!.id).eq('mode', 'personal').gte('date', yearStart).lte('date', yearEnd).then(r => r.data),
+      supabase.from('income_transactions').select('amount, taxable_status').eq('owner_id', user!.id).eq('mode', 'business').gte('date', yearStart).lte('date', yearEnd).then(r => r.data),
+      fetchAll('personal'),
+      fetchAll('business'),
     ]);
     const sumTaxable = (rows: any[] | null) => (rows || []).filter(r => r.taxable_status === 'taxable').reduce((s, r) => s + Number(r.amount || 0), 0);
-    const sumDed = (rows: any[] | null) => (rows || []).reduce((s, r) => s + Math.abs(Number(r.amount || 0)), 0);
+    // Deductible if explicitly flagged OR effective category is in the
+    // deductible set for the row's mode. Partial categories (meals, entertainment)
+    // get the standard 50% Schedule C haircut. requires_review still counts at full
+    // for the projection but is surfaced separately in the breakdown.
+    const sumDeductible = (rows: any[], mode: 'personal' | 'business') => {
+      let total = 0;
+      for (const r of rows) {
+        const cat = (r.final_category || r.predicted_category || '') as string;
+        const hint = deductibilityHint(mode, cat);
+        if (hint === 'none' && !r.counts_as_tax_deduction) continue;
+        const amt = Math.abs(Number(r.amount || 0));
+        if (hint === 'partial') total += amt * 0.5;
+        else total += amt;
+      }
+      return total;
+    };
     setProjection({
-      personal: { taxable: sumTaxable(incPersonal), deductions: sumDed(dedPersonal) },
-      business: { taxable: sumTaxable(incBusiness), deductions: sumDed(dedBusiness) },
+      personal: { taxable: sumTaxable(incPersonal), deductions: sumDeductible(txPersonal, 'personal') },
+      business: { taxable: sumTaxable(incBusiness), deductions: sumDeductible(txBusiness, 'business') },
     });
   }
 
@@ -161,34 +204,49 @@ export default function Tax() {
   }
 
   async function loadDeductions() {
-    let q = supabase
-      .from('transactions_uploaded')
-      .select('final_category, amount, review_status')
-      .eq('owner_id', user!.id)
-      .eq('counts_as_tax_deduction', true)
-      .eq('is_split_parent', false)
-      .in('review_status', ['approved', 'auto_categorized', 'edited'])
-      .gte('date', yearStart)
-      .lte('date', yearEnd);
-    if (scope !== 'all') q = q.eq('transaction_mode', scope);
-    const { data } = await q;
-    setDeductionRows((data as DeductionRow[]) || []);
+    // Pull every categorized expense in scope (broad statuses), decide
+    // deductibility client-side. This way confirmed AND high-confidence
+    // predicted rows both surface in the breakdown.
+    const reportingStatuses = ['approved', 'auto_categorized', 'edited', 'suggested', 'ai_suggested'];
+    let from = 0;
+    const pageSize = 1000;
+    let all: any[] = [];
+    let hasMore = true;
+    while (hasMore) {
+      let q = supabase
+        .from('transactions_uploaded')
+        .select('final_category, predicted_category, amount, review_status, transaction_mode, counts_as_tax_deduction')
+        .eq('owner_id', user!.id)
+        .eq('is_split_parent', false)
+        .in('review_status', reportingStatuses)
+        .gte('date', yearStart)
+        .lte('date', yearEnd)
+        .range(from, from + pageSize - 1);
+      if (scope !== 'all') q = q.eq('transaction_mode', scope);
+      const { data } = await q;
+      if (data) all = [...all, ...data];
+      hasMore = (data?.length ?? 0) === pageSize;
+      from += pageSize;
+    }
+    // Keep only rows that look deductible (flag set OR category is in the
+    // deductible set for the row's mode).
+    const filtered: DeductionRow[] = all.filter(r => {
+      if (r.counts_as_tax_deduction) return true;
+      const cat = r.final_category || r.predicted_category || '';
+      return deductibilityHint(r.transaction_mode, cat) !== 'none';
+    });
+    setDeductionRows(filtered);
 
-    // Count + sum unreviewed business transactions in scope. These are the
-    // rows that haven't been categorized yet, so they CAN'T be flagged as
-    // deductions (the flag is set at categorize-time). The whole pile is
-    // potential additional deductions.
+    // Count + sum truly unreviewed business spend (still un-categorized).
     let cq = supabase
       .from('transactions_uploaded')
       .select('amount', { count: 'exact' })
       .eq('owner_id', user!.id)
       .eq('is_split_parent', false)
       .eq('is_transfer', false)
-      .in('review_status', ['needs_review', 'suggested', 'ai_suggested'])
+      .eq('review_status', 'needs_review')
       .gte('date', yearStart)
       .lte('date', yearEnd);
-    // Only ever count business spend as "potential deductions" — most personal
-    // spend isn't deductible so it'd be misleading.
     if (scope === 'business' || scope === 'all') {
       cq = cq.eq('transaction_mode', 'business');
     } else {
