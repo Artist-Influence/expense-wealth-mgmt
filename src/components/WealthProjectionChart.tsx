@@ -225,18 +225,25 @@ export function WealthProjectionChart({
 
   // Seed the projection rate from live data when it arrives,
   // unless the user has marked this account as manually overridden.
+  // Auto-seeded rates are clamped to a sane long-horizon ceiling
+  // (crypto 15%, equities 12%) so a 60%+ 10y CAGR doesn't compound the
+  // chart into the quadrillions over a 40-year horizon.
   useEffect(() => {
     let changed = false;
     const next = { ...assumptions };
+    const nextCapped = { ...cappedFrom };
     for (const a of accounts) {
       if (overrides.has(a.id)) continue;
       const live = liveRateByAccount[a.id];
       if (live?.rate == null) continue;
       const cur = next[a.id];
       if (!cur) continue;
-      const newRate = Number(live.rate.toFixed(2));
-      if (Math.abs(cur.annual_rate_pct - newRate) > 0.01) {
-        next[a.id] = { ...cur, annual_rate_pct: newRate };
+      const rawLive = Number(live.rate.toFixed(2));
+      const { rate: clamped, capped } = clampSeededRate(a, rawLive);
+      if (capped) nextCapped[a.id] = rawLive;
+      else delete nextCapped[a.id];
+      if (Math.abs(cur.annual_rate_pct - clamped) > 0.01) {
+        next[a.id] = { ...cur, annual_rate_pct: clamped };
         changed = true;
       }
     }
@@ -244,6 +251,7 @@ export function WealthProjectionChart({
       setAssumptions(next);
       saveAssumptions(next);
     }
+    setCappedFrom(nextCapped);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [liveRateByAccount]);
 
