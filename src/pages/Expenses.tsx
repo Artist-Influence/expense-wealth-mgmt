@@ -152,6 +152,7 @@ export default function Expenses() {
     const month = searchParams.get('month');
     const scope = searchParams.get('scope') as TransactionMode | null;
     const review = searchParams.get('review');
+    const method = searchParams.get('method');
     let consumed = false;
     if (scope && ['personal', 'business', 'reimbursable_work'].includes(scope)) {
       setMode(scope);
@@ -169,6 +170,10 @@ export default function Expenses() {
     }
     if (review) {
       setStatusFilter(review);
+      consumed = true;
+    }
+    if (method) {
+      setMethodFilter(method);
       consumed = true;
     }
     if (consumed) {
