@@ -125,13 +125,11 @@ export default function Expenses() {
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [showPreview, setShowPreview] = useState(false);
 
-  // Cross-mode totals so the comparative summary strip always shows Personal vs Business
-  // side-by-side regardless of which mode tab the spreadsheet is on.
-  const [crossModeTotals, setCrossModeTotals] = useState<{
-    personalCashOut: number; businessCashOut: number;
-    truePersonal: number; trueBusiness: number;
-    pendingReimbursable: number;
-  }>({ personalCashOut: 0, businessCashOut: 0, truePersonal: 0, trueBusiness: 0, pendingReimbursable: 0 });
+  // NOTE: cross-mode totals are now derived from the loaded `transactions`
+  // set + the active date range via `useMemo` below. The previous
+  // `loadCrossModeTotals` paginated re-fetch was wasteful (data is already
+  // loaded by `loadTransactions`) and — more importantly — couldn't react to
+  // the date filter, so the summary cards were stale.
 
   const isProcessing = fileQueue.some(f => !['done', 'error'].includes(f.status));
   const totalFiles = fileQueue.length;
@@ -142,7 +140,7 @@ export default function Expenses() {
   const categoryMode = mode === 'reimbursable_work' ? 'personal' : mode;
 
   useEffect(() => {
-    if (user) { loadTransactions(); loadCategories(); loadCrossModeTotals(); }
+    if (user) { loadTransactions(); loadCategories(); loadAllModeTransactions(); }
   }, [user, mode]);
 
   // Apply incoming URL params (e.g. linked from Allocations review warning).
