@@ -183,6 +183,41 @@ export function FileProgressList({ items, mode }: FileProgressListProps) {
           )}
         </div>
       ))}
+
+      <Dialog open={!!skippedDialogBatchId} onOpenChange={(v) => !v && setSkippedDialogBatchId(null)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Copy className="h-4 w-4 text-warning" /> Rows skipped as exact duplicates
+            </DialogTitle>
+            <DialogDescription>
+              These rows already existed in your data with the same date, amount, and merchant — so they were not re-imported.
+              {skippedRows.length >= 50 && ' (Showing first 50.)'}
+            </DialogDescription>
+          </DialogHeader>
+          {skippedLoading ? (
+            <div className="flex items-center justify-center py-8 text-muted-foreground text-sm">
+              <Loader2 className="h-4 w-4 animate-spin mr-2" /> Loading…
+            </div>
+          ) : skippedRows.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-4">No detailed list available for this import.</p>
+          ) : (
+            <ScrollArea className="max-h-[60vh]">
+              <div className="space-y-1 text-xs">
+                {skippedRows.map((r, i) => (
+                  <div key={i} className="flex items-center justify-between gap-3 px-2 py-1.5 rounded border border-border/40 bg-background/40">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <span className="text-muted-foreground shrink-0 w-20">{r.date || 'no date'}</span>
+                      <span className="truncate">{r.description || '—'}</span>
+                    </div>
+                    <span className="shrink-0 font-mono">{r.amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}</span>
+                  </div>
+                ))}
+              </div>
+            </ScrollArea>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
