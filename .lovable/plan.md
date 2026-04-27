@@ -1,81 +1,32 @@
-## Goal
+## Issue
 
-Surface money routed to brokerage / investment accounts (Wealthfront, Gemini, Dub, Coinbase, Robinhood, Fidelity, Vanguard, Schwab, Betterment, Kraken, Binance, Collectr) as **true savings** in the Year-over-Year Comparison on the Income & Savings tab — so personal "Net Saved" reflects what actually moved into wealth, not just income minus expenses.
+Wealthfront rows are bucketing into "Other Brokerage" instead of their own "Wealthfront" sub-row.
 
-## What's wrong now
+## Root cause
 
-The YoY table currently shows:
+The Wealthfront ACH descriptions look like:
+- `description_raw`: `"Wealthfront DES:EDI PYMNTS ID:… INDN:Jared Rapoza CO ID:… WEB"`
+- `description_normalized`: `"PYMNTS ID:… INDN:JARED RAPOZA WEB"` ← merchant name stripped
 
-| Metric | 2025 | 2026 | Change |
-|---|---|---|---|
-| Income | … | … | % |
-| Expenses | … | … | % |
-| Net Saved | income − expenses | income − expenses | — |
-
-Brokerage transfers (currently 7 Wealthfront, 6 Gemini, 3 Dub rows = ~$17.6K in 2026) are correctly excluded from expenses (`is_transfer=true`, `transfer_type='brokerage_transfer'`) — but they're invisible. There's no row that shows "you actually moved $X into wealth this year."
+The `wealthDestination()` helper currently does `description_normalized || description_raw`, so it only sees the normalized string — which no longer contains "Wealthfront". The rows still get caught as savings (because `transfer_type='brokerage_transfer'` is set), but they fall through to the "Other Brokerage" fallback bucket.
 
 ## Fix
 
-Add an **"Invested / Saved to Wealth"** row to the YoY Comparison table (personal mode only, since the data only matters there), with a per-destination breakdown shown inline.
+In `src/pages/Insights.tsx`, change `wealthDestination()` to test the regex against **both** fields concatenated, not just the normalized one:
 
-### New YoY table layout (personal mode)
+```ts
+const haystack = `${t.description_raw || ''} ${t.description_normalized || ''}`.trim();
+```
 
-| Metric | 2025 | 2026 | Change |
-|---|---|---|---|
-| Income | … | … | % |
-| Expenses | … | … | % |
-| **Invested / Saved to Wealth** | $X | $Y | % |
-|   ↳ Wealthfront | $… | $… | |
-|   ↳ Gemini | $… | $… | |
-|   ↳ Dub | $… | $… | |
-|   ↳ (other detected destinations) | $… | $… | |
-| Net Saved (Income − Expenses) | … | … | — |
-| **True Savings Rate** | (Saved to Wealth ÷ Income)% | … | — |
+Same logic applies to any other destination whose name gets stripped during normalization (Gemini and Dub already work because their merchant strings survive normalization, but this defensively covers all of them).
 
-Sub-rows render as small indented entries under the parent row. Only destinations with non-zero totals in either year show.
+## Files affected
 
-In **business mode**, the new rows are hidden — table stays as-is.
+- `src/pages/Insights.tsx` — `wealthDestination()` helper only (~3 lines).
 
-## Technical changes (single file: `src/pages/Insights.tsx`)
+No schema, no other logic, no other rows change. After the fix, the YoY breakdown will show:
+- Wealthfront $6,600
+- Gemini $5,600
+- Dub $5,400
 
-1. **Extend `loadExpenses` SELECT**: add `transfer_type` to the column list so we can filter brokerage transfers without re-querying.
-
-2. **Add destination detector** alongside `effectiveMethod`:
-   ```ts
-   const WEALTH_DESTINATIONS: [RegExp, string][] = [
-     [/wealthfront/i, 'Wealthfront'],
-     [/gemini/i, 'Gemini'],
-     [/\bdub\b/i, 'Dub'],
-     [/coinbase/i, 'Coinbase'],
-     [/robinhood/i, 'Robinhood'],
-     [/fidelity/i, 'Fidelity'],
-     [/vanguard/i, 'Vanguard'],
-     [/schwab/i, 'Schwab'],
-     [/betterment/i, 'Betterment'],
-     [/kraken/i, 'Kraken'],
-     [/binance/i, 'Binance'],
-     [/collectr/i, 'Collectr'],
-   ];
-   const wealthDestination = (desc: string): string | null => { … };
-   ```
-   Source description from `description_normalized || description_raw`.
-
-3. **Extend `yoyComparison` useMemo**: walk the raw `transactions` array (not `allExpenses`, since brokerage transfers are excluded there), match rows where `transfer_type === 'brokerage_transfer'` OR description matches `wealthDestination`, bucket by year + destination. Output:
-   ```ts
-   {
-     thisYear: { income, expenses, savedToWealth, byDestination: { Wealthfront: $, Gemini: $, … } },
-     lastYear: { … same shape },
-     incomeChange, expenseChange, savedChange,
-     trueSavingsRate: { thisYear: %, lastYear: % }
-   }
-   ```
-
-4. **Render**: insert new rows in the YoY `<table>` between Expenses and Net Saved, gated on `mode === 'personal'`. Sub-rows use a smaller font + left padding (`pl-6`) and a `↳` glyph; sort destinations by current-year total descending.
-
-5. **No schema / no backend changes**. Rule of thumb: rely on existing `transfer_type` flag first, fall back to description regex for any brokerage transfers that weren't auto-tagged.
-
-## Out of scope
-
-- No change to the Net Savings Rate card to its left (keeps existing income−expenses math).
-- No change to Expenses calculation, charts, or any other tab.
-- Business mode stays unchanged.
+instead of the current "Other Brokerage $6,600 / Gemini $5,600 / Dub $5,400".
