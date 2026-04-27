@@ -55,10 +55,12 @@ const WEALTH_DESTINATIONS: [RegExp, string][] = [
   [/collectr/i, 'Collectr'],
 ];
 const wealthDestination = (t: { description_normalized: string | null; description_raw: string | null }): string | null => {
-  const desc = (t.description_normalized || t.description_raw || '').trim();
-  if (!desc) return null;
+  // Check BOTH fields — the normalizer often strips merchant names from ACH descriptions
+  // (e.g. "Wealthfront DES:EDI PYMNTS …" normalizes to just "PYMNTS ID:… INDN:…").
+  const haystack = `${t.description_raw || ''} ${t.description_normalized || ''}`.trim();
+  if (!haystack) return null;
   for (const [pattern, label] of WEALTH_DESTINATIONS) {
-    if (pattern.test(desc)) return label;
+    if (pattern.test(haystack)) return label;
   }
   return null;
 };
