@@ -1833,12 +1833,12 @@ export default function Expenses() {
           )}
 
           {selectedIds.size === 0 && (() => {
-            const suggestedCount = filtered.filter(t => ['suggested', 'ai_suggested', 'auto_categorized'].includes(t.review_status) && (t.final_category || t.predicted_category)).length;
+            const suggestedCount = filtered.filter(t => ['suggested', 'ai_suggested', 'auto_categorized'].includes(t.review_status) && !t.is_split_parent && (t.final_category || t.predicted_category)).length;
             return suggestedCount > 0 ? (
               <Button size="sm" variant="outline" className="h-8 gap-1 text-xs border-success/30 text-success hover:bg-success/10" onClick={async () => {
-                const toApprove = filtered.filter(t => ['suggested', 'ai_suggested', 'auto_categorized'].includes(t.review_status) && (t.final_category || t.predicted_category));
-                for (const tx of toApprove) await approveRow(tx);
-                toast.success(`Approved ${toApprove.length} suggested rows`);
+                const toApprove = filtered.filter(t => ['suggested', 'ai_suggested', 'auto_categorized'].includes(t.review_status) && !t.is_split_parent && (t.final_category || t.predicted_category));
+                const { approved, skipped } = await bulkApproveRows(toApprove);
+                toast.success(`Approved ${approved} suggested row${approved === 1 ? '' : 's'}${skipped > 0 ? ` · ${skipped} skipped` : ''}`);
               }}>
                 <CheckCheck className="h-3 w-3" /> Approve All Suggested ({suggestedCount})
               </Button>
