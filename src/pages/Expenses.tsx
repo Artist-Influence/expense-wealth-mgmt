@@ -744,6 +744,59 @@ export default function Expenses() {
     }
   };
 
+  /**
+   * Bulk-approve helper. One round-trip per row in parallel, ONE reload at the end.
+   * Silently skips rows that have no category or are split parents (no per-row toast spam).
+   * Returns counts so the caller can show a single summary toast.
+   */
+  const bulkApproveRows = async (txs: Transaction[]): Promise<{ approved: number; skipped: number }> => {
+    const eligible = txs.filter(t => !t.is_split_parent && (t.final_category || t.predicted_category));
+    const skipped = txs.length - eligible.length;
+    if (eligible.length === 0) return { approved: 0, skipped };
+
+    // Issue all updates in parallel.
+    const updates = eligible.map(tx => {
+      const category = (tx.final_category || tx.predicted_category)!;
+      return supabase
+        .from('transactions_uploaded')
+        .update({
+          final_category: category,
+          final_method: tx.final_method || tx.predicted_method,
+          final_notes: tx.final_notes || tx.predicted_notes,
+          review_status: 'approved',
+          counts_as_tax_deduction: isDeductibleCategory(tx.transaction_mode as any, category),
+        })
+        .eq('id', tx.id);
+    });
+    const results = await Promise.all(updates);
+    const approved = results.filter(r => !r.error).length;
+
+    // Update merchant memory in parallel for eligible, non-artifact rows.
+    const memoryTasks = eligible
+      .filter(tx => tx.parse_status === 'ok' && !tx.is_transfer && !tx.is_split_parent && !tx.parent_transaction_id && tx.duplicate_status !== 'possible_duplicate')
+      .map(tx => {
+        const category = (tx.final_category || tx.predicted_category)!;
+        const desc = tx.description_raw || '';
+        if (isStatementArtifact(desc, tx.amount || 0)) return null;
+        const merchantKey = generateMerchantKey(normalizeDescription(desc));
+        return updateMerchantMemory(
+          merchantKey,
+          categoryMode as 'personal' | 'business',
+          category,
+          tx.final_method || tx.predicted_method || null,
+          tx.final_notes || tx.predicted_notes || null,
+          desc,
+          user!.id,
+          tx.match_source,
+        );
+      })
+      .filter(Boolean) as Promise<unknown>[];
+    if (memoryTasks.length > 0) await Promise.all(memoryTasks);
+
+    await loadTransactions();
+    return { approved, skipped };
+  };
+
   // Inline cell edit — update a single field directly from the table.
   // Mirrors handleDrawerSave guardrails (category whitelist, status transition, merchant memory).
   const inlineUpdate = async (tx: Transaction, field: 'final_category' | 'final_method' | 'economic_owner', value: string) => {
