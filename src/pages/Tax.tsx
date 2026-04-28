@@ -127,7 +127,10 @@ export default function Tax() {
   // `deductibilityHint`, so high-confidence predicted-but-not-yet-approved rows
   // count toward the projection (matches what the user sees on Expenses).
   async function loadProjection() {
-    const reportingStatuses = ['approved', 'auto_categorized', 'edited', 'suggested', 'ai_suggested'];
+    // Financial-integrity rule: only approved/edited rows count toward totals.
+    // Unreviewed "suggested"/"ai_suggested" rows are surfaced separately as
+    // "potential additional deductions" rather than baked into the projection.
+    const reportingStatuses = ['approved', 'auto_categorized', 'edited'];
     const fetchAll = async (m: 'personal' | 'business') => {
       let from = 0;
       const pageSize = 1000;
@@ -467,12 +470,23 @@ export default function Tax() {
           const bNet = Math.max(0, projection.business.taxable - projection.business.deductions);
           const pTax = pNet * combinedRate;
           const bTax = bNet * combinedRate;
+          const showPersonal = scope === 'personal' || scope === 'all';
+          const showBusiness = scope === 'business' || scope === 'all';
+          const totalTaxable =
+            (showPersonal ? projection.personal.taxable : 0) +
+            (showBusiness ? projection.business.taxable : 0);
+          const totalDeductionsProj =
+            (showPersonal ? projection.personal.deductions : 0) +
+            (showBusiness ? projection.business.deductions : 0);
+          const totalNet = (showPersonal ? pNet : 0) + (showBusiness ? bNet : 0);
+          const totalTax = (showPersonal ? pTax : 0) + (showBusiness ? bTax : 0);
+          const scopeLabel = scope === 'all' ? 'All' : scope === 'business' ? 'Business' : 'Personal';
           return (
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="text-base">{selectedYear} Projection — Income vs Expenses</CardTitle>
+                <CardTitle className="text-base">{selectedYear} Projection — {scopeLabel}</CardTitle>
                 <CardDescription className="text-xs">
-                  Net = Taxable income − Deductible expenses. Estimated tax = Net × ({(combinedRate * 100).toFixed(1)}%) at your current Fed + NYS{cityEnabled ? ' + NYC' : ''} rates.
+                  Net = Taxable income − Deductible expenses. Estimated tax = Net × ({(combinedRate * 100).toFixed(1)}%) at your current Fed + NYS{cityEnabled ? ' + NYC' : ''} rates. Only approved / edited expenses count toward deductions.
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -487,29 +501,40 @@ export default function Tax() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    <TableRow>
-                      <TableCell className="font-medium">Personal</TableCell>
-                      <TableCell className="text-right">{fmt(projection.personal.taxable)}</TableCell>
-                      <TableCell className="text-right">−{fmt(projection.personal.deductions)}</TableCell>
-                      <TableCell className="text-right">{fmt(pNet)}</TableCell>
-                      <TableCell className="text-right text-warning">{fmt(pTax)}</TableCell>
-                    </TableRow>
-                    <TableRow>
-                      <TableCell className="font-medium">Business</TableCell>
-                      <TableCell className="text-right">{fmt(projection.business.taxable)}</TableCell>
-                      <TableCell className="text-right">−{fmt(projection.business.deductions)}</TableCell>
-                      <TableCell className="text-right">{fmt(bNet)}</TableCell>
-                      <TableCell className="text-right text-warning">{fmt(bTax)}</TableCell>
-                    </TableRow>
-                    <TableRow className="font-semibold border-t-2">
-                      <TableCell>Total</TableCell>
-                      <TableCell className="text-right">{fmt(projection.personal.taxable + projection.business.taxable)}</TableCell>
-                      <TableCell className="text-right">−{fmt(projection.personal.deductions + projection.business.deductions)}</TableCell>
-                      <TableCell className="text-right">{fmt(pNet + bNet)}</TableCell>
-                      <TableCell className="text-right text-destructive">{fmt(pTax + bTax)}</TableCell>
-                    </TableRow>
+                    {showPersonal && (
+                      <TableRow>
+                        <TableCell className="font-medium">Personal</TableCell>
+                        <TableCell className="text-right">{fmt(projection.personal.taxable)}</TableCell>
+                        <TableCell className="text-right">−{fmt(projection.personal.deductions)}</TableCell>
+                        <TableCell className="text-right">{fmt(pNet)}</TableCell>
+                        <TableCell className="text-right text-warning">{fmt(pTax)}</TableCell>
+                      </TableRow>
+                    )}
+                    {showBusiness && (
+                      <TableRow>
+                        <TableCell className="font-medium">Business</TableCell>
+                        <TableCell className="text-right">{fmt(projection.business.taxable)}</TableCell>
+                        <TableCell className="text-right">−{fmt(projection.business.deductions)}</TableCell>
+                        <TableCell className="text-right">{fmt(bNet)}</TableCell>
+                        <TableCell className="text-right text-warning">{fmt(bTax)}</TableCell>
+                      </TableRow>
+                    )}
+                    {scope === 'all' && (
+                      <TableRow className="font-semibold border-t-2">
+                        <TableCell>Total</TableCell>
+                        <TableCell className="text-right">{fmt(totalTaxable)}</TableCell>
+                        <TableCell className="text-right">−{fmt(totalDeductionsProj)}</TableCell>
+                        <TableCell className="text-right">{fmt(totalNet)}</TableCell>
+                        <TableCell className="text-right text-destructive">{fmt(totalTax)}</TableCell>
+                      </TableRow>
+                    )}
                   </TableBody>
                 </Table>
+                {potentialDeductions.total > 0 && (scope === 'business' || scope === 'all') && (
+                  <p className="text-[11px] text-muted-foreground mt-2">
+                    + <span className="text-foreground/80 font-medium">{fmt(potentialDeductions.total)}</span> in unreviewed business spend not yet counted toward deductions. Approve them on the Expenses page to lock in the deduction.
+                  </p>
+                )}
                 {selectedYear > nowYear && (
                   <p className="text-[11px] text-muted-foreground mt-2">
                     {selectedYear} has limited or no actuals yet — projections will populate as transactions land.

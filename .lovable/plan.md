@@ -1,39 +1,83 @@
-## What's broken
+## What's actually wrong
 
-When you click **Approve** on selected expenses (or **Approve All Suggested**), the table flashes/reloads repeatedly and a toast says *"Set a category first"* — even though every row already has a category.
+Two separate things are conspiring to make the Tax page look broken:
 
-## Root cause
+### 1. The Personal/Business/All toggle does nothing visible at the top
 
-`bulkApprove` (and the "Approve All Suggested" button) loop through every selected/suggested row and call `approveRow(tx)` one at a time. Inside `approveRow`:
+The big "2026 Projection — Income vs Expenses" table (the one in your screenshots) is **hardcoded to always show both Personal and Business rows side by side**, regardless of which scope you click. Only the cards/tables further down the page (Taxable Income YTD, Deductions Breakdown, etc.) actually filter by scope.
 
-1. It runs an individual UPDATE for that row.
-2. It calls `await loadTransactions()`, which re-pages **every** transaction for the active mode (in 1000-row chunks) — every time.
+So clicking Personal vs Business above the fold appears to do nothing — that's why "the math looks the same between personal and business." The number that *does* change (taxable income YTD card) is below where your screenshot was cropped.
 
-So approving N rows triggers N full table reloads back-to-back. That's the "reloading over and over" you're seeing.
+### 2. The Business projection is wildly over-stating deductions
 
-The *"Set a category first"* toast is also a side effect of the loop: `approveRow` is reused as both the single-row handler and the bulk loop body, and it calls `toast.error('Set a category first')` if **any single row** in the loop happens to lack both `final_category` and `predicted_category` (e.g. a transfer row, a split parent, or a row whose suggestion was rejected). Because the loop fires the toast per-row, you can see it pop on rows that look categorized in the UI but actually have a null `predicted_category` after a prior rejection.
+Confirmed from the database for 2026:
+
+```text
+Approved/edited business deductible spend:  ~$53k
+Business deductions shown on Tax page:      ~$273k   ← inflated by ~$220k
+```
+
+The inflation comes from **unreviewed "suggested"/"ai_suggested" rows being counted at 100%**. The biggest culprit:
+
+```text
+Vendor Payment · suggested · 257 rows · $157,029.98
+Commission     · suggested ·  13 rows · $24,058.97
+Payroll        · suggested ·  15 rows · $19,513.00
+```
+
+That single "Vendor Payment / suggested" bucket is $157k of un-reviewed transactions being treated as fully deductible business expenses. Result: business "deductions" ($273k) > business "income" ($227k), business net = $0, business tax = $0.
+
+This also **violates a core project rule** ("Only approved/edited `final_category` counts. Exclude unreviewed txns from all totals") — `loadProjection` in `src/pages/Tax.tsx` deliberately broadened the status filter to `['approved','auto_categorized','edited','suggested','ai_suggested']`, which contradicts that rule.
 
 ## Fix
 
-Rewrite the bulk paths in `src/pages/Expenses.tsx` so they do **one** DB round-trip and **one** reload, and so they only operate on rows that genuinely have a category:
+### A. Make the projection respect the scope toggle
 
-1. **New helper `bulkApproveRows(txs: Transaction[])`** — used by `bulkApprove`, "Approve All Suggested", and any future bulk caller:
-   - Filter to rows that have `final_category || predicted_category` and aren't split parents. Silently skip the rest (no per-row error toast).
-   - Build one update payload per row (categories, methods, notes, `review_status: 'approved'`, `counts_as_tax_deduction`) and issue them in parallel via `Promise.all` — no awaiting `loadTransactions` between them.
-   - After all updates resolve, update merchant memory in parallel for the eligible rows (same guards already in `approveRow`: parse_status ok, not transfer, not split parent/child, not possible_duplicate, not statement artifact).
-   - Call `loadTransactions()` **once** at the end.
-   - Show one summary toast: `Approved X rows` (and, if any were skipped, `· Y skipped (no category)`).
+`src/pages/Tax.tsx` — the projection table now shows only the row(s) for the selected scope, with a single "Total" footer when `scope === 'all'`. Personal selected → only Personal row + total. Business selected → only Business row + total. All selected → both + total (today's behavior).
 
-2. **Keep `approveRow` for single-row use** (drawer + per-row check button), but route both bulk callers through `bulkApproveRows` instead of looping `approveRow`.
+The header subtitle changes from `2026 Projection — Income vs Expenses` to `2026 Projection — {scope}` so it's obvious what you're looking at.
 
-3. **Tighten the "Approve All Suggested" filter** so it only includes rows where the suggested/predicted category is non-null AND the row isn't a split parent — matches the new helper's contract.
+### B. Stop counting unreviewed rows as deductions
 
-## Files changed
+In `loadProjection`, change the deduction status filter from:
 
-- `src/pages/Expenses.tsx` — add `bulkApproveRows`, rewire `bulkApprove` (line ~832) and "Approve All Suggested" onClick (line ~1785-1791). No schema changes, no other UI changes.
+```text
+['approved','auto_categorized','edited','suggested','ai_suggested']
+```
 
-## Result
+to:
 
-- Approving any number of rows triggers exactly one reload at the end — no more flicker storm.
-- No false "Set a category first" toast during bulk operations; uncategorized rows are silently skipped and reported in the summary toast.
-- Single-row Approve button behavior is unchanged.
+```text
+['approved','auto_categorized','edited']
+```
+
+This aligns with the project's core financial-integrity rule and matches what every other page (Insights, Accountant exports, Allocations) already does. Income side is unchanged.
+
+### C. Surface the unreviewed exposure as a separate, non-scary line
+
+To avoid hiding information, add a small muted line under the projection table:
+
+```text
++ $X in unreviewed business spend not yet counted toward deductions.
+  Approve them on the Expenses page to lock in the deduction.
+```
+
+That number is the same `unreviewedDeductionCount` / `potentialDeductions` we already compute on the page (line 261). No new query.
+
+## Expected outcome
+
+After the fix, with Business selected for 2026:
+
+- Business Taxable Income: $227,424.69 (unchanged — income side is already approval-agnostic by design)
+- Business Deductions: ~$53k (only approved/edited)
+- Business Net: ~$174k
+- Business Est. Tax: ~$62k at 35.5%
+- A muted line below: "+$220k unreviewed business spend not yet counted — review on Expenses to unlock deductions."
+
+Personal numbers are unaffected (the Personal mode has very few auto-suggested deductions).
+
+## Files touched
+
+- `src/pages/Tax.tsx` — `loadProjection` status filter + projection table rendering filtered by `scope` + add unreviewed-exposure footnote.
+
+No DB migration. No changes to `categorization-engine.ts` or other pages.
