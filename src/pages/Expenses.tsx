@@ -884,9 +884,9 @@ export default function Expenses() {
 
   const bulkApprove = async () => {
     const selected = filtered.filter(t => selectedIds.has(t.id));
-    for (const tx of selected) await approveRow(tx);
+    const { approved, skipped } = await bulkApproveRows(selected);
     setSelectedIds(new Set());
-    toast.success(`Approved ${selected.length} rows`);
+    toast.success(`Approved ${approved} row${approved === 1 ? '' : 's'}${skipped > 0 ? ` · ${skipped} skipped (no category)` : ''}`);
   };
 
   const bulkMarkTransfer = async () => {
