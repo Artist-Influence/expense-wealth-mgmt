@@ -127,7 +127,10 @@ export default function Tax() {
   // `deductibilityHint`, so high-confidence predicted-but-not-yet-approved rows
   // count toward the projection (matches what the user sees on Expenses).
   async function loadProjection() {
-    const reportingStatuses = ['approved', 'auto_categorized', 'edited', 'suggested', 'ai_suggested'];
+    // Financial-integrity rule: only approved/edited rows count toward totals.
+    // Unreviewed "suggested"/"ai_suggested" rows are surfaced separately as
+    // "potential additional deductions" rather than baked into the projection.
+    const reportingStatuses = ['approved', 'auto_categorized', 'edited'];
     const fetchAll = async (m: 'personal' | 'business') => {
       let from = 0;
       const pageSize = 1000;
