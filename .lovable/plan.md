@@ -1,19 +1,36 @@
 ## Problem
 
-The "Last Known" column in the Update Balances dialog shows the most recent **snapshot** balance (e.g. April: $15,118 for Dub), while the account cards show `current_balance` ($21,129 for Dub). This creates a confusing discrepancy — you expect to see the same number that's on the card.
+Contributions YTD shows $0 (or too low) for Gemini, Dub, Collectr, and there's no Wealthfront account at all. Two issues:
 
-## Root Cause
+### 1. Parentheses in auto_track_pattern break PostgREST queries
 
-`getLastBalance()` prioritizes the latest snapshot over `current_balance`. But `current_balance` on the account is often more up-to-date (set via the account edit dialog or auto-sync), while snapshots are only recorded on specific dates.
+Dub's pattern is `dub (ecfi)`. The code builds a Supabase `.or()` filter like:
+```
+description_normalized.ilike.%dub (ecfi)%,description_raw.ilike.%dub (ecfi)%
+```
+PostgREST uses parentheses `()` as grouping operators inside `.or()`. The literal parens in "dub (ecfi)" corrupt the filter syntax, causing the query to silently fail and return no matches. This means Dub always shows $0.
 
-## Fix
+**Fix**: Escape or strip parentheses from patterns before building the `.or()` filter. The safe approach is to replace `(` and `)` with wildcards or remove them, since ILIKE matching doesn't need exact paren matches for these merchant names.
 
-In `BulkBalanceUpdateDialog.getLastBalance()`:
+### 2. Missing Wealthfront account
 
-- Always use the account's `current_balance` as the primary reference for "Last Known" and for pre-filling the input.
-- Only fall back to a snapshot if the selected month already has one recorded (so you see what was previously saved for that month).
-- Pre-fill the input with `current_balance` so you just need to type the new number for accounts that changed.
+There's no Wealthfront investment account in the database, despite $8,000 in matching expenses YTD. The `DEFAULT_AUTO_ACCOUNTS` seed list includes Wealthfront, but auto-seeding only runs when you click "Sync from Expenses". Even then, `contributions_ytd` on the DB row stays at 0 because the live query recalculates — but the account needs to exist first.
 
-This aligns the dialog with what you see on each account card.
+**Fix**: No code change needed for this — clicking "Sync from Expenses" will create it. But the parentheses fix must land first so contributions actually calculate.
 
-One function change in `src/pages/Wealth.tsx`, ~5 lines.
+### 3. Broader pattern sanitization
+
+The `safe` transform only strips `%` and `,` but not PostgREST-special characters like `(`, `)`, and `.`. All three need stripping.
+
+## Changes
+
+**File: `src/pages/Wealth.tsx`** — two locations (the `liveYtdMap` query and the `sync` mutation) both build `.or()` filters the same way. In both, update the sanitization:
+
+```typescript
+// Before:
+const safe = t.replace(/[%,]/g, ' ');
+// After:  
+const safe = t.replace(/[%,().]/g, ' ').trim();
+```
+
+This ensures patterns like `dub (ecfi)` become `dub  ecfi ` which ILIKE handles correctly as a substring match.
