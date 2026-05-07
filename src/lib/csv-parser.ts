@@ -143,7 +143,7 @@ function findHeaderLineIndex(text: string): number {
  * Strips any pre-header summary block (BoA-style "Beginning Balance" rows, etc.)
  * so PapaParse sees the real transaction header as row 1.
  */
-function trimToTransactionHeader(text: string): string {
+export function trimToTransactionHeader(text: string): string {
   const idx = findHeaderLineIndex(text);
   if (idx === 0) return text;
   return text.split(/\r?\n/).slice(idx).join('\n');
