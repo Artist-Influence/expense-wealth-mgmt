@@ -618,10 +618,13 @@ export function WealthProjectionChart({
                         <Lock className="h-2.5 w-2.5" />
                         manual · {ass.annual_rate_pct.toFixed(1)}%
                       </button>
-                    ) : liveRate != null ? (
+                    ) : liveRate != null || realized.cagr_pct != null ? (
                       <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-emerald-500/30 bg-emerald-500/5 text-emerald-500/90">
                         <Zap className="h-2.5 w-2.5" />
-                        auto · {ass.annual_rate_pct.toFixed(1)}% ({live.label} 10y)
+                        {realized.cagr_pct != null && realized.window_years != null && realized.window_years >= 0.25
+                          ? `blended · ${ass.annual_rate_pct.toFixed(1)}% (${Math.round(Math.min(75, realized.window_years / 4 * 100))}% realized)`
+                          : `auto · ${ass.annual_rate_pct.toFixed(1)}% (${live?.label} 10y)`
+                        }
                         {cappedFrom[a.id] != null && (
                           <span
                             className="ml-1 text-amber-500/90"
