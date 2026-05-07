@@ -32,6 +32,7 @@ export function useAuth() {
   const isAuthorized = !!role;
   const isInvestor = role === 'investor';
   const isOwner = role === 'owner';
+  const isAccountant = role === 'accountant';
 
   const signIn = async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({ email, password });
@@ -48,6 +49,7 @@ export function useAuth() {
     isAuthorized,
     isInvestor,
     isOwner,
+    isAccountant,
     role,
     signIn,
     signOut,
