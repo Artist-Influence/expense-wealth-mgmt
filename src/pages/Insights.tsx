@@ -928,14 +928,19 @@ export default function Insights() {
               </button>
             )}
 
-            <div className="flex rounded-lg border border-border/40 overflow-hidden">
-              <button onClick={() => setMode('personal')} className={`px-3 py-1.5 text-xs font-medium transition-colors ${mode === 'personal' ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground'}`}>
-                Personal
-              </button>
-              <button onClick={() => setMode('business')} className={`px-3 py-1.5 text-xs font-medium transition-colors ${mode === 'business' ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground'}`}>
-                Business
-              </button>
-            </div>
+            {!isInvestor && (
+              <div className="flex rounded-lg border border-border/40 overflow-hidden">
+                <button onClick={() => setMode('personal')} className={`px-3 py-1.5 text-xs font-medium transition-colors ${mode === 'personal' ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground'}`}>
+                  Personal
+                </button>
+                <button onClick={() => setMode('business')} className={`px-3 py-1.5 text-xs font-medium transition-colors ${mode === 'business' ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground'}`}>
+                  Business
+                </button>
+              </div>
+            )}
+            {isInvestor && (
+              <span className="text-xs font-medium text-primary">Business Insights</span>
+            )}
 
             <Select value={reviewMode} onValueChange={(v) => setReviewModePersisted(v as ReviewMode)}>
               <SelectTrigger className="h-9 w-[180px] bg-card border-border text-xs" title="Which transactions are counted in totals">
