@@ -14,8 +14,7 @@ export default function Login() {
   const navigate = useNavigate();
 
   if (user && isAuthorized) {
-    navigate('/', { replace: true });
-    return null;
+    return <Navigate to="/" replace />;
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
