@@ -327,23 +327,48 @@ export function WealthProjectionChart({
   };
 
   // ---- Simulation -------------------------------------------------------
-  // Run monthly compounding for each account up to age 65. We also build a
-  // total trajectory plus a conservative (rate-3%) and optimistic (rate+3%)
-  // band on the total so the user sees a realistic range.
+  // Run monthly compounding for each account up to age 65.
+  // Variance bands use actual snapshot-derived volatility (annualized σ)
+  // instead of a fixed ±3% offset. For accounts without enough history,
+  // we fall back to asset-class defaults.
   const series = useMemo(() => {
     const yearsToProject = Math.max(1, TARGET_AGE - age);
     const months = yearsToProject * 12;
     const startYear = new Date().getFullYear();
 
-    // Per-account month-by-month balances at three rate scenarios.
-    // rateOffsetFn lets us asymmetrically cap the high band so already-aggressive
-    // rates (e.g. 15% crypto) don't run away to absurd values.
-    const sim = (rateOffsetFn: (baseRate: number) => number) => {
+    // Compute per-account annualized volatility from snapshots.
+    // Fallback defaults: crypto ~55%, equities ~16%, collectibles ~20%, savings ~1%.
+    const volByAccount: Record<string, number> = {};
+    for (const a of accounts) {
+      const measured = monthlyVolatility(snapshotsByAccount[a.id] || []);
+      if (measured != null && measured > 0) {
+        volByAccount[a.id] = measured;
+      } else {
+        const n = (a.account_name + ' ' + (a.platform || '')).toLowerCase();
+        if (a.account_type === 'crypto' || n.includes('gemini')) volByAccount[a.id] = 55;
+        else if (a.account_type === 'savings') volByAccount[a.id] = 1;
+        else if (a.account_type === 'collectibles' || n.includes('pokemon') || n.includes('pokémon')) volByAccount[a.id] = 20;
+        else volByAccount[a.id] = 16; // broad equities
+      }
+    }
+
+    // Simulate at a given confidence-sigma offset.
+    // offset = 0 → expected, offset = -1 → 16th percentile, offset = +1 → 84th percentile
+    const sim = (sigmaOffset: number) => {
       const balances: Record<string, number[]> = {};
       for (const a of accounts) {
         const ass = assumptions[a.id];
         if (!ass) continue;
-        const effectiveAnnual = rateOffsetFn(ass.annual_rate_pct);
+        const vol = volByAccount[a.id] || 16;
+        // Adjust the annual rate by sigma * offset, clamped so it doesn't go wildly negative
+        const adjustedAnnual = Math.max(
+          -10,
+          ass.annual_rate_pct + sigmaOffset * vol
+        );
+        // For the high band, cap at 1.25× to prevent absurd long-horizon numbers
+        const effectiveAnnual = sigmaOffset > 0
+          ? Math.min(adjustedAnnual, ass.annual_rate_pct * 1.25 + 2)
+          : adjustedAnnual;
         const monthlyRate = (effectiveAnnual / 100) / 12;
         const monthsContributing = Math.max(0, (ass.stop_age - age) * 12);
         let bal = Number(a.current_balance) || 0;
@@ -351,18 +376,16 @@ export function WealthProjectionChart({
         for (let m = 1; m <= months; m++) {
           bal = bal * (1 + monthlyRate);
           if (m <= monthsContributing) bal += ass.monthly_contribution;
-          arr.push(bal);
+          arr.push(Math.max(0, bal)); // floor at 0
         }
         balances[a.id] = arr;
       }
       return balances;
     };
 
-    const expected = sim((r) => r);
-    const low      = sim((r) => Math.max(0, r - 3));
-    // Cap the optimistic band so a 15% rate can't balloon to 18% (which over
-    // 40 years is the difference between $5M and $20M+).
-    const high     = sim((r) => Math.min(r + 3, r * 1.25));
+    const expected = sim(0);
+    const low      = sim(-1);  // ~16th percentile
+    const high     = sim(1);   // ~84th percentile
 
     // Sample at year boundaries for a clean axis.
     const rows: any[] = [];
@@ -394,7 +417,7 @@ export function WealthProjectionChart({
       rows.push(row);
     }
     return rows;
-  }, [accounts, assumptions, age, hidden]);
+  }, [accounts, assumptions, age, hidden, snapshotsByAccount]);
 
   const finalRow = series[series.length - 1];
   const finalTotal = finalRow?.total || 0;
