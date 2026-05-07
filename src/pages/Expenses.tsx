@@ -1598,7 +1598,7 @@ export default function Expenses() {
         {/* Top Control Bar */}
         <div className="glass-panel p-3 mb-3 flex flex-wrap items-center gap-2 sticky top-14 z-40">
           {/* 3-Way Mode Toggle — hidden for investors */}
-          {!isInvestor && (
+          {!isInvestor && !isAccountant && (
             <div className="flex rounded-lg border border-border/40 overflow-hidden">
               {(Object.entries(MODE_CONFIG) as [TransactionMode, typeof MODE_CONFIG[TransactionMode]][]).map(([key, cfg]) => (
                 <button
@@ -1617,8 +1617,8 @@ export default function Expenses() {
             <span className="text-xs font-medium text-primary px-3 py-1.5">Business Expenses</span>
           )}
 
-          {/* Upload — hidden for investors */}
-          {!isInvestor && (
+          {/* Upload — hidden for investors/accountants */}
+          {!isInvestor && !isAccountant && (
             <Sheet open={uploadOpen} onOpenChange={setUploadOpen}>
               <SheetTrigger asChild>
                 <Button size="sm" className="h-8 gap-1.5 text-xs">
@@ -1780,7 +1780,7 @@ export default function Expenses() {
           )}
 
 
-          {!isInvestor && selectedIds.size === 0 && user && (
+          {!isInvestor && !isAccountant && selectedIds.size === 0 && user && (
             <Button
               size="sm"
               variant="outline"
@@ -1814,7 +1814,7 @@ export default function Expenses() {
             </Button>
           )}
 
-          {!isInvestor && selectedIds.size === 0 && user && (
+          {!isInvestor && !isAccountant && selectedIds.size === 0 && user && (
             <Button
               size="sm"
               variant="outline"
@@ -1840,7 +1840,7 @@ export default function Expenses() {
             </Button>
           )}
 
-          {!isInvestor && selectedIds.size === 0 && (() => {
+          {!isInvestor && !isAccountant && selectedIds.size === 0 && (() => {
             const suggestedCount = filtered.filter(t => ['suggested', 'ai_suggested', 'auto_categorized'].includes(t.review_status) && !t.is_split_parent && (t.final_category || t.predicted_category)).length;
             return suggestedCount > 0 ? (
               <Button size="sm" variant="outline" className="h-8 gap-1 text-xs border-success/30 text-success hover:bg-success/10" onClick={async () => {
@@ -1854,7 +1854,7 @@ export default function Expenses() {
           })()}
 
           {/* Bulk Actions — owner only */}
-          {!isInvestor && selectedIds.size > 0 && (
+          {!isInvestor && !isAccountant && selectedIds.size > 0 && (
             <>
               <Button size="sm" onClick={bulkApprove} className="h-8 gap-1 text-xs">
                 <CheckCheck className="h-3 w-3" /> Approve {selectedIds.size}
@@ -1902,7 +1902,7 @@ export default function Expenses() {
           </p>
         </div>
         <div className={`grid ${isInvestor ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-2 md:grid-cols-5'} gap-2 mb-2`}>
-          {!isInvestor && (
+          {!isInvestor && !isAccountant && (
             <div className="glass-panel-sm p-2.5">
               <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Personal Cash Out</p>
               <p className="text-sm font-mono font-semibold text-foreground mt-0.5">{fmtMoney(crossModeTotals.personalCashOut)}</p>
@@ -1912,7 +1912,7 @@ export default function Expenses() {
             <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Business Cash Out</p>
             <p className="text-sm font-mono font-semibold text-primary mt-0.5">{fmtMoney(crossModeTotals.businessCashOut)}</p>
           </div>
-          {!isInvestor && (
+          {!isInvestor && !isAccountant && (
             <div className="glass-panel-sm p-2.5">
               <p className="text-[10px] text-muted-foreground uppercase tracking-wider">True Personal</p>
               <p className="text-sm font-mono font-semibold text-foreground mt-0.5">{fmtMoney(crossModeTotals.truePersonal)}</p>
@@ -1924,7 +1924,7 @@ export default function Expenses() {
             <p className="text-sm font-mono font-semibold text-primary mt-0.5">{fmtMoney(crossModeTotals.trueBusiness)}</p>
             <p className="text-[9px] text-muted-foreground">Real business spend</p>
           </div>
-          {!isInvestor && (
+          {!isInvestor && !isAccountant && (
             <div className="glass-panel-sm p-2.5">
               <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Pending Reimbursable</p>
               <p className="text-sm font-mono font-semibold text-warning mt-0.5">{fmtMoney(crossModeTotals.pendingReimbursable)}</p>
@@ -2004,7 +2004,7 @@ export default function Expenses() {
             <table className="w-full text-xs">
               <thead className="sticky top-0 z-10 bg-card/90 backdrop-blur-sm">
                 <tr className="border-b border-border/40">
-                  {!isInvestor && (
+                  {!isInvestor && !isAccountant && (
                     <th className="px-2 py-2 text-left w-8 sticky left-0 bg-card/90 z-20">
                       <input type="checkbox" checked={selectedIds.size === filtered.length && filtered.length > 0} onChange={selectAll} className="rounded border-border" />
                     </th>
@@ -2037,7 +2037,7 @@ export default function Expenses() {
                       style={{ height: '32px' }}
                       onClick={() => !isInvestor && setDetailTx(tx)}
                     >
-                      {!isInvestor && (
+                      {!isInvestor && !isAccountant && (
                         <td className="px-2 py-1 sticky left-0 bg-card/60" onClick={e => e.stopPropagation()}>
                           <input type="checkbox" checked={selectedIds.has(tx.id)} onChange={() => toggleSelect(tx.id)} className="rounded border-border" />
                         </td>
@@ -2185,7 +2185,7 @@ export default function Expenses() {
                           )}
                         </div>
                       </td>
-                      {!isInvestor && (
+                      {!isInvestor && !isAccountant && (
                         <td className="px-2 py-1 text-right whitespace-nowrap" onClick={e => e.stopPropagation()}>
                           <div className="flex items-center gap-0.5 justify-end">
                             <Button size="sm" variant="ghost" className="h-5 w-5 p-0" onClick={() => setDetailTx(tx)} title="Edit">
