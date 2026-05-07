@@ -122,9 +122,9 @@ const readReviewMode = (): ReviewMode => {
 };
 
 export default function Insights() {
-  const { user } = useAuth();
-  const [mode, setMode] = useState<'personal' | 'business'>('personal');
-  const [modeAutoSet, setModeAutoSet] = useState(false);
+  const { user, isInvestor } = useAuth();
+  const [mode, setMode] = useState<'personal' | 'business'>(isInvestor ? 'business' : 'personal');
+  const [modeAutoSet, setModeAutoSet] = useState(isInvestor ? true : false);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [incomeData, setIncomeData] = useState<IncomeTransaction[]>([]);
   const [taxReservePct, setTaxReservePct] = useState<number>(0);
