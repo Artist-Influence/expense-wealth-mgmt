@@ -343,6 +343,7 @@ export default function Wealth() {
   const [form, setForm] = useState(emptyForm);
   const [scope, setScope] = useState<ModeScope>(() => readPersistedScope('wealth_scope', 'all'));
   const [targetDialogOpen, setTargetDialogOpen] = useState(false);
+  const [bulkUpdateOpen, setBulkUpdateOpen] = useState(false);
   const { data: accounts = [], isLoading } = useQuery({
     queryKey: ['investment_accounts'],
     queryFn: async () => {
