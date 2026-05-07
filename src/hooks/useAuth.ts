@@ -7,9 +7,9 @@ export function useAuth() {
   const [user, setUser] = useState<User | null>(null);
   const [ready, setReady] = useState(false);
   const { role, roleLoading } = useUserRole(user);
+  const [effectiveOwnerId, setEffectiveOwnerId] = useState<string | null>(null);
 
   useEffect(() => {
-    // 1. Listen for auth changes (must be set up before getSession)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (_event, session) => {
         setUser(session?.user ?? null);
@@ -17,7 +17,6 @@ export function useAuth() {
       }
     );
 
-    // 2. Restore session from storage
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null);
       setReady(true);
@@ -26,13 +25,35 @@ export function useAuth() {
     return () => subscription.unsubscribe();
   }, []);
 
-  // Loading until initial session is restored AND role is resolved
+  // Resolve effective owner ID for accountants
+  useEffect(() => {
+    if (!user || roleLoading) return;
+
+    if (role === 'accountant') {
+      let cancelled = false;
+      supabase
+        .from('profiles')
+        .select('user_id')
+        .eq('is_owner', true)
+        .maybeSingle()
+        .then(({ data }) => {
+          if (!cancelled) setEffectiveOwnerId(data?.user_id ?? null);
+        });
+      return () => { cancelled = true; };
+    } else {
+      setEffectiveOwnerId(user.id);
+    }
+  }, [user?.id, role, roleLoading]);
+
   const loading = !ready || roleLoading;
 
   const isAuthorized = !!role;
   const isInvestor = role === 'investor';
   const isOwner = role === 'owner';
   const isAccountant = role === 'accountant';
+
+  // ownerId: the user ID to use in queries (owner's ID for accountants)
+  const ownerId = effectiveOwnerId;
 
   const signIn = async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({ email, password });
@@ -50,6 +71,7 @@ export function useAuth() {
     isInvestor,
     isOwner,
     isAccountant,
+    ownerId,
     role,
     signIn,
     signOut,
