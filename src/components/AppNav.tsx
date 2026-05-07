@@ -142,22 +142,28 @@ export function AppNav() {
         </div>
 
         <div className="flex items-center gap-1.5 shrink-0">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={() => setHealthOpen(true)}
-                className={`flex items-center gap-1.5 h-7 px-2 rounded-lg border text-xs font-medium transition-colors ${healthTone}`}
-              >
-                <Activity className="h-3.5 w-3.5" />
-                <span className="hidden md:inline">
-                  {totalIssues === 0 ? 'Healthy' : `${totalIssues} issue${totalIssues > 1 ? 's' : ''}`}
-                </span>
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" className="text-xs">
-              Data Health Check {healthSummary?.ranAt ? `· last run ${new Date(healthSummary.ranAt).toLocaleString()}` : ''}
-            </TooltipContent>
-          </Tooltip>
+          {!isInvestor && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={() => setHealthOpen(true)}
+                  className={`flex items-center gap-1.5 h-7 px-2 rounded-lg border text-xs font-medium transition-colors ${healthTone}`}
+                >
+                  <Activity className="h-3.5 w-3.5" />
+                  <span className="hidden md:inline">
+                    {totalIssues === 0 ? 'Healthy' : `${totalIssues} issue${totalIssues > 1 ? 's' : ''}`}
+                  </span>
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="text-xs">
+                Data Health Check {healthSummary?.ranAt ? `· last run ${new Date(healthSummary.ranAt).toLocaleString()}` : ''}
+              </TooltipContent>
+            </Tooltip>
+          )}
+
+          {isInvestor && (
+            <span className="text-[10px] text-muted-foreground/60 hidden md:inline">Investor View</span>
+          )}
 
           <Button
             variant="ghost"
@@ -171,12 +177,14 @@ export function AppNav() {
         </div>
       </div>
 
-      <HealthCheckPanel
-        open={healthOpen}
-        onClose={() => setHealthOpen(false)}
-        initialSummary={healthSummary}
-        onSummaryChange={setHealthSummary}
-      />
+      {!isInvestor && (
+        <HealthCheckPanel
+          open={healthOpen}
+          onClose={() => setHealthOpen(false)}
+          initialSummary={healthSummary}
+          onSummaryChange={setHealthSummary}
+        />
+      )}
     </nav>
   );
 }
