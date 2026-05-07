@@ -259,11 +259,10 @@ export function WealthProjectionChart({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accounts, liveCagrFingerprint]);
 
-  // Seed the projection rate from live data when it arrives,
-  // unless the user has marked this account as manually overridden.
-  // Auto-seeded rates are clamped to a sane long-horizon ceiling
-  // (crypto 15%, equities 12%) so a 60%+ 10y CAGR doesn't compound the
-  // chart into the quadrillions over a 40-year horizon.
+  // Seed the projection rate from live data blended with realized returns.
+  // Unless the user has marked this account as manually overridden.
+  // Blending: weight realized CAGR more as snapshot history grows (up to 75%).
+  // Auto-seeded rates are clamped to a sane long-horizon ceiling.
   useEffect(() => {
     let changed = false;
     const next = { ...assumptions };
@@ -271,12 +270,21 @@ export function WealthProjectionChart({
     for (const a of accounts) {
       if (overrides.has(a.id)) continue;
       const live = liveRateByAccount[a.id];
-      if (live?.rate == null) continue;
       const cur = next[a.id];
       if (!cur) continue;
-      const rawLive = Number(live.rate.toFixed(2));
-      const { rate: clamped, capped } = clampSeededRate(a, rawLive);
-      if (capped) nextCapped[a.id] = rawLive;
+
+      // Compute realized CAGR for blending
+      const snapshots = snapshotsByAccount[a.id] || [];
+      const contribEstimate = a.contributions_ytd > 0
+        ? a.contributions_ytd
+        : a.contribution_target_monthly * Math.max(1, snapshots.length - 1);
+      const realized = realizedCagr(snapshots, contribEstimate);
+
+      const benchmarkRate = live?.rate != null ? Number(live.rate.toFixed(2)) : null;
+      const blended = blendRate(realized, benchmarkRate, defaultRateFor(a));
+      const rawRate = Number(blended.toFixed(2));
+      const { rate: clamped, capped } = clampSeededRate(a, rawRate);
+      if (capped) nextCapped[a.id] = rawRate;
       else delete nextCapped[a.id];
       if (Math.abs(cur.annual_rate_pct - clamped) > 0.01) {
         next[a.id] = { ...cur, annual_rate_pct: clamped };
@@ -289,7 +297,7 @@ export function WealthProjectionChart({
     }
     setCappedFrom(nextCapped);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [liveRateByAccount]);
+  }, [liveRateByAccount, snapshotsByAccount]);
 
   useEffect(() => {
     localStorage.setItem(AGE_KEY, String(age));
