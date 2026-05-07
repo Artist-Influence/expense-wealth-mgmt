@@ -1084,6 +1084,19 @@ export default function Wealth() {
         onSave={(amount, year) => saveTarget.mutate({ amount, year })}
         saving={saveTarget.isPending}
       />
+      {user && (
+        <BulkBalanceUpdateDialog
+          open={bulkUpdateOpen}
+          onOpenChange={setBulkUpdateOpen}
+          accounts={scopedAccounts.filter(a => a.is_active)}
+          snapshots={snapshots}
+          userId={user.id}
+          onSaved={() => {
+            qc.invalidateQueries({ queryKey: ['investment_accounts'] });
+            qc.invalidateQueries({ queryKey: ['account_balance_snapshots', user.id] });
+          }}
+        />
+      )}
     </div>
   );
 }
