@@ -30,7 +30,7 @@ const navItems = [
 
 export function AppNav() {
   const location = useLocation();
-  const { user, signOut } = useAuth();
+  const { user, signOut, isInvestor } = useAuth();
   const [healthOpen, setHealthOpen] = useState(false);
   const [healthSummary, setHealthSummary] = useState<HealthCheckSummary | null>(null);
 
