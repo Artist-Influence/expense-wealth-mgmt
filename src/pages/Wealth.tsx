@@ -315,7 +315,9 @@ function BulkBalanceUpdateDialog({
               <thead>
                 <tr className="bg-secondary/30 border-b border-border/40">
                   <th className="text-left px-3 py-1.5 font-medium text-muted-foreground">Account</th>
-                  <th className="text-right px-3 py-1.5 font-medium text-muted-foreground w-28">Last Known</th>
+                  <th className="text-right px-3 py-1.5 font-medium text-muted-foreground w-28">
+                    {new Date(`${month}-01`).toLocaleString('en-US', { month: 'short', year: 'numeric' })}
+                  </th>
                   <th className="text-right px-3 py-1.5 font-medium text-muted-foreground w-32">New Balance</th>
                 </tr>
               </thead>
