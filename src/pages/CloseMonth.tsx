@@ -43,7 +43,7 @@ function getDateRange(month: string) {
 }
 
 export default function CloseMonth() {
-  const { user } = useAuth();
+  const { user, ownerId, isAccountant } = useAuth();
   const [selectedMonth, setSelectedMonth] = useState(() => {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -70,7 +70,7 @@ export default function CloseMonth() {
       const { data } = await supabase
         .from('transactions_uploaded')
         .select('id, description_normalized, amount, date, review_status')
-        .eq('owner_id', user.id)
+        .eq('owner_id', ownerId!)
         .eq('transaction_mode', scope)
         .in('review_status', ['needs_review', 'suggested', 'ai_suggested'])
         .gte('date', dateRange.start)
@@ -89,7 +89,7 @@ export default function CloseMonth() {
       const { data } = await supabase
         .from('tax_profiles')
         .select('*')
-        .eq('owner_id', user.id)
+        .eq('owner_id', ownerId!)
         .maybeSingle();
       return data;
     },
@@ -104,7 +104,7 @@ export default function CloseMonth() {
       const { data } = await supabase
         .from('income_transactions')
         .select('amount, income_type')
-        .eq('owner_id', user.id)
+        .eq('owner_id', ownerId!)
         .eq('mode', scope)
         .gte('date', dateRange.start)
         .lte('date', dateRange.end);
@@ -121,7 +121,7 @@ export default function CloseMonth() {
       const { data } = await supabase
         .from('allocation_plans')
         .select('*')
-        .eq('owner_id', user.id)
+        .eq('owner_id', ownerId!)
         .eq('month', selectedMonth)
         .maybeSingle();
       return data;

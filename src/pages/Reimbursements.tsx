@@ -92,7 +92,7 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 export default function Reimbursements() {
-  const { user } = useAuth();
+  const { user, ownerId, isAccountant } = useAuth();
   const [transactions, setTransactions] = useState<ReimbursableTransaction[]>([]);
   const [groups, setGroups] = useState<ReimbursementGroup[]>([]);
   const [loading, setLoading] = useState(true);
@@ -123,7 +123,7 @@ export default function Reimbursements() {
       .select('category_name')
       .eq('mode', 'personal')
       .eq('is_active', true)
-      .eq('owner_id', user!.id)
+      .eq('owner_id', ownerId!)
       .order('sort_order');
     setCategories((data || []).map(c => c.category_name));
   };
@@ -134,13 +134,13 @@ export default function Reimbursements() {
       supabase
         .from('transactions_uploaded')
         .select('*')
-        .eq('owner_id', user!.id)
+        .eq('owner_id', ownerId!)
         .eq('is_reimbursable', true)
         .order('date', { ascending: false }),
       (supabase as any)
         .from('reimbursement_groups')
         .select('*')
-        .eq('owner_id', user!.id)
+        .eq('owner_id', ownerId!)
         .order('created_at', { ascending: false }),
     ]);
     setTransactions((txResult.data || []) as unknown as ReimbursableTransaction[]);

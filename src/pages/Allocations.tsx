@@ -32,7 +32,7 @@ function monthLabel(m: string) {
 }
 
 export default function Allocations() {
-  const { user } = useAuth();
+  const { user, ownerId, isAccountant } = useAuth();
   const qc = useQueryClient();
   const monthOptions = useMemo(() => getMonthOptions(), []);
   const [selectedMonth, setSelectedMonth] = useState(() => {
@@ -59,7 +59,7 @@ export default function Allocations() {
       const { data } = await supabase
         .from('income_transactions')
         .select('amount, income_type')
-        .eq('owner_id', user!.id)
+        .eq('owner_id', ownerId!)
         .eq('mode', scope)
         .gte('date', start)
         .lte('date', end);
@@ -81,7 +81,7 @@ export default function Allocations() {
       const { data } = await supabase
         .from('transactions_uploaded')
         .select('amount')
-        .eq('owner_id', user!.id)
+        .eq('owner_id', ownerId!)
         .eq('transaction_mode', scope)
         .gte('date', start)
         .lte('date', end)
@@ -102,7 +102,7 @@ export default function Allocations() {
       const { count } = await supabase
         .from('transactions_uploaded')
         .select('id', { count: 'exact', head: true })
-        .eq('owner_id', user!.id)
+        .eq('owner_id', ownerId!)
         .eq('transaction_mode', scope)
         .gte('date', start)
         .lte('date', end)

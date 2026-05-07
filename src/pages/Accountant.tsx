@@ -88,7 +88,7 @@ function downloadCsv(filename: string, headers: string[], rows: string[][]) {
 }
 
 export default function Accountant() {
-  const { user } = useAuth();
+  const { user, ownerId, isAccountant } = useAuth();
   const [selectedExport, setSelectedExport] = useState<ExportType>('expense_ledger');
   const [period, setPeriod] = useState('month');
   const [selection, setSelection] = useState(() => {
@@ -120,7 +120,7 @@ export default function Accountant() {
       const { data } = await supabase
         .from('transactions_uploaded')
         .select('*')
-        .eq('owner_id', user.id)
+        .eq('owner_id', ownerId!)
         .gte('date', dateRange.start)
         .lte('date', dateRange.end)
         .order('date');
@@ -136,7 +136,7 @@ export default function Accountant() {
       const { data } = await supabase
         .from('income_transactions')
         .select('*')
-        .eq('owner_id', user.id)
+        .eq('owner_id', ownerId!)
         .gte('date', dateRange.start)
         .lte('date', dateRange.end)
         .order('date');

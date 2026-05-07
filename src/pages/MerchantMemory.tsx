@@ -22,7 +22,7 @@ interface MerchantRecord {
 type SortKey = 'merchant_key' | 'mode' | 'most_common_category' | 'most_common_method' | 'default_note_template' | 'times_seen';
 
 export default function MerchantMemory() {
-  const { user } = useAuth();
+  const { user, ownerId, isAccountant } = useAuth();
   const [merchants, setMerchants] = useState<MerchantRecord[]>([]);
   const [search, setSearch] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -38,7 +38,7 @@ export default function MerchantMemory() {
     const { data } = await supabase
       .from('merchant_memory')
       .select('*')
-      .eq('owner_id', user!.id)
+      .eq('owner_id', ownerId!)
       .order('times_seen', { ascending: false })
       .limit(200);
     setMerchants((data || []) as MerchantRecord[]);
