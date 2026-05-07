@@ -2017,7 +2017,7 @@ export default function Expenses() {
                   <SortHeader col="confidence" label="Conf" />
                   <th className="px-2 py-2 text-left text-[11px] font-medium text-muted-foreground">Status</th>
                   <th className="px-2 py-2 text-left text-[11px] font-medium text-muted-foreground">Flags</th>
-                  <th className="px-2 py-2 text-right text-[11px] font-medium text-muted-foreground w-20">Actions</th>
+                  {!isInvestor && <th className="px-2 py-2 text-right text-[11px] font-medium text-muted-foreground w-20">Actions</th>}
                 </tr>
               </thead>
               <tbody>
