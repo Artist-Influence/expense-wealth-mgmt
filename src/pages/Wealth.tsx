@@ -728,6 +728,9 @@ export default function Wealth() {
               <RefreshCw className={`h-3.5 w-3.5 mr-1 ${sync.isPending ? 'animate-spin' : ''}`} />
               {sync.isPending ? 'Syncing…' : 'Sync from Expenses'}
             </Button>
+            <Button size="sm" variant="outline" className="h-8" onClick={() => setBulkUpdateOpen(true)}>
+              <CalendarPlus className="h-3.5 w-3.5 mr-1" />Update Balances
+            </Button>
             <Button size="sm" className="h-8" onClick={openAdd}><Plus className="h-3.5 w-3.5 mr-1" />Add Account</Button>
           </div>
         </div>
