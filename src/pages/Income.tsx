@@ -5,6 +5,7 @@ import { AppNav } from '@/components/AppNav';
 import { CsvUploader } from '@/components/CsvUploader';
 import { classifyIncome, INCOME_TYPE_OPTIONS, TAXABLE_STATUS_OPTIONS, MODE_OPTIONS, NON_EARNING_TYPES } from '@/lib/income-classifier';
 import { normalizeDescription } from '@/lib/normalizer';
+import { trimToTransactionHeader } from '@/lib/csv-parser';
 import { toast } from 'sonner';
 import Papa from 'papaparse';
 import { Button } from '@/components/ui/button';
@@ -252,7 +253,8 @@ export default function Income() {
   const handleCsvFiles = async (files: File[]) => {
     if (!user) return;
     for (const file of files) {
-      const text = await file.text();
+      const rawText = await file.text();
+      const text = trimToTransactionHeader(rawText);
       const parsed = Papa.parse(text, { header: false, skipEmptyLines: true });
       const allRows = parsed.data as string[][];
       if (allRows.length < 2) { toast.error(`${file.name}: No data rows`); continue; }
