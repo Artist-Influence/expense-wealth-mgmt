@@ -54,6 +54,41 @@ type Assumption = {
 };
 type AssumptionMap = Record<string, Assumption>;
 
+// ---- Volatility from snapshot history ------------------------------------
+// Returns annualized standard deviation of monthly log-returns.
+function monthlyVolatility(snapshots: RateSnap[]): number | null {
+  if (snapshots.length < 3) return null;
+  const sorted = [...snapshots].sort((a, b) => a.as_of_date.localeCompare(b.as_of_date));
+  const logReturns: number[] = [];
+  for (let i = 1; i < sorted.length; i++) {
+    const prev = Number(sorted[i - 1].balance);
+    const cur = Number(sorted[i].balance);
+    if (prev > 0 && cur > 0) logReturns.push(Math.log(cur / prev));
+  }
+  if (logReturns.length < 2) return null;
+  const mean = logReturns.reduce((s, v) => s + v, 0) / logReturns.length;
+  const variance = logReturns.reduce((s, v) => s + (v - mean) ** 2, 0) / (logReturns.length - 1);
+  const monthlyStd = Math.sqrt(variance);
+  // Annualize: σ_annual ≈ σ_monthly × √12
+  return monthlyStd * Math.sqrt(12) * 100; // as percentage points
+}
+
+// Blend realized CAGR with benchmark CAGR based on snapshot window length.
+// More history → more weight on realized performance.
+function blendRate(
+  realized: { cagr_pct: number | null; window_years: number | null },
+  benchmarkRate: number | null,
+  defaultRate: number,
+): number {
+  if (realized.cagr_pct == null || realized.window_years == null || realized.window_years < 0.25) {
+    return benchmarkRate ?? defaultRate;
+  }
+  const anchor = benchmarkRate ?? defaultRate;
+  // Weight realized more as history grows: 0 at 0yr, 50% at 2yr, 75% at 5yr
+  const realizedWeight = Math.min(0.75, realized.window_years / 4);
+  return realized.cagr_pct * realizedWeight + anchor * (1 - realizedWeight);
+}
+
 // ---- Heuristic defaults --------------------------------------------------
 function defaultRateFor(acc: ProjAccount): number {
   // Prefer the static rate from the basket resolver when it's a no-live-feed asset.
