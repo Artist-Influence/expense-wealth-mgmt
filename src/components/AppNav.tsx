@@ -30,7 +30,7 @@ const navItems = [
 
 export function AppNav() {
   const location = useLocation();
-  const { user, signOut, isInvestor } = useAuth();
+  const { user, signOut, isInvestor, isAccountant } = useAuth();
   const [healthOpen, setHealthOpen] = useState(false);
   const [healthSummary, setHealthSummary] = useState<HealthCheckSummary | null>(null);
 
@@ -163,6 +163,10 @@ export function AppNav() {
 
           {isInvestor && (
             <span className="text-[10px] text-muted-foreground/60 hidden md:inline">Investor View</span>
+          )}
+
+          {isAccountant && (
+            <span className="text-[10px] text-muted-foreground/60 hidden md:inline">Accountant View</span>
           )}
 
           <Button
