@@ -1,28 +1,38 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import type { User } from '@supabase/supabase-js';
 import { useUserRole, type AppRole } from './useUserRole';
 
 export function useAuth() {
   const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [ready, setReady] = useState(false);
+  const initialised = useRef(false);
   const { role, roleLoading } = useUserRole(user);
 
   useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
-      setLoading(false);
-    });
+    // Prevent double-init in StrictMode
+    if (initialised.current) return;
+    initialised.current = true;
 
+    // 1. Restore session from storage first
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null);
-      setLoading(false);
+      setReady(true);
     });
+
+    // 2. Listen for subsequent changes (sign-in / sign-out)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (_event, session) => {
+        setUser(session?.user ?? null);
+      }
+    );
 
     return () => subscription.unsubscribe();
   }, []);
 
-  // A user is authorized if they have any role assigned
+  // Loading until initial session is restored AND role is resolved
+  const loading = !ready || roleLoading;
+
   const isAuthorized = !!role;
   const isInvestor = role === 'investor';
   const isOwner = role === 'owner';
@@ -38,7 +48,7 @@ export function useAuth() {
 
   return {
     user,
-    loading: loading || roleLoading,
+    loading,
     isAuthorized,
     isInvestor,
     isOwner,
