@@ -84,6 +84,34 @@ const DEFAULT_AUTO_ACCOUNTS: Array<{
   { name: 'Pokémon',     account_type: 'collectibles', platform: 'TCGPlayer / Zelle', pattern: 'tcgplayer|pokemon' },
 ];
 
+/**
+ * Converts a pattern token (e.g. "dub ecfi") into a PostgREST-safe ILIKE value.
+ * Multi-word tokens become `%word1%word2%` so "DUB (ECFI)" matches.
+ * Single-word tokens become `%word%`.
+ */
+function patternToIlike(token: string): string {
+  const words = token
+    .replace(/[%,().]/g, ' ')
+    .split(/\s+/)
+    .map(w => w.trim())
+    .filter(Boolean);
+  if (words.length === 0) return '';
+  return `%${words.join('%')}%`;
+}
+
+/** Build PostgREST .or() parts for a pipe-separated auto_track_pattern. */
+function buildOrFilter(pattern: string): string[] {
+  const tokens = pattern.split('|').map(t => t.trim()).filter(Boolean);
+  const orParts: string[] = [];
+  for (const t of tokens) {
+    const ilike = patternToIlike(t);
+    if (!ilike) continue;
+    orParts.push(`description_normalized.ilike.${ilike}`);
+    orParts.push(`description_raw.ilike.${ilike}`);
+  }
+  return orParts;
+}
+
 // ---------------------------------------------------------------
 // Inline editor popover for an account's monthly balance snapshots.
 // Lets you add/edit/delete YYYY-MM-01 balance points without leaving the card.
