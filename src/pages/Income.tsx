@@ -460,37 +460,46 @@ export default function Income() {
             <p className="text-sm text-muted-foreground">Track inflows and classify by type. <span className="text-[10px] text-muted-foreground/70">Summary: {dateActive ? dateLabel : 'All Dates'}</span></p>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={() => { if (!showUploader && filterMode !== 'all') setCsvImportMode(filterMode); setShowUploader(!showUploader); }}>
-              <Upload className="h-4 w-4 mr-1" /> Import CSV
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => { setManualMode(filterMode === 'business' ? 'business' : 'personal'); setShowManualEntry(true); }}>
-              <Plus className="h-4 w-4 mr-1" /> Add Entry
-            </Button>
+            {!isInvestor && (
+              <>
+                <Button variant="outline" size="sm" onClick={() => { if (!showUploader && filterMode !== 'all') setCsvImportMode(filterMode); setShowUploader(!showUploader); }}>
+                  <Upload className="h-4 w-4 mr-1" /> Import CSV
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => { setManualMode(filterMode === 'business' ? 'business' : 'personal'); setShowManualEntry(true); }}>
+                  <Plus className="h-4 w-4 mr-1" /> Add Entry
+                </Button>
+              </>
+            )}
             <Button variant="outline" size="sm" onClick={exportCsv}>
               <Download className="h-4 w-4 mr-1" /> Export
             </Button>
           </div>
         </div>
 
-        {/* Mode toggle */}
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-muted-foreground uppercase tracking-wide">View:</span>
-          <div className="inline-flex rounded-md border border-border bg-card p-0.5">
-            {(['all', 'personal', 'business'] as const).map(m => (
-              <button
-                key={m}
-                onClick={() => setFilterMode(m)}
-                className={`px-3 py-1 text-xs rounded-[4px] transition-colors ${
-                  filterMode === m
-                    ? 'bg-primary text-primary-foreground'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-secondary/40'
-                }`}
-              >
-                {m === 'all' ? 'All' : m === 'personal' ? 'Personal' : 'Business'}
-              </button>
-            ))}
+        {/* Mode toggle — hidden for investors */}
+        {!isInvestor && (
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground uppercase tracking-wide">View:</span>
+            <div className="inline-flex rounded-md border border-border bg-card p-0.5">
+              {(['all', 'personal', 'business'] as const).map(m => (
+                <button
+                  key={m}
+                  onClick={() => setFilterMode(m)}
+                  className={`px-3 py-1 text-xs rounded-[4px] transition-colors ${
+                    filterMode === m
+                      ? 'bg-primary text-primary-foreground'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-secondary/40'
+                  }`}
+                >
+                  {m === 'all' ? 'All' : m === 'personal' ? 'Personal' : 'Business'}
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
+        {isInvestor && (
+          <span className="text-xs font-medium text-primary">Business Income</span>
+        )}
 
         {/* Summary Cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
