@@ -1900,29 +1900,35 @@ export default function Expenses() {
             )}
           </p>
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mb-2">
-          <div className="glass-panel-sm p-2.5">
-            <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Personal Cash Out</p>
-            <p className="text-sm font-mono font-semibold text-foreground mt-0.5">{fmtMoney(crossModeTotals.personalCashOut)}</p>
-          </div>
+        <div className={`grid ${isInvestor ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-2 md:grid-cols-5'} gap-2 mb-2`}>
+          {!isInvestor && (
+            <div className="glass-panel-sm p-2.5">
+              <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Personal Cash Out</p>
+              <p className="text-sm font-mono font-semibold text-foreground mt-0.5">{fmtMoney(crossModeTotals.personalCashOut)}</p>
+            </div>
+          )}
           <div className="glass-panel-sm p-2.5">
             <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Business Cash Out</p>
             <p className="text-sm font-mono font-semibold text-primary mt-0.5">{fmtMoney(crossModeTotals.businessCashOut)}</p>
           </div>
-          <div className="glass-panel-sm p-2.5">
-            <p className="text-[10px] text-muted-foreground uppercase tracking-wider">True Personal</p>
-            <p className="text-sm font-mono font-semibold text-foreground mt-0.5">{fmtMoney(crossModeTotals.truePersonal)}</p>
-            <p className="text-[9px] text-muted-foreground">Excludes reimbursable</p>
-          </div>
+          {!isInvestor && (
+            <div className="glass-panel-sm p-2.5">
+              <p className="text-[10px] text-muted-foreground uppercase tracking-wider">True Personal</p>
+              <p className="text-sm font-mono font-semibold text-foreground mt-0.5">{fmtMoney(crossModeTotals.truePersonal)}</p>
+              <p className="text-[9px] text-muted-foreground">Excludes reimbursable</p>
+            </div>
+          )}
           <div className="glass-panel-sm p-2.5">
             <p className="text-[10px] text-muted-foreground uppercase tracking-wider">True Business</p>
             <p className="text-sm font-mono font-semibold text-primary mt-0.5">{fmtMoney(crossModeTotals.trueBusiness)}</p>
             <p className="text-[9px] text-muted-foreground">Real business spend</p>
           </div>
-          <div className="glass-panel-sm p-2.5">
-            <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Pending Reimbursable</p>
-            <p className="text-sm font-mono font-semibold text-warning mt-0.5">{fmtMoney(crossModeTotals.pendingReimbursable)}</p>
-          </div>
+          {!isInvestor && (
+            <div className="glass-panel-sm p-2.5">
+              <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Pending Reimbursable</p>
+              <p className="text-sm font-mono font-semibold text-warning mt-0.5">{fmtMoney(crossModeTotals.pendingReimbursable)}</p>
+            </div>
+          )}
         </div>
 
         {/* Period insight tiles — Avg / day, Largest expense, Unique merchants */}
