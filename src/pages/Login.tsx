@@ -10,8 +10,16 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const { signIn, user, isAuthorized } = useAuth();
+  const { signIn, user, isAuthorized, loading: authLoading } = useAuth();
   const navigate = useNavigate();
+
+  if (authLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+      </div>
+    );
+  }
 
   if (user && isAuthorized) {
     return <Navigate to="/" replace />;
