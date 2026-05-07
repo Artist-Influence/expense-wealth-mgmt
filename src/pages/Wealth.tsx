@@ -364,7 +364,7 @@ function BulkBalanceUpdateDialog({
 }
 
 export default function Wealth() {
-  const { user } = useAuth();
+  const { user, ownerId, isAccountant } = useAuth();
   const qc = useQueryClient();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -447,7 +447,7 @@ export default function Wealth() {
       const { data: allAccounts } = await supabase
         .from('investment_accounts')
         .select('*')
-        .eq('owner_id', user!.id);
+        .eq('owner_id', ownerId!);
       const accs = (allAccounts || []) as Account[];
 
       const map = new Map<string, number>();
@@ -465,7 +465,7 @@ export default function Wealth() {
         const { data: matches } = await supabase
           .from('transactions_uploaded')
           .select('amount')
-          .eq('owner_id', user!.id)
+          .eq('owner_id', ownerId!)
           .eq('mode', 'personal')
           .gte('date', yearStart)
           .lte('date', yearEnd)
@@ -485,7 +485,7 @@ export default function Wealth() {
       const { data, error } = await supabase
         .from('app_settings')
         .select('id, wealth_target_amount, wealth_target_year')
-        .eq('owner_id', user!.id)
+        .eq('owner_id', ownerId!)
         .maybeSingle();
       if (error) throw error;
       return data;
@@ -649,7 +649,7 @@ export default function Wealth() {
       }
 
       // 2. Re-fetch (we may have added rows above).
-      const { data: latest } = await supabase.from('investment_accounts').select('*').eq('owner_id', user!.id);
+      const { data: latest } = await supabase.from('investment_accounts').select('*').eq('owner_id', ownerId!);
       const all = (latest || []) as Account[];
 
       // 3. For each account with a pattern, sum matching personal expenses YTD.
@@ -663,7 +663,7 @@ export default function Wealth() {
         const { data: matches } = await supabase
           .from('transactions_uploaded')
           .select('amount')
-          .eq('owner_id', user!.id)
+          .eq('owner_id', ownerId!)
           .eq('mode', 'personal')
           .gte('date', yearStart)
           .lte('date', yearEnd)

@@ -30,7 +30,7 @@ const navItems = [
 
 export function AppNav() {
   const location = useLocation();
-  const { user, signOut, isInvestor } = useAuth();
+  const { user, signOut, isInvestor, isAccountant, ownerId } = useAuth();
   const [healthOpen, setHealthOpen] = useState(false);
   const [healthSummary, setHealthSummary] = useState<HealthCheckSummary | null>(null);
 
@@ -41,11 +41,11 @@ export function AppNav() {
       const { count } = await supabase
         .from('transactions_uploaded')
         .select('id', { count: 'exact', head: true })
-        .eq('owner_id', user!.id)
+        .eq('owner_id', ownerId!)
         .in('review_status', ['needs_review', 'suggested', 'ai_suggested']);
       return count || 0;
     },
-    enabled: !!user,
+    enabled: !!user && !!ownerId,
     refetchInterval: 30000,
   });
 
@@ -58,7 +58,7 @@ export function AppNav() {
         const { data } = await supabase
           .from('app_settings')
           .select('last_health_check_at, last_health_check_summary')
-          .eq('owner_id', user.id)
+          .eq('owner_id', ownerId!)
           .maybeSingle();
         if (!cancelled && data?.last_health_check_summary) {
           setHealthSummary({
@@ -163,6 +163,10 @@ export function AppNav() {
 
           {isInvestor && (
             <span className="text-[10px] text-muted-foreground/60 hidden md:inline">Investor View</span>
+          )}
+
+          {isAccountant && (
+            <span className="text-[10px] text-muted-foreground/60 hidden md:inline">Accountant View</span>
           )}
 
           <Button

@@ -122,7 +122,7 @@ const readReviewMode = (): ReviewMode => {
 };
 
 export default function Insights() {
-  const { user, isInvestor } = useAuth();
+  const { user, isInvestor, isAccountant, ownerId } = useAuth();
   const [mode, setMode] = useState<'personal' | 'business'>(isInvestor ? 'business' : 'personal');
   const [modeAutoSet, setModeAutoSet] = useState(isInvestor ? true : false);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -151,8 +151,8 @@ export default function Insights() {
     if (!user || modeAutoSet) return;
     (async () => {
       const [{ count: pCount }, { count: bCount }] = await Promise.all([
-        supabase.from('transactions_uploaded').select('id', { count: 'exact', head: true }).eq('owner_id', user.id).eq('mode', 'personal'),
-        supabase.from('transactions_uploaded').select('id', { count: 'exact', head: true }).eq('owner_id', user.id).eq('mode', 'business'),
+        supabase.from('transactions_uploaded').select('id', { count: 'exact', head: true }).eq('owner_id', ownerId!).eq('mode', 'personal'),
+        supabase.from('transactions_uploaded').select('id', { count: 'exact', head: true }).eq('owner_id', ownerId!).eq('mode', 'business'),
       ]);
       const personalN = pCount || 0;
       const businessN = bCount || 0;
@@ -170,7 +170,7 @@ export default function Insights() {
     const [expenseResult, incomeResult, taxResult] = await Promise.all([
       loadExpenses(),
       loadIncome(),
-      supabase.from('tax_profiles').select('default_federal_reserve_percent, default_nys_reserve_percent, default_nyc_reserve_percent').eq('owner_id', user!.id).maybeSingle(),
+      supabase.from('tax_profiles').select('default_federal_reserve_percent, default_nys_reserve_percent, default_nyc_reserve_percent').eq('owner_id', ownerId!).maybeSingle(),
     ]);
     setTransactions(expenseResult);
     setIncomeData(incomeResult);
@@ -190,7 +190,7 @@ export default function Insights() {
       const { data } = await supabase
         .from('transactions_uploaded')
         .select('date, description_raw, description_normalized, amount, final_category, predicted_category, final_method, predicted_method, review_status, is_transfer, transfer_type, exclude_from_expense_totals, parse_status, is_split_parent')
-        .eq('owner_id', user!.id).eq('mode', mode).neq('parse_status', 'parse_error')
+        .eq('owner_id', ownerId!).eq('mode', mode).neq('parse_status', 'parse_error')
         .range(from, from + pageSize - 1);
       if (data) allData = [...allData, ...(data as Transaction[])];
       hasMore = (data?.length ?? 0) === pageSize;
@@ -205,7 +205,7 @@ export default function Insights() {
       const { data } = await supabase
         .from('income_transactions')
         .select('date, amount, income_type, taxable_status, status, mode')
-        .eq('owner_id', user!.id)
+        .eq('owner_id', ownerId!)
         .eq('mode', mode)
         .range(from, from + pageSize - 1);
       if (data) allData = [...allData, ...(data as IncomeTransaction[])];

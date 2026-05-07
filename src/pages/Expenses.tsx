@@ -89,7 +89,7 @@ const MODE_CONFIG: Record<TransactionMode, { label: string; color: string; activ
 };
 
 export default function Expenses() {
-  const { user, isInvestor } = useAuth();
+  const { user, isInvestor, isAccountant, ownerId } = useAuth();
   const [mode, setMode] = useState<TransactionMode>(isInvestor ? 'business' : 'personal');
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
@@ -214,7 +214,7 @@ export default function Expenses() {
       let q = supabase
         .from('transactions_uploaded')
         .select('amount, transaction_mode, mode, is_split_parent, is_transfer, exclude_from_expense_totals, is_non_expense_cash_movement, parse_status, counts_toward_true_personal_spend, counts_toward_true_business_spend, is_reimbursable, reimbursement_status, date')
-        .eq('owner_id', user.id);
+        .eq('owner_id', ownerId!);
       if (isInvestor) q = q.eq('mode', 'business');
       const { data } = await q.range(from, from + pageSize - 1);
       if (data) all = [...all, ...(data as unknown as AllModeRow[])];
@@ -230,7 +230,7 @@ export default function Expenses() {
       .select('category_name')
       .eq('mode', categoryMode)
       .eq('is_active', true)
-      .eq('owner_id', user!.id)
+      .eq('owner_id', ownerId!)
       .order('sort_order');
     setCategories((data || []).map(c => c.category_name));
   };
@@ -245,7 +245,7 @@ export default function Expenses() {
       const { data } = await supabase
         .from('transactions_uploaded')
         .select('*')
-        .eq('owner_id', user!.id)
+        .eq('owner_id', ownerId!)
         .eq('transaction_mode', mode)
         .order('date', { ascending: false })
         .range(from, from + pageSize - 1);
@@ -279,7 +279,7 @@ export default function Expenses() {
         const { data } = await supabase
           .from('transactions_uploaded')
           .select('id, date, description_normalized, description_raw, amount, duplicate_fingerprint, mode, created_at, final_category, predicted_category, final_method, predicted_method, source_file_name, source_account_name, duplicate_status, is_transfer, is_split_parent, parent_transaction_id, review_status')
-          .eq('owner_id', user.id)
+          .eq('owner_id', ownerId!)
           .range(from, from + pageSize - 1);
         if (data) rows.push(...(data as any));
         hasMore = (data?.length ?? 0) === pageSize;
@@ -1085,7 +1085,7 @@ export default function Expenses() {
   const loadSettings = async () => {
     const { data } = await supabase.from('app_settings')
       .select('prevent_exact_duplicates, flag_possible_duplicates, exclude_transfers_from_totals, ai_enabled')
-      .eq('owner_id', user!.id).maybeSingle();
+      .eq('owner_id', ownerId!).maybeSingle();
     return {
       preventExactDuplicates: data?.prevent_exact_duplicates ?? true,
       flagPossibleDuplicates: data?.flag_possible_duplicates ?? true,
@@ -1105,7 +1105,7 @@ export default function Expenses() {
         .select('category_name')
         .eq('mode', categoryMode)
         .eq('is_active', true)
-        .eq('owner_id', user.id)
+        .eq('owner_id', ownerId!)
         .order('sort_order');
       const allowedCategories = (catData || []).map(c => c.category_name);
       const allowedSet = new Set(allowedCategories.map(c => c.toLowerCase()));
@@ -1229,7 +1229,7 @@ export default function Expenses() {
           const { data: existing } = await supabase
             .from('transactions_uploaded')
             .select('id, date, description_normalized, amount, duplicate_fingerprint')
-            .eq('mode', categoryMode).eq('owner_id', user.id)
+            .eq('mode', categoryMode).eq('owner_id', ownerId!)
             .gte('date', fromDate).lte('date', toDate)
             .range(from, from + pageSize - 1);
           if (existing) ingestExisting(existing as any);
@@ -1242,7 +1242,7 @@ export default function Expenses() {
         const { data: nullDateRows } = await supabase
           .from('transactions_uploaded')
           .select('id, date, description_normalized, amount, duplicate_fingerprint')
-          .eq('mode', categoryMode).eq('owner_id', user.id)
+          .eq('mode', categoryMode).eq('owner_id', ownerId!)
           .is('date', null)
           .limit(1000);
         if (nullDateRows) ingestExisting(nullDateRows as any);
@@ -1324,7 +1324,7 @@ export default function Expenses() {
               .from('transactions_uploaded')
               .select('description_normalized, amount, date')
               .eq('mode', categoryMode)
-              .eq('owner_id', user.id)
+              .eq('owner_id', ownerId!)
               .gte('date', since)
               .not('amount', 'is', null)
               .range(from, from + pageSize - 1);
@@ -1617,8 +1617,8 @@ export default function Expenses() {
             <span className="text-xs font-medium text-primary px-3 py-1.5">Business Expenses</span>
           )}
 
-          {/* Upload — hidden for investors */}
-          {!isInvestor && (
+          {/* Upload — hidden for investors/accountants */}
+          {!isInvestor && !isAccountant && (
             <Sheet open={uploadOpen} onOpenChange={setUploadOpen}>
               <SheetTrigger asChild>
                 <Button size="sm" className="h-8 gap-1.5 text-xs">
@@ -1780,7 +1780,7 @@ export default function Expenses() {
           )}
 
 
-          {!isInvestor && selectedIds.size === 0 && user && (
+          {!isInvestor && !isAccountant && selectedIds.size === 0 && user && (
             <Button
               size="sm"
               variant="outline"
@@ -1814,7 +1814,7 @@ export default function Expenses() {
             </Button>
           )}
 
-          {!isInvestor && selectedIds.size === 0 && user && (
+          {!isInvestor && !isAccountant && selectedIds.size === 0 && user && (
             <Button
               size="sm"
               variant="outline"
@@ -1840,7 +1840,7 @@ export default function Expenses() {
             </Button>
           )}
 
-          {!isInvestor && selectedIds.size === 0 && (() => {
+          {!isInvestor && !isAccountant && selectedIds.size === 0 && (() => {
             const suggestedCount = filtered.filter(t => ['suggested', 'ai_suggested', 'auto_categorized'].includes(t.review_status) && !t.is_split_parent && (t.final_category || t.predicted_category)).length;
             return suggestedCount > 0 ? (
               <Button size="sm" variant="outline" className="h-8 gap-1 text-xs border-success/30 text-success hover:bg-success/10" onClick={async () => {
@@ -1854,7 +1854,7 @@ export default function Expenses() {
           })()}
 
           {/* Bulk Actions — owner only */}
-          {!isInvestor && selectedIds.size > 0 && (
+          {!isInvestor && !isAccountant && selectedIds.size > 0 && (
             <>
               <Button size="sm" onClick={bulkApprove} className="h-8 gap-1 text-xs">
                 <CheckCheck className="h-3 w-3" /> Approve {selectedIds.size}
@@ -2004,7 +2004,7 @@ export default function Expenses() {
             <table className="w-full text-xs">
               <thead className="sticky top-0 z-10 bg-card/90 backdrop-blur-sm">
                 <tr className="border-b border-border/40">
-                  {!isInvestor && (
+                  {!isInvestor && !isAccountant && (
                     <th className="px-2 py-2 text-left w-8 sticky left-0 bg-card/90 z-20">
                       <input type="checkbox" checked={selectedIds.size === filtered.length && filtered.length > 0} onChange={selectAll} className="rounded border-border" />
                     </th>
@@ -2037,7 +2037,7 @@ export default function Expenses() {
                       style={{ height: '32px' }}
                       onClick={() => !isInvestor && setDetailTx(tx)}
                     >
-                      {!isInvestor && (
+                      {!isInvestor && !isAccountant && (
                         <td className="px-2 py-1 sticky left-0 bg-card/60" onClick={e => e.stopPropagation()}>
                           <input type="checkbox" checked={selectedIds.has(tx.id)} onChange={() => toggleSelect(tx.id)} className="rounded border-border" />
                         </td>
@@ -2185,7 +2185,7 @@ export default function Expenses() {
                           )}
                         </div>
                       </td>
-                      {!isInvestor && (
+                      {!isInvestor && !isAccountant && (
                         <td className="px-2 py-1 text-right whitespace-nowrap" onClick={e => e.stopPropagation()}>
                           <div className="flex items-center gap-0.5 justify-end">
                             <Button size="sm" variant="ghost" className="h-5 w-5 p-0" onClick={() => setDetailTx(tx)} title="Edit">

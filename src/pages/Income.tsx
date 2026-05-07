@@ -59,7 +59,7 @@ const INCOME_TYPE_BADGE: Record<string, { class: string }> = {
 };
 
 export default function Income() {
-  const { user, isInvestor } = useAuth();
+  const { user, isInvestor, isAccountant, ownerId } = useAuth();
   const [transactions, setTransactions] = useState<IncomeTransaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -95,7 +95,7 @@ export default function Income() {
       const { data, error } = await supabase
         .from('income_transactions')
         .select('*')
-        .eq('owner_id', user.id)
+        .eq('owner_id', ownerId!)
         .order('date', { ascending: false })
         .range(from, from + pageSize - 1);
       if (error) { toast.error('Failed to load income'); console.error(error); break; }
@@ -271,7 +271,7 @@ export default function Income() {
       const { data: existingTxs } = await supabase
         .from('income_transactions')
         .select('date, amount, description_normalized')
-        .eq('owner_id', user.id);
+        .eq('owner_id', ownerId!);
       for (const ex of (existingTxs || [])) {
         const fp = `income|${ex.date || ''}|${ex.amount || 0}|${(ex.description_normalized || '').toLowerCase()}`;
         existingFingerprints.add(fp);

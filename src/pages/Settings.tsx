@@ -110,7 +110,7 @@ const emptyRule = {
 };
 
 export default function SettingsPage() {
-  const { user } = useAuth();
+  const { user, ownerId, isAccountant } = useAuth();
   const [personalCats, setPersonalCats] = useState<CategoryOption[]>([]);
   const [businessCats, setBusinessCats] = useState<CategoryOption[]>([]);
   const [newCatPersonal, setNewCatPersonal] = useState('');
@@ -147,14 +147,14 @@ export default function SettingsPage() {
   }, [user]);
 
   const loadCategories = async () => {
-    const { data } = await supabase.from('category_options').select('*').eq('owner_id', user!.id).order('sort_order');
+    const { data } = await supabase.from('category_options').select('*').eq('owner_id', ownerId!).order('sort_order');
     const cats = (data || []) as CategoryOption[];
     setPersonalCats(cats.filter(c => c.mode === 'personal'));
     setBusinessCats(cats.filter(c => c.mode === 'business'));
   };
 
   const loadSettings = async () => {
-    const { data } = await supabase.from('app_settings').select('*').eq('owner_id', user!.id).maybeSingle();
+    const { data } = await supabase.from('app_settings').select('*').eq('owner_id', ownerId!).maybeSingle();
     if (data) {
       setSettings({
         personal_auto_threshold: data.personal_auto_threshold,
@@ -170,7 +170,7 @@ export default function SettingsPage() {
   };
 
   const loadRules = async () => {
-    const { data } = await supabase.from('categorization_rules').select('*').eq('owner_id', user!.id).order('priority', { ascending: true });
+    const { data } = await supabase.from('categorization_rules').select('*').eq('owner_id', ownerId!).order('priority', { ascending: true });
     setRules((data || []) as Rule[]);
   };
 
@@ -194,7 +194,7 @@ export default function SettingsPage() {
   };
 
   const saveSettings = async () => {
-    const { data: existing } = await supabase.from('app_settings').select('id').eq('owner_id', user!.id).maybeSingle();
+    const { data: existing } = await supabase.from('app_settings').select('id').eq('owner_id', ownerId!).maybeSingle();
     const payload = { ...settings };
     if (existing) await supabase.from('app_settings').update(payload).eq('id', existing.id);
     else await supabase.from('app_settings').insert({ ...payload, owner_id: user!.id });
@@ -270,9 +270,9 @@ export default function SettingsPage() {
 
   const clearSeededData = async (mode: 'personal' | 'business') => {
     try {
-      await supabase.from('merchant_memory').delete().eq('owner_id', user!.id).eq('mode', mode);
-      await supabase.from('category_options').delete().eq('owner_id', user!.id).eq('mode', mode);
-      await supabase.from('categorization_rules').delete().eq('owner_id', user!.id).eq('mode', mode).eq('priority', 200);
+      await supabase.from('merchant_memory').delete().eq('owner_id', ownerId!).eq('mode', mode);
+      await supabase.from('category_options').delete().eq('owner_id', ownerId!).eq('mode', mode);
+      await supabase.from('categorization_rules').delete().eq('owner_id', ownerId!).eq('mode', mode).eq('priority', 200);
       await loadCategories();
       await loadRules();
       toast.success(`Cleared all ${mode} merchant memory, categories, and auto-generated rules`);
@@ -289,7 +289,7 @@ export default function SettingsPage() {
       const { data: merchants } = await supabase
         .from('merchant_memory')
         .select('merchant_key, most_common_category, most_common_method')
-        .eq('owner_id', user!.id)
+        .eq('owner_id', ownerId!)
         .eq('mode', mode);
       if (!merchants || merchants.length === 0) {
         toast.error(`No ${mode} merchant memory found. Seed historical data first.`);

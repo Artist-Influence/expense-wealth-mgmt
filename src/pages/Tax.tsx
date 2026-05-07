@@ -66,7 +66,7 @@ const FILING_STATUSES = [
 const fmt = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n);
 
 export default function Tax() {
-  const { user } = useAuth();
+  const { user, ownerId, isAccountant } = useAuth();
   // toast imported from sonner at top
   const [profile, setProfile] = useState<TaxProfile | null>(null);
   const [loading, setLoading] = useState(true);
@@ -140,7 +140,7 @@ export default function Tax() {
         const { data } = await supabase
           .from('transactions_uploaded')
           .select('amount, final_category, predicted_category, counts_as_tax_deduction, review_status')
-          .eq('owner_id', user!.id)
+          .eq('owner_id', ownerId!)
           .eq('transaction_mode', m)
           .eq('is_split_parent', false)
           .in('review_status', reportingStatuses)
@@ -154,8 +154,8 @@ export default function Tax() {
       return all;
     };
     const [incPersonal, incBusiness, txPersonal, txBusiness] = await Promise.all([
-      supabase.from('income_transactions').select('amount, taxable_status').eq('owner_id', user!.id).eq('mode', 'personal').gte('date', yearStart).lte('date', yearEnd).then(r => r.data),
-      supabase.from('income_transactions').select('amount, taxable_status').eq('owner_id', user!.id).eq('mode', 'business').gte('date', yearStart).lte('date', yearEnd).then(r => r.data),
+      supabase.from('income_transactions').select('amount, taxable_status').eq('owner_id', ownerId!).eq('mode', 'personal').gte('date', yearStart).lte('date', yearEnd).then(r => r.data),
+      supabase.from('income_transactions').select('amount, taxable_status').eq('owner_id', ownerId!).eq('mode', 'business').gte('date', yearStart).lte('date', yearEnd).then(r => r.data),
       fetchAll('personal'),
       fetchAll('business'),
     ]);
@@ -186,7 +186,7 @@ export default function Tax() {
     const { data } = await supabase
       .from('tax_profiles' as any)
       .select('*')
-      .eq('owner_id', user!.id)
+      .eq('owner_id', ownerId!)
       .maybeSingle();
     if (data) {
       setProfile(data as any);
@@ -198,7 +198,7 @@ export default function Tax() {
     let q = supabase
       .from('income_transactions')
       .select('income_type, taxable_status, amount')
-      .eq('owner_id', user!.id)
+      .eq('owner_id', ownerId!)
       .gte('date', yearStart)
       .lte('date', yearEnd);
     if (scope !== 'all') q = q.eq('mode', scope);
@@ -219,7 +219,7 @@ export default function Tax() {
       let q = supabase
         .from('transactions_uploaded')
         .select('final_category, predicted_category, amount, review_status, transaction_mode, counts_as_tax_deduction')
-        .eq('owner_id', user!.id)
+        .eq('owner_id', ownerId!)
         .eq('is_split_parent', false)
         .in('review_status', reportingStatuses)
         .gte('date', yearStart)
@@ -244,7 +244,7 @@ export default function Tax() {
     let cq = supabase
       .from('transactions_uploaded')
       .select('amount', { count: 'exact' })
-      .eq('owner_id', user!.id)
+      .eq('owner_id', ownerId!)
       .eq('is_split_parent', false)
       .eq('is_transfer', false)
       .eq('review_status', 'needs_review')
@@ -268,7 +268,7 @@ export default function Tax() {
     const { data } = await supabase
       .from('transactions_uploaded')
       .select('date, description_normalized, amount, treatment_type')
-      .eq('owner_id', user!.id)
+      .eq('owner_id', ownerId!)
       .in('treatment_type', ['tax_payment', 'estimated_tax_payment'])
       .gte('date', yearStart)
       .lte('date', yearEnd)
