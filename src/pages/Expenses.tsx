@@ -1596,47 +1596,54 @@ export default function Expenses() {
       <div className="container py-4 animate-fade-in">
         {/* Top Control Bar */}
         <div className="glass-panel p-3 mb-3 flex flex-wrap items-center gap-2 sticky top-14 z-40">
-          {/* 3-Way Mode Toggle */}
-          <div className="flex rounded-lg border border-border/40 overflow-hidden">
-            {(Object.entries(MODE_CONFIG) as [TransactionMode, typeof MODE_CONFIG[TransactionMode]][]).map(([key, cfg]) => (
-              <button
-                key={key}
-                onClick={() => setMode(key)}
-                className={`px-3 py-1.5 text-xs font-medium transition-colors border-r border-border/20 last:border-r-0 ${
-                  mode === key ? cfg.activeClass : 'text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                {cfg.label}
-              </button>
-            ))}
-          </div>
+          {/* 3-Way Mode Toggle — hidden for investors */}
+          {!isInvestor && (
+            <div className="flex rounded-lg border border-border/40 overflow-hidden">
+              {(Object.entries(MODE_CONFIG) as [TransactionMode, typeof MODE_CONFIG[TransactionMode]][]).map(([key, cfg]) => (
+                <button
+                  key={key}
+                  onClick={() => setMode(key)}
+                  className={`px-3 py-1.5 text-xs font-medium transition-colors border-r border-border/20 last:border-r-0 ${
+                    mode === key ? cfg.activeClass : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  {cfg.label}
+                </button>
+              ))}
+            </div>
+          )}
+          {isInvestor && (
+            <span className="text-xs font-medium text-primary px-3 py-1.5">Business Expenses</span>
+          )}
 
-          {/* Upload */}
-          <Sheet open={uploadOpen} onOpenChange={setUploadOpen}>
-            <SheetTrigger asChild>
-              <Button size="sm" className="h-8 gap-1.5 text-xs">
-                <Upload className="h-3.5 w-3.5" /> Upload CSV
-              </Button>
-            </SheetTrigger>
-            <SheetContent side="right" className="w-full sm:max-w-md bg-background border-border">
-              <SheetHeader>
-                <SheetTitle className="text-foreground">Upload Expenses</SheetTitle>
-              </SheetHeader>
-              <div className="mt-4 space-y-4">
-                <CsvUploader onFilesSelect={handleFilesSelect} disabled={isProcessing} />
-                {totalFiles > 0 && (
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between text-xs text-muted-foreground">
-                      <span>{completedFiles} / {totalFiles} files</span>
-                      <span>{overallProgress}%</span>
+          {/* Upload — hidden for investors */}
+          {!isInvestor && (
+            <Sheet open={uploadOpen} onOpenChange={setUploadOpen}>
+              <SheetTrigger asChild>
+                <Button size="sm" className="h-8 gap-1.5 text-xs">
+                  <Upload className="h-3.5 w-3.5" /> Upload CSV
+                </Button>
+              </SheetTrigger>
+              <SheetContent side="right" className="w-full sm:max-w-md bg-background border-border">
+                <SheetHeader>
+                  <SheetTitle className="text-foreground">Upload Expenses</SheetTitle>
+                </SheetHeader>
+                <div className="mt-4 space-y-4">
+                  <CsvUploader onFilesSelect={handleFilesSelect} disabled={isProcessing} />
+                  {totalFiles > 0 && (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between text-xs text-muted-foreground">
+                        <span>{completedFiles} / {totalFiles} files</span>
+                        <span>{overallProgress}%</span>
+                      </div>
+                      <Progress value={overallProgress} className="h-1.5" />
                     </div>
-                    <Progress value={overallProgress} className="h-1.5" />
-                  </div>
-                )}
-                <FileProgressList items={fileQueue} mode={categoryMode} />
-              </div>
-            </SheetContent>
-          </Sheet>
+                  )}
+                  <FileProgressList items={fileQueue} mode={categoryMode} />
+                </div>
+              </SheetContent>
+            </Sheet>
+          )}
 
           {/* Search */}
           <div className="relative flex-1 min-w-[160px]">
