@@ -211,11 +211,12 @@ export default function Expenses() {
     let all: AllModeRow[] = [];
     let hasMore = true;
     while (hasMore) {
-      const { data } = await supabase
+      let q = supabase
         .from('transactions_uploaded')
         .select('amount, transaction_mode, mode, is_split_parent, is_transfer, exclude_from_expense_totals, is_non_expense_cash_movement, parse_status, counts_toward_true_personal_spend, counts_toward_true_business_spend, is_reimbursable, reimbursement_status, date')
-        .eq('owner_id', user.id)
-        .range(from, from + pageSize - 1);
+        .eq('owner_id', user.id);
+      if (isInvestor) q = q.eq('mode', 'business');
+      const { data } = await q.range(from, from + pageSize - 1);
       if (data) all = [...all, ...(data as unknown as AllModeRow[])];
       hasMore = (data?.length ?? 0) === pageSize;
       from += pageSize;
