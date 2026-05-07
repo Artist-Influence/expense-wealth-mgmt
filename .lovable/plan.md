@@ -1,23 +1,30 @@
-
 ## Problem
 
-The new volatility-based bands are producing extreme projections because raw annualized σ values (55% for crypto, 20% for collectibles) applied as rate offsets create unrealistic high/low scenarios over 40 years. Even with the cap (`rate × 1.25 + 2`), the numbers compound to billions.
+The nav badge correctly shows 663 issues (from the persisted `totalIssues` in `app_settings`). But when the Health Check dialog opens, it displays all zeros because the persisted summary only stores `totalIssues` and a `breakdown` object — while the reconstructed `HealthCheckSummary` in AppNav (lines 62-70) **hardcodes all detail fields to zero**:
 
-The core issue: **volatility should scale down for longer horizons**. A 1-year 55% σ does not mean ±55% every year for 40 years — returns mean-revert. This is a well-known problem in long-horizon projections.
+```
+staleReviews: { count: 0, oldestDate: null }
+needsReview: { incomeCount: 0, expenseCount: 0 }
+parseErrors: { count: 0 }
+```
+
+So the dialog shows "No stale items", "0 expenses · 0 income", etc. despite 611 stale + 52 near-duplicates.
 
 ## Fix
 
-1. **Apply a horizon-dampening factor** to the volatility offset. The standard approach: divide σ by `√(horizon_years)` for the band width, or more practically, cap the band offset to a reasonable multiple of the base rate:
-   - High band: `base_rate + min(vol_offset, base_rate × 0.5)` — at most 50% wider than expected
-   - Low band: `base_rate - min(vol_offset, base_rate × 0.6)` — at most 60% narrower, floored at 0%
+**Reconstruct the detail fields from the persisted `breakdown`** when loading from `app_settings` in AppNav:
 
-2. **Use a tighter σ fraction** for the offset. Instead of `1σ` (which covers 68%), use `0.5σ` — this produces a more useful "plausible range" rather than "anything could happen" range. Combined with the horizon dampener, this keeps the bands meaningful but not absurd.
+1. **AppNav.tsx (lines 62-70)**: Map `breakdown.stale` → `staleReviews.count`, `breakdown.parseErrors` → `parseErrors.count`, `breakdown.expenseNear` → use for near cluster count display, etc. Also compute `needsReview` counts from the breakdown or re-query them.
 
-3. **Tighten the high-band cap formula** to `min(adjustedRate, base_rate + 4)` — no account should project more than 4 percentage points above its expected rate for the optimistic scenario. Over 40 years, even +4pp is a massive difference.
+2. **health-check.ts**: Expand the persisted `breakdown` to also include `needsReviewExpenses` and `needsReviewIncome` so the dialog can show those without re-running.
 
-### Result
-- Collectr (10% base): band of ~6%–14% instead of -10%–14.5%
-- Gemini (15% base): band of ~9%–19% instead of -40%–20.75%
-- S&P 500 (12% base): band of ~8%–16% instead of -4%–17%
+3. **HealthCheckPanel**: The dialog already auto-runs when opened with no summary — but `initialSummary` is set (with zeros), so it skips the auto-run. Fix: if the summary came from persistence (no clusters loaded), auto-run on open to get fresh data.
 
-This keeps the bands proportional to actual volatility (crypto wider than equities wider than savings) without producing billions-scale artifacts.
+**Recommended approach**: Option 3 is simplest and most accurate — always re-run the health check when the dialog opens, regardless of whether a persisted summary exists. This ensures the dialog always shows fresh data. The persisted summary is only used for the nav badge between dialog opens.
+
+## Changes
+
+- **`src/components/AppNav.tsx`**: When setting `healthSummary` from persistence, mark it as `persisted: true` (or simply don't set cluster data). Then in the dialog open handler, always trigger a refresh.
+- **`src/components/HealthCheckPanel.tsx`**: Change the auto-run condition from `!summary` to always run on open (or run when summary has no cluster data).
+
+This is a 2-file, ~10-line change.
