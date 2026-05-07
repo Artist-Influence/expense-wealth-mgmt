@@ -80,7 +80,7 @@ const DEFAULT_AUTO_ACCOUNTS: Array<{
 }> = [
   { name: 'Gemini',      account_type: 'crypto',       platform: 'Gemini',      pattern: 'gemini' },
   { name: 'Dub',         account_type: 'brokerage',    platform: 'Dub',         pattern: 'dub ecfi' },
-  { name: 'Wealthfront', account_type: 'brokerage',    platform: 'Wealthfront', pattern: 'wealthfront' },
+  { name: 'S&P 500',     account_type: 'brokerage',    platform: 'Wealthfront', pattern: 'wealthfront' },
   { name: 'Pokémon',     account_type: 'collectibles', platform: 'TCGPlayer / Zelle', pattern: 'tcgplayer|pokemon' },
 ];
 
