@@ -79,10 +79,38 @@ const DEFAULT_AUTO_ACCOUNTS: Array<{
   name: string; account_type: string; platform: string; pattern: string;
 }> = [
   { name: 'Gemini',      account_type: 'crypto',       platform: 'Gemini',      pattern: 'gemini' },
-  { name: 'Dub',         account_type: 'brokerage',    platform: 'Dub',         pattern: 'dub (ecfi)' },
+  { name: 'Dub',         account_type: 'brokerage',    platform: 'Dub',         pattern: 'dub ecfi' },
   { name: 'Wealthfront', account_type: 'brokerage',    platform: 'Wealthfront', pattern: 'wealthfront' },
   { name: 'Pokémon',     account_type: 'collectibles', platform: 'TCGPlayer / Zelle', pattern: 'tcgplayer|pokemon' },
 ];
+
+/**
+ * Converts a pattern token (e.g. "dub ecfi") into a PostgREST-safe ILIKE value.
+ * Multi-word tokens become `%word1%word2%` so "DUB (ECFI)" matches.
+ * Single-word tokens become `%word%`.
+ */
+function patternToIlike(token: string): string {
+  const words = token
+    .replace(/[%,().]/g, ' ')
+    .split(/\s+/)
+    .map(w => w.trim())
+    .filter(Boolean);
+  if (words.length === 0) return '';
+  return `%${words.join('%')}%`;
+}
+
+/** Build PostgREST .or() parts for a pipe-separated auto_track_pattern. */
+function buildOrFilter(pattern: string): string[] {
+  const tokens = pattern.split('|').map(t => t.trim()).filter(Boolean);
+  const orParts: string[] = [];
+  for (const t of tokens) {
+    const ilike = patternToIlike(t);
+    if (!ilike) continue;
+    orParts.push(`description_normalized.ilike.${ilike}`);
+    orParts.push(`description_raw.ilike.${ilike}`);
+  }
+  return orParts;
+}
 
 // ---------------------------------------------------------------
 // Inline editor popover for an account's monthly balance snapshots.
@@ -287,7 +315,9 @@ function BulkBalanceUpdateDialog({
               <thead>
                 <tr className="bg-secondary/30 border-b border-border/40">
                   <th className="text-left px-3 py-1.5 font-medium text-muted-foreground">Account</th>
-                  <th className="text-right px-3 py-1.5 font-medium text-muted-foreground w-28">Last Known</th>
+                  <th className="text-right px-3 py-1.5 font-medium text-muted-foreground w-28">
+                    {new Date(`${month}-01`).toLocaleString('en-US', { month: 'short', year: 'numeric' })}
+                  </th>
                   <th className="text-right px-3 py-1.5 font-medium text-muted-foreground w-32">New Balance</th>
                 </tr>
               </thead>
@@ -383,24 +413,48 @@ export default function Wealth() {
     queryFn: async () => {
       const yearStart = `${currentYear}-01-01`;
       const yearEnd = `${currentYear}-12-31`;
+
+      // Auto-seed missing default accounts so Wealthfront etc. appear automatically.
+      const existingNames = new Set(accounts.map(a => a.account_name.toLowerCase()));
+      const seeds: any[] = [];
+      for (const def of DEFAULT_AUTO_ACCOUNTS) {
+        if (!existingNames.has(def.name.toLowerCase())) {
+          seeds.push({
+            owner_id: user!.id,
+            account_name: def.name,
+            account_type: def.account_type,
+            platform: def.platform,
+            auto_track_pattern: def.pattern,
+            mode: 'personal',
+            current_balance: 0,
+            contributions_ytd: 0,
+            starting_balance_year: 0,
+          });
+        }
+      }
+      if (seeds.length > 0) {
+        await supabase.from('investment_accounts').insert(seeds);
+        qc.invalidateQueries({ queryKey: ['investment_accounts'] });
+      }
+
+      // Re-fetch all accounts (including newly seeded ones)
+      const { data: allAccounts } = await supabase
+        .from('investment_accounts')
+        .select('*')
+        .eq('owner_id', user!.id);
+      const accs = (allAccounts || []) as Account[];
+
       const map = new Map<string, number>();
-      for (const acc of accounts) {
+      for (const acc of accs) {
         const pattern = acc.auto_track_pattern?.trim();
         if (!pattern) {
-          // Fall back to stored value (manual entry)
           map.set(acc.id, Number(acc.contributions_ytd) || 0);
           continue;
         }
-        const tokens = pattern.split('|').map(t => t.trim()).filter(Boolean);
-        if (tokens.length === 0) {
+        const orParts = buildOrFilter(pattern);
+        if (orParts.length === 0) {
           map.set(acc.id, Number(acc.contributions_ytd) || 0);
           continue;
-        }
-        const orParts: string[] = [];
-        for (const t of tokens) {
-          const safe = t.replace(/[%,().]/g, ' ').trim();
-          orParts.push(`description_normalized.ilike.%${safe}%`);
-          orParts.push(`description_raw.ilike.%${safe}%`);
         }
         const { data: matches } = await supabase
           .from('transactions_uploaded')
@@ -592,16 +646,8 @@ export default function Wealth() {
       for (const acc of all) {
         const pattern = acc.auto_track_pattern?.trim();
         if (!pattern) continue;
-        const tokens = pattern.split('|').map(t => t.trim()).filter(Boolean);
-        if (tokens.length === 0) continue;
-
-        // Build OR filter for description_normalized + description_raw across all tokens.
-        const orParts: string[] = [];
-        for (const t of tokens) {
-          const safe = t.replace(/[%,().]/g, ' ').trim();
-          orParts.push(`description_normalized.ilike.%${safe}%`);
-          orParts.push(`description_raw.ilike.%${safe}%`);
-        }
+        const orParts = buildOrFilter(pattern);
+        if (orParts.length === 0) continue;
 
         const { data: matches } = await supabase
           .from('transactions_uploaded')
