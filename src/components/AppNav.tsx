@@ -45,7 +45,7 @@ export function AppNav() {
         .in('review_status', ['needs_review', 'suggested', 'ai_suggested']);
       return count || 0;
     },
-    enabled: !!user,
+    enabled: !!user && !!ownerId,
     refetchInterval: 30000,
   });
 
