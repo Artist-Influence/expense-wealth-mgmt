@@ -166,8 +166,8 @@ const fmtUsd = (n: number) => {
 };
 
 // Cap unrealistically high auto-seeded rates for long-horizon projections.
-// Live 10y CAGR for crypto can be 60%+ — extrapolating that for 40 years is
-// nonsensical. User can still manually override to anything.
+// Even static/collectible accounts get capped — a "realized +1000%" from a
+// short snapshot window shouldn't drive the projection.
 function clampSeededRate(acc: ProjAccount, rawRate: number): { rate: number; capped: boolean } {
   const basket = resolveBasket(acc);
   const name = (acc.account_name + ' ' + (acc.platform || '')).toLowerCase();
@@ -175,7 +175,10 @@ function clampSeededRate(acc: ProjAccount, rawRate: number): { rate: number; cap
   if (acc.account_type === 'crypto' || name.includes('gemini') || basket.label.toLowerCase().includes('mix')) {
     cap = 15;
   }
-  if (basket.source === 'static') return { rate: rawRate, capped: false };
+  if (basket.source === 'static') {
+    // Static assets: cap at their default static rate + a small margin
+    cap = (basket.static_rate ?? 10) + 3;
+  }
   if (rawRate > cap) return { rate: cap, capped: true };
   return { rate: rawRate, capped: false };
 }
