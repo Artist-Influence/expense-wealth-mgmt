@@ -2058,8 +2058,8 @@ export default function Expenses() {
                               🔁
                             </span>
                           )}
-                          {tx.is_split_parent ? (
-                            <span className="text-foreground px-1" title="Split parent — edit child rows instead">
+                          {tx.is_split_parent || isInvestor ? (
+                            <span className="text-foreground px-1" title={tx.is_split_parent ? "Split parent — edit child rows instead" : undefined}>
                               {tx.final_category || tx.predicted_category || '—'}
                             </span>
                           ) : (
