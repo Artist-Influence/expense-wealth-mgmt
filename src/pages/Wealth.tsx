@@ -200,13 +200,11 @@ function BulkBalanceUpdateDialog({
   const fmt = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 });
 
   const getLastBalance = (accountId: string): number => {
-    const accSnaps = snapshots
-      .filter(s => s.account_id === accountId)
-      .sort((a, b) => b.as_of_date.localeCompare(a.as_of_date));
     const monthDate = `${month}-01`;
-    const exact = accSnaps.find(s => s.as_of_date === monthDate);
+    // If the selected month already has a snapshot, show that
+    const exact = snapshots.find(s => s.account_id === accountId && s.as_of_date === monthDate);
     if (exact) return exact.balance;
-    if (accSnaps.length > 0) return accSnaps[0].balance;
+    // Otherwise use current_balance (matches what the card shows)
     const acc = accounts.find(a => a.id === accountId);
     return acc ? Number(acc.current_balance) : 0;
   };
