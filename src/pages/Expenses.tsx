@@ -2184,21 +2184,23 @@ export default function Expenses() {
                           )}
                         </div>
                       </td>
-                      <td className="px-2 py-1 text-right whitespace-nowrap" onClick={e => e.stopPropagation()}>
-                        <div className="flex items-center gap-0.5 justify-end">
-                          <Button size="sm" variant="ghost" className="h-5 w-5 p-0" onClick={() => setDetailTx(tx)} title="Edit">
-                            <Edit3 className="h-3 w-3 text-muted-foreground" />
-                          </Button>
-                          <Button size="sm" variant="ghost" className="h-5 w-5 p-0" onClick={() => toggleTransfer(tx)} title={tx.is_transfer ? 'Restore' : 'Transfer'}>
-                            <ArrowLeftRight className={`h-3 w-3 ${tx.is_transfer ? 'text-primary' : 'text-muted-foreground'}`} />
-                          </Button>
-                          {!['approved', 'edited'].includes(tx.review_status) && (
-                            <Button size="sm" variant="ghost" className="h-5 w-5 p-0" onClick={() => approveRow(tx)} title="Approve">
-                              <Check className="h-3 w-3 text-success" />
+                      {!isInvestor && (
+                        <td className="px-2 py-1 text-right whitespace-nowrap" onClick={e => e.stopPropagation()}>
+                          <div className="flex items-center gap-0.5 justify-end">
+                            <Button size="sm" variant="ghost" className="h-5 w-5 p-0" onClick={() => setDetailTx(tx)} title="Edit">
+                              <Edit3 className="h-3 w-3 text-muted-foreground" />
                             </Button>
-                          )}
-                        </div>
-                      </td>
+                            <Button size="sm" variant="ghost" className="h-5 w-5 p-0" onClick={() => toggleTransfer(tx)} title={tx.is_transfer ? 'Restore' : 'Transfer'}>
+                              <ArrowLeftRight className={`h-3 w-3 ${tx.is_transfer ? 'text-primary' : 'text-muted-foreground'}`} />
+                            </Button>
+                            {!['approved', 'edited'].includes(tx.review_status) && (
+                              <Button size="sm" variant="ghost" className="h-5 w-5 p-0" onClick={() => approveRow(tx)} title="Approve">
+                                <Check className="h-3 w-3 text-success" />
+                              </Button>
+                            )}
+                          </div>
+                        </td>
+                      )}
                     </tr>
                   ))
                 )}
