@@ -54,6 +54,41 @@ type Assumption = {
 };
 type AssumptionMap = Record<string, Assumption>;
 
+// ---- Volatility from snapshot history ------------------------------------
+// Returns annualized standard deviation of monthly log-returns.
+function monthlyVolatility(snapshots: RateSnap[]): number | null {
+  if (snapshots.length < 3) return null;
+  const sorted = [...snapshots].sort((a, b) => a.as_of_date.localeCompare(b.as_of_date));
+  const logReturns: number[] = [];
+  for (let i = 1; i < sorted.length; i++) {
+    const prev = Number(sorted[i - 1].balance);
+    const cur = Number(sorted[i].balance);
+    if (prev > 0 && cur > 0) logReturns.push(Math.log(cur / prev));
+  }
+  if (logReturns.length < 2) return null;
+  const mean = logReturns.reduce((s, v) => s + v, 0) / logReturns.length;
+  const variance = logReturns.reduce((s, v) => s + (v - mean) ** 2, 0) / (logReturns.length - 1);
+  const monthlyStd = Math.sqrt(variance);
+  // Annualize: σ_annual ≈ σ_monthly × √12
+  return monthlyStd * Math.sqrt(12) * 100; // as percentage points
+}
+
+// Blend realized CAGR with benchmark CAGR based on snapshot window length.
+// More history → more weight on realized performance.
+function blendRate(
+  realized: { cagr_pct: number | null; window_years: number | null },
+  benchmarkRate: number | null,
+  defaultRate: number,
+): number {
+  if (realized.cagr_pct == null || realized.window_years == null || realized.window_years < 0.25) {
+    return benchmarkRate ?? defaultRate;
+  }
+  const anchor = benchmarkRate ?? defaultRate;
+  // Weight realized more as history grows: 0 at 0yr, 50% at 2yr, 75% at 5yr
+  const realizedWeight = Math.min(0.75, realized.window_years / 4);
+  return realized.cagr_pct * realizedWeight + anchor * (1 - realizedWeight);
+}
+
 // ---- Heuristic defaults --------------------------------------------------
 function defaultRateFor(acc: ProjAccount): number {
   // Prefer the static rate from the basket resolver when it's a no-live-feed asset.
@@ -224,11 +259,10 @@ export function WealthProjectionChart({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accounts, liveCagrFingerprint]);
 
-  // Seed the projection rate from live data when it arrives,
-  // unless the user has marked this account as manually overridden.
-  // Auto-seeded rates are clamped to a sane long-horizon ceiling
-  // (crypto 15%, equities 12%) so a 60%+ 10y CAGR doesn't compound the
-  // chart into the quadrillions over a 40-year horizon.
+  // Seed the projection rate from live data blended with realized returns.
+  // Unless the user has marked this account as manually overridden.
+  // Blending: weight realized CAGR more as snapshot history grows (up to 75%).
+  // Auto-seeded rates are clamped to a sane long-horizon ceiling.
   useEffect(() => {
     let changed = false;
     const next = { ...assumptions };
@@ -236,12 +270,21 @@ export function WealthProjectionChart({
     for (const a of accounts) {
       if (overrides.has(a.id)) continue;
       const live = liveRateByAccount[a.id];
-      if (live?.rate == null) continue;
       const cur = next[a.id];
       if (!cur) continue;
-      const rawLive = Number(live.rate.toFixed(2));
-      const { rate: clamped, capped } = clampSeededRate(a, rawLive);
-      if (capped) nextCapped[a.id] = rawLive;
+
+      // Compute realized CAGR for blending
+      const snapshots = snapshotsByAccount[a.id] || [];
+      const contribEstimate = a.contributions_ytd > 0
+        ? a.contributions_ytd
+        : a.contribution_target_monthly * Math.max(1, snapshots.length - 1);
+      const realized = realizedCagr(snapshots, contribEstimate);
+
+      const benchmarkRate = live?.rate != null ? Number(live.rate.toFixed(2)) : null;
+      const blended = blendRate(realized, benchmarkRate, defaultRateFor(a));
+      const rawRate = Number(blended.toFixed(2));
+      const { rate: clamped, capped } = clampSeededRate(a, rawRate);
+      if (capped) nextCapped[a.id] = rawRate;
       else delete nextCapped[a.id];
       if (Math.abs(cur.annual_rate_pct - clamped) > 0.01) {
         next[a.id] = { ...cur, annual_rate_pct: clamped };
@@ -254,7 +297,7 @@ export function WealthProjectionChart({
     }
     setCappedFrom(nextCapped);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [liveRateByAccount]);
+  }, [liveRateByAccount, snapshotsByAccount]);
 
   useEffect(() => {
     localStorage.setItem(AGE_KEY, String(age));
@@ -284,23 +327,48 @@ export function WealthProjectionChart({
   };
 
   // ---- Simulation -------------------------------------------------------
-  // Run monthly compounding for each account up to age 65. We also build a
-  // total trajectory plus a conservative (rate-3%) and optimistic (rate+3%)
-  // band on the total so the user sees a realistic range.
+  // Run monthly compounding for each account up to age 65.
+  // Variance bands use actual snapshot-derived volatility (annualized σ)
+  // instead of a fixed ±3% offset. For accounts without enough history,
+  // we fall back to asset-class defaults.
   const series = useMemo(() => {
     const yearsToProject = Math.max(1, TARGET_AGE - age);
     const months = yearsToProject * 12;
     const startYear = new Date().getFullYear();
 
-    // Per-account month-by-month balances at three rate scenarios.
-    // rateOffsetFn lets us asymmetrically cap the high band so already-aggressive
-    // rates (e.g. 15% crypto) don't run away to absurd values.
-    const sim = (rateOffsetFn: (baseRate: number) => number) => {
+    // Compute per-account annualized volatility from snapshots.
+    // Fallback defaults: crypto ~55%, equities ~16%, collectibles ~20%, savings ~1%.
+    const volByAccount: Record<string, number> = {};
+    for (const a of accounts) {
+      const measured = monthlyVolatility(snapshotsByAccount[a.id] || []);
+      if (measured != null && measured > 0) {
+        volByAccount[a.id] = measured;
+      } else {
+        const n = (a.account_name + ' ' + (a.platform || '')).toLowerCase();
+        if (a.account_type === 'crypto' || n.includes('gemini')) volByAccount[a.id] = 55;
+        else if (a.account_type === 'savings') volByAccount[a.id] = 1;
+        else if (a.account_type === 'collectibles' || n.includes('pokemon') || n.includes('pokémon')) volByAccount[a.id] = 20;
+        else volByAccount[a.id] = 16; // broad equities
+      }
+    }
+
+    // Simulate at a given confidence-sigma offset.
+    // offset = 0 → expected, offset = -1 → 16th percentile, offset = +1 → 84th percentile
+    const sim = (sigmaOffset: number) => {
       const balances: Record<string, number[]> = {};
       for (const a of accounts) {
         const ass = assumptions[a.id];
         if (!ass) continue;
-        const effectiveAnnual = rateOffsetFn(ass.annual_rate_pct);
+        const vol = volByAccount[a.id] || 16;
+        // Adjust the annual rate by sigma * offset, clamped so it doesn't go wildly negative
+        const adjustedAnnual = Math.max(
+          -10,
+          ass.annual_rate_pct + sigmaOffset * vol
+        );
+        // For the high band, cap at 1.25× to prevent absurd long-horizon numbers
+        const effectiveAnnual = sigmaOffset > 0
+          ? Math.min(adjustedAnnual, ass.annual_rate_pct * 1.25 + 2)
+          : adjustedAnnual;
         const monthlyRate = (effectiveAnnual / 100) / 12;
         const monthsContributing = Math.max(0, (ass.stop_age - age) * 12);
         let bal = Number(a.current_balance) || 0;
@@ -308,18 +376,16 @@ export function WealthProjectionChart({
         for (let m = 1; m <= months; m++) {
           bal = bal * (1 + monthlyRate);
           if (m <= monthsContributing) bal += ass.monthly_contribution;
-          arr.push(bal);
+          arr.push(Math.max(0, bal)); // floor at 0
         }
         balances[a.id] = arr;
       }
       return balances;
     };
 
-    const expected = sim((r) => r);
-    const low      = sim((r) => Math.max(0, r - 3));
-    // Cap the optimistic band so a 15% rate can't balloon to 18% (which over
-    // 40 years is the difference between $5M and $20M+).
-    const high     = sim((r) => Math.min(r + 3, r * 1.25));
+    const expected = sim(0);
+    const low      = sim(-1);  // ~16th percentile
+    const high     = sim(1);   // ~84th percentile
 
     // Sample at year boundaries for a clean axis.
     const rows: any[] = [];
@@ -351,7 +417,7 @@ export function WealthProjectionChart({
       rows.push(row);
     }
     return rows;
-  }, [accounts, assumptions, age, hidden]);
+  }, [accounts, assumptions, age, hidden, snapshotsByAccount]);
 
   const finalRow = series[series.length - 1];
   const finalTotal = finalRow?.total || 0;
@@ -386,14 +452,16 @@ export function WealthProjectionChart({
             <PopoverContent className="w-80 p-3 text-[11px] leading-relaxed" align="start">
               <div className="font-semibold text-foreground mb-1">Methodology</div>
               <p className="text-muted-foreground">
-                Each account compounds monthly at its assumed annual rate, with monthly contributions
-                added until the configured stop age. Defaults are historical-average heuristics
-                (S&P ~8%, crypto ~12%, collectibles ~7%) — edit any value in <span className="text-foreground">Settings</span>.
+                Each account compounds monthly at a <span className="text-foreground">blended rate</span> — your
+                realized returns (from snapshot history) weighted with the live benchmark CAGR.
+                The more history you have, the more your actual performance drives the projection
+                (up to 75% weight at 3+ years). Edit any value in <span className="text-foreground">Settings</span>.
               </p>
               <p className="text-muted-foreground mt-2">
-                The shaded band around <span className="text-foreground">Total</span> shows a ±3% rate range
-                (conservative vs optimistic). Crypto and collectibles carry wider real-world variance —
-                toggle them off to see the baseline trajectory.
+                The shaded band uses each account's <span className="text-foreground">actual volatility</span> (standard
+                deviation of monthly returns from your snapshots) instead of a flat ±3%. Crypto
+                accounts with wild swings get wider bands; steady accounts get narrow ones. Without
+                enough history, asset-class defaults are used (equities ~16%, crypto ~55%).
               </p>
             </PopoverContent>
           </Popover>
@@ -550,10 +618,13 @@ export function WealthProjectionChart({
                         <Lock className="h-2.5 w-2.5" />
                         manual · {ass.annual_rate_pct.toFixed(1)}%
                       </button>
-                    ) : liveRate != null ? (
+                    ) : liveRate != null || realized.cagr_pct != null ? (
                       <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-emerald-500/30 bg-emerald-500/5 text-emerald-500/90">
                         <Zap className="h-2.5 w-2.5" />
-                        auto · {ass.annual_rate_pct.toFixed(1)}% ({live.label} 10y)
+                        {realized.cagr_pct != null && realized.window_years != null && realized.window_years >= 0.25
+                          ? `blended · ${ass.annual_rate_pct.toFixed(1)}% (${Math.round(Math.min(75, realized.window_years / 4 * 100))}% realized)`
+                          : `auto · ${ass.annual_rate_pct.toFixed(1)}% (${live?.label} 10y)`
+                        }
                         {cappedFrom[a.id] != null && (
                           <span
                             className="ml-1 text-amber-500/90"
