@@ -353,22 +353,33 @@ export function WealthProjectionChart({
     }
 
     // Simulate at a given confidence-sigma offset.
-    // offset = 0 → expected, offset = -1 → 16th percentile, offset = +1 → 84th percentile
+    // offset = 0 → expected, offset = -0.5/+0.5 → "plausible range"
+    // Volatility is dampened for long horizons and hard-capped so 40-year
+    // projections stay sane (max ±4pp from the base rate).
     const sim = (sigmaOffset: number) => {
       const balances: Record<string, number[]> = {};
       for (const a of accounts) {
         const ass = assumptions[a.id];
         if (!ass) continue;
         const vol = volByAccount[a.id] || 16;
-        // Adjust the annual rate by sigma * offset, clamped so it doesn't go wildly negative
-        const adjustedAnnual = Math.max(
-          -10,
-          ass.annual_rate_pct + sigmaOffset * vol
-        );
-        // For the high band, cap at 1.25× to prevent absurd long-horizon numbers
-        const effectiveAnnual = sigmaOffset > 0
-          ? Math.min(adjustedAnnual, ass.annual_rate_pct * 1.25 + 2)
-          : adjustedAnnual;
+        const baseRate = ass.annual_rate_pct;
+
+        // Raw offset from volatility (using 0.5σ for a tighter "plausible" band)
+        const rawOffset = sigmaOffset * vol * 0.5;
+
+        // Clamp: high band at most +min(vol_offset, base×0.5, 4pp)
+        //        low band at most  -min(vol_offset, base×0.6, 4pp), floored at 0%
+        let effectiveAnnual: number;
+        if (sigmaOffset > 0) {
+          const cappedOffset = Math.min(Math.abs(rawOffset), baseRate * 0.5, 4);
+          effectiveAnnual = baseRate + cappedOffset;
+        } else if (sigmaOffset < 0) {
+          const cappedOffset = Math.min(Math.abs(rawOffset), baseRate * 0.6, 4);
+          effectiveAnnual = Math.max(0, baseRate - cappedOffset);
+        } else {
+          effectiveAnnual = baseRate;
+        }
+
         const monthlyRate = (effectiveAnnual / 100) / 12;
         const monthsContributing = Math.max(0, (ass.stop_age - age) * 12);
         let bal = Number(a.current_balance) || 0;
@@ -376,7 +387,7 @@ export function WealthProjectionChart({
         for (let m = 1; m <= months; m++) {
           bal = bal * (1 + monthlyRate);
           if (m <= monthsContributing) bal += ass.monthly_contribution;
-          arr.push(Math.max(0, bal)); // floor at 0
+          arr.push(Math.max(0, bal));
         }
         balances[a.id] = arr;
       }
@@ -384,8 +395,8 @@ export function WealthProjectionChart({
     };
 
     const expected = sim(0);
-    const low      = sim(-1);  // ~16th percentile
-    const high     = sim(1);   // ~84th percentile
+    const low      = sim(-1);  // dampened low
+    const high     = sim(1);   // dampened high
 
     // Sample at year boundaries for a clean axis.
     const rows: any[] = [];
