@@ -414,23 +414,29 @@ export default function Wealth() {
       const yearStart = `${currentYear}-01-01`;
       const yearEnd = `${currentYear}-12-31`;
 
-      // Auto-seed missing default accounts so Wealthfront etc. appear automatically.
+      // Auto-seed missing default accounts. Match by pattern overlap OR name to avoid duplicates.
+      const existingPatterns = accounts.map(a => (a.auto_track_pattern || '').toLowerCase()).filter(Boolean);
       const existingNames = new Set(accounts.map(a => a.account_name.toLowerCase()));
       const seeds: any[] = [];
       for (const def of DEFAULT_AUTO_ACCOUNTS) {
-        if (!existingNames.has(def.name.toLowerCase())) {
-          seeds.push({
-            owner_id: user!.id,
-            account_name: def.name,
-            account_type: def.account_type,
-            platform: def.platform,
-            auto_track_pattern: def.pattern,
-            mode: 'personal',
-            current_balance: 0,
-            contributions_ytd: 0,
-            starting_balance_year: 0,
-          });
-        }
+        if (existingNames.has(def.name.toLowerCase())) continue;
+        // Check if any existing account already tracks the same pattern tokens
+        const defTokens = def.pattern.split('|').map(t => t.trim().toLowerCase()).filter(Boolean);
+        const patternOverlap = existingPatterns.some(ep =>
+          defTokens.some(dt => ep.includes(dt) || dt.includes(ep.split('|')[0]))
+        );
+        if (patternOverlap) continue;
+        seeds.push({
+          owner_id: user!.id,
+          account_name: def.name,
+          account_type: def.account_type,
+          platform: def.platform,
+          auto_track_pattern: def.pattern,
+          mode: 'personal',
+          current_balance: 0,
+          contributions_ytd: 0,
+          starting_balance_year: 0,
+        });
       }
       if (seeds.length > 0) {
         await supabase.from('investment_accounts').insert(seeds);
