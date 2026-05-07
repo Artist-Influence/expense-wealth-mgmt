@@ -1902,7 +1902,7 @@ export default function Expenses() {
           </p>
         </div>
         <div className={`grid ${isInvestor ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-2 md:grid-cols-5'} gap-2 mb-2`}>
-          {!isInvestor && !isAccountant && (
+          {!isInvestor && (
             <div className="glass-panel-sm p-2.5">
               <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Personal Cash Out</p>
               <p className="text-sm font-mono font-semibold text-foreground mt-0.5">{fmtMoney(crossModeTotals.personalCashOut)}</p>
@@ -1912,7 +1912,7 @@ export default function Expenses() {
             <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Business Cash Out</p>
             <p className="text-sm font-mono font-semibold text-primary mt-0.5">{fmtMoney(crossModeTotals.businessCashOut)}</p>
           </div>
-          {!isInvestor && !isAccountant && (
+          {!isInvestor && (
             <div className="glass-panel-sm p-2.5">
               <p className="text-[10px] text-muted-foreground uppercase tracking-wider">True Personal</p>
               <p className="text-sm font-mono font-semibold text-foreground mt-0.5">{fmtMoney(crossModeTotals.truePersonal)}</p>
@@ -1924,7 +1924,7 @@ export default function Expenses() {
             <p className="text-sm font-mono font-semibold text-primary mt-0.5">{fmtMoney(crossModeTotals.trueBusiness)}</p>
             <p className="text-[9px] text-muted-foreground">Real business spend</p>
           </div>
-          {!isInvestor && !isAccountant && (
+          {!isInvestor && (
             <div className="glass-panel-sm p-2.5">
               <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Pending Reimbursable</p>
               <p className="text-sm font-mono font-semibold text-warning mt-0.5">{fmtMoney(crossModeTotals.pendingReimbursable)}</p>
