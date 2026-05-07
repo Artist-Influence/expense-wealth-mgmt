@@ -415,20 +415,13 @@ export default function Wealth() {
       for (const acc of accounts) {
         const pattern = acc.auto_track_pattern?.trim();
         if (!pattern) {
-          // Fall back to stored value (manual entry)
           map.set(acc.id, Number(acc.contributions_ytd) || 0);
           continue;
         }
-        const tokens = pattern.split('|').map(t => t.trim()).filter(Boolean);
-        if (tokens.length === 0) {
+        const orParts = buildOrFilter(pattern);
+        if (orParts.length === 0) {
           map.set(acc.id, Number(acc.contributions_ytd) || 0);
           continue;
-        }
-        const orParts: string[] = [];
-        for (const t of tokens) {
-          const safe = t.replace(/[%,().]/g, ' ').trim();
-          orParts.push(`description_normalized.ilike.%${safe}%`);
-          orParts.push(`description_raw.ilike.%${safe}%`);
         }
         const { data: matches } = await supabase
           .from('transactions_uploaded')
