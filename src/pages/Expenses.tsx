@@ -89,8 +89,8 @@ const MODE_CONFIG: Record<TransactionMode, { label: string; color: string; activ
 };
 
 export default function Expenses() {
-  const { user } = useAuth();
-  const [mode, setMode] = useState<TransactionMode>('personal');
+  const { user, isInvestor } = useAuth();
+  const [mode, setMode] = useState<TransactionMode>(isInvestor ? 'business' : 'personal');
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -211,11 +211,12 @@ export default function Expenses() {
     let all: AllModeRow[] = [];
     let hasMore = true;
     while (hasMore) {
-      const { data } = await supabase
+      let q = supabase
         .from('transactions_uploaded')
         .select('amount, transaction_mode, mode, is_split_parent, is_transfer, exclude_from_expense_totals, is_non_expense_cash_movement, parse_status, counts_toward_true_personal_spend, counts_toward_true_business_spend, is_reimbursable, reimbursement_status, date')
-        .eq('owner_id', user.id)
-        .range(from, from + pageSize - 1);
+        .eq('owner_id', user.id);
+      if (isInvestor) q = q.eq('mode', 'business');
+      const { data } = await q.range(from, from + pageSize - 1);
       if (data) all = [...all, ...(data as unknown as AllModeRow[])];
       hasMore = (data?.length ?? 0) === pageSize;
       from += pageSize;
@@ -1596,47 +1597,54 @@ export default function Expenses() {
       <div className="container py-4 animate-fade-in">
         {/* Top Control Bar */}
         <div className="glass-panel p-3 mb-3 flex flex-wrap items-center gap-2 sticky top-14 z-40">
-          {/* 3-Way Mode Toggle */}
-          <div className="flex rounded-lg border border-border/40 overflow-hidden">
-            {(Object.entries(MODE_CONFIG) as [TransactionMode, typeof MODE_CONFIG[TransactionMode]][]).map(([key, cfg]) => (
-              <button
-                key={key}
-                onClick={() => setMode(key)}
-                className={`px-3 py-1.5 text-xs font-medium transition-colors border-r border-border/20 last:border-r-0 ${
-                  mode === key ? cfg.activeClass : 'text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                {cfg.label}
-              </button>
-            ))}
-          </div>
+          {/* 3-Way Mode Toggle — hidden for investors */}
+          {!isInvestor && (
+            <div className="flex rounded-lg border border-border/40 overflow-hidden">
+              {(Object.entries(MODE_CONFIG) as [TransactionMode, typeof MODE_CONFIG[TransactionMode]][]).map(([key, cfg]) => (
+                <button
+                  key={key}
+                  onClick={() => setMode(key)}
+                  className={`px-3 py-1.5 text-xs font-medium transition-colors border-r border-border/20 last:border-r-0 ${
+                    mode === key ? cfg.activeClass : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  {cfg.label}
+                </button>
+              ))}
+            </div>
+          )}
+          {isInvestor && (
+            <span className="text-xs font-medium text-primary px-3 py-1.5">Business Expenses</span>
+          )}
 
-          {/* Upload */}
-          <Sheet open={uploadOpen} onOpenChange={setUploadOpen}>
-            <SheetTrigger asChild>
-              <Button size="sm" className="h-8 gap-1.5 text-xs">
-                <Upload className="h-3.5 w-3.5" /> Upload CSV
-              </Button>
-            </SheetTrigger>
-            <SheetContent side="right" className="w-full sm:max-w-md bg-background border-border">
-              <SheetHeader>
-                <SheetTitle className="text-foreground">Upload Expenses</SheetTitle>
-              </SheetHeader>
-              <div className="mt-4 space-y-4">
-                <CsvUploader onFilesSelect={handleFilesSelect} disabled={isProcessing} />
-                {totalFiles > 0 && (
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between text-xs text-muted-foreground">
-                      <span>{completedFiles} / {totalFiles} files</span>
-                      <span>{overallProgress}%</span>
+          {/* Upload — hidden for investors */}
+          {!isInvestor && (
+            <Sheet open={uploadOpen} onOpenChange={setUploadOpen}>
+              <SheetTrigger asChild>
+                <Button size="sm" className="h-8 gap-1.5 text-xs">
+                  <Upload className="h-3.5 w-3.5" /> Upload CSV
+                </Button>
+              </SheetTrigger>
+              <SheetContent side="right" className="w-full sm:max-w-md bg-background border-border">
+                <SheetHeader>
+                  <SheetTitle className="text-foreground">Upload Expenses</SheetTitle>
+                </SheetHeader>
+                <div className="mt-4 space-y-4">
+                  <CsvUploader onFilesSelect={handleFilesSelect} disabled={isProcessing} />
+                  {totalFiles > 0 && (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between text-xs text-muted-foreground">
+                        <span>{completedFiles} / {totalFiles} files</span>
+                        <span>{overallProgress}%</span>
+                      </div>
+                      <Progress value={overallProgress} className="h-1.5" />
                     </div>
-                    <Progress value={overallProgress} className="h-1.5" />
-                  </div>
-                )}
-                <FileProgressList items={fileQueue} mode={categoryMode} />
-              </div>
-            </SheetContent>
-          </Sheet>
+                  )}
+                  <FileProgressList items={fileQueue} mode={categoryMode} />
+                </div>
+              </SheetContent>
+            </Sheet>
+          )}
 
           {/* Search */}
           <div className="relative flex-1 min-w-[160px]">
@@ -1772,7 +1780,7 @@ export default function Expenses() {
           )}
 
 
-          {selectedIds.size === 0 && user && (
+          {!isInvestor && selectedIds.size === 0 && user && (
             <Button
               size="sm"
               variant="outline"
@@ -1806,7 +1814,7 @@ export default function Expenses() {
             </Button>
           )}
 
-          {selectedIds.size === 0 && user && (
+          {!isInvestor && selectedIds.size === 0 && user && (
             <Button
               size="sm"
               variant="outline"
@@ -1820,7 +1828,7 @@ export default function Expenses() {
             </Button>
           )}
 
-          {(exactClusters.length > 0 || nearClusters.length > 0 || crossModePairs.length > 0) && selectedIds.size === 0 && (
+          {!isInvestor && (exactClusters.length > 0 || nearClusters.length > 0 || crossModePairs.length > 0) && selectedIds.size === 0 && (
             <Button
               size="sm"
               variant="outline"
@@ -1832,7 +1840,7 @@ export default function Expenses() {
             </Button>
           )}
 
-          {selectedIds.size === 0 && (() => {
+          {!isInvestor && selectedIds.size === 0 && (() => {
             const suggestedCount = filtered.filter(t => ['suggested', 'ai_suggested', 'auto_categorized'].includes(t.review_status) && !t.is_split_parent && (t.final_category || t.predicted_category)).length;
             return suggestedCount > 0 ? (
               <Button size="sm" variant="outline" className="h-8 gap-1 text-xs border-success/30 text-success hover:bg-success/10" onClick={async () => {
@@ -1845,8 +1853,8 @@ export default function Expenses() {
             ) : null;
           })()}
 
-          {/* Bulk Actions */}
-          {selectedIds.size > 0 && (
+          {/* Bulk Actions — owner only */}
+          {!isInvestor && selectedIds.size > 0 && (
             <>
               <Button size="sm" onClick={bulkApprove} className="h-8 gap-1 text-xs">
                 <CheckCheck className="h-3 w-3" /> Approve {selectedIds.size}
@@ -1893,29 +1901,35 @@ export default function Expenses() {
             )}
           </p>
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mb-2">
-          <div className="glass-panel-sm p-2.5">
-            <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Personal Cash Out</p>
-            <p className="text-sm font-mono font-semibold text-foreground mt-0.5">{fmtMoney(crossModeTotals.personalCashOut)}</p>
-          </div>
+        <div className={`grid ${isInvestor ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-2 md:grid-cols-5'} gap-2 mb-2`}>
+          {!isInvestor && (
+            <div className="glass-panel-sm p-2.5">
+              <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Personal Cash Out</p>
+              <p className="text-sm font-mono font-semibold text-foreground mt-0.5">{fmtMoney(crossModeTotals.personalCashOut)}</p>
+            </div>
+          )}
           <div className="glass-panel-sm p-2.5">
             <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Business Cash Out</p>
             <p className="text-sm font-mono font-semibold text-primary mt-0.5">{fmtMoney(crossModeTotals.businessCashOut)}</p>
           </div>
-          <div className="glass-panel-sm p-2.5">
-            <p className="text-[10px] text-muted-foreground uppercase tracking-wider">True Personal</p>
-            <p className="text-sm font-mono font-semibold text-foreground mt-0.5">{fmtMoney(crossModeTotals.truePersonal)}</p>
-            <p className="text-[9px] text-muted-foreground">Excludes reimbursable</p>
-          </div>
+          {!isInvestor && (
+            <div className="glass-panel-sm p-2.5">
+              <p className="text-[10px] text-muted-foreground uppercase tracking-wider">True Personal</p>
+              <p className="text-sm font-mono font-semibold text-foreground mt-0.5">{fmtMoney(crossModeTotals.truePersonal)}</p>
+              <p className="text-[9px] text-muted-foreground">Excludes reimbursable</p>
+            </div>
+          )}
           <div className="glass-panel-sm p-2.5">
             <p className="text-[10px] text-muted-foreground uppercase tracking-wider">True Business</p>
             <p className="text-sm font-mono font-semibold text-primary mt-0.5">{fmtMoney(crossModeTotals.trueBusiness)}</p>
             <p className="text-[9px] text-muted-foreground">Real business spend</p>
           </div>
-          <div className="glass-panel-sm p-2.5">
-            <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Pending Reimbursable</p>
-            <p className="text-sm font-mono font-semibold text-warning mt-0.5">{fmtMoney(crossModeTotals.pendingReimbursable)}</p>
-          </div>
+          {!isInvestor && (
+            <div className="glass-panel-sm p-2.5">
+              <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Pending Reimbursable</p>
+              <p className="text-sm font-mono font-semibold text-warning mt-0.5">{fmtMoney(crossModeTotals.pendingReimbursable)}</p>
+            </div>
+          )}
         </div>
 
         {/* Period insight tiles — Avg / day, Largest expense, Unique merchants */}
@@ -1990,9 +2004,11 @@ export default function Expenses() {
             <table className="w-full text-xs">
               <thead className="sticky top-0 z-10 bg-card/90 backdrop-blur-sm">
                 <tr className="border-b border-border/40">
-                  <th className="px-2 py-2 text-left w-8 sticky left-0 bg-card/90 z-20">
-                    <input type="checkbox" checked={selectedIds.size === filtered.length && filtered.length > 0} onChange={selectAll} className="rounded border-border" />
-                  </th>
+                  {!isInvestor && (
+                    <th className="px-2 py-2 text-left w-8 sticky left-0 bg-card/90 z-20">
+                      <input type="checkbox" checked={selectedIds.size === filtered.length && filtered.length > 0} onChange={selectAll} className="rounded border-border" />
+                    </th>
+                  )}
                   <SortHeader col="date" label="Date" />
                   <SortHeader col="description" label="Description" />
                   <SortHeader col="amount" label="Amount" className="text-right" />
@@ -2002,7 +2018,7 @@ export default function Expenses() {
                   <SortHeader col="confidence" label="Conf" />
                   <th className="px-2 py-2 text-left text-[11px] font-medium text-muted-foreground">Status</th>
                   <th className="px-2 py-2 text-left text-[11px] font-medium text-muted-foreground">Flags</th>
-                  <th className="px-2 py-2 text-right text-[11px] font-medium text-muted-foreground w-20">Actions</th>
+                  {!isInvestor && <th className="px-2 py-2 text-right text-[11px] font-medium text-muted-foreground w-20">Actions</th>}
                 </tr>
               </thead>
               <tbody>
@@ -2019,11 +2035,13 @@ export default function Expenses() {
                       key={tx.id}
                       className={`border-b border-border/10 hover:bg-secondary/20 transition-colors cursor-pointer ${tx.exclude_from_expense_totals ? 'opacity-50' : ''}`}
                       style={{ height: '32px' }}
-                      onClick={() => setDetailTx(tx)}
+                      onClick={() => !isInvestor && setDetailTx(tx)}
                     >
-                      <td className="px-2 py-1 sticky left-0 bg-card/60" onClick={e => e.stopPropagation()}>
-                        <input type="checkbox" checked={selectedIds.has(tx.id)} onChange={() => toggleSelect(tx.id)} className="rounded border-border" />
-                      </td>
+                      {!isInvestor && (
+                        <td className="px-2 py-1 sticky left-0 bg-card/60" onClick={e => e.stopPropagation()}>
+                          <input type="checkbox" checked={selectedIds.has(tx.id)} onChange={() => toggleSelect(tx.id)} className="rounded border-border" />
+                        </td>
+                      )}
                       <td className="px-2 py-1 font-mono text-muted-foreground whitespace-nowrap">{tx.date || '—'}</td>
                       <td className="px-2 py-1 max-w-[300px]">
                         <p className="text-foreground truncate" title={tx.description_raw || ''}>{tx.description_raw || '—'}</p>
@@ -2041,8 +2059,8 @@ export default function Expenses() {
                               🔁
                             </span>
                           )}
-                          {tx.is_split_parent ? (
-                            <span className="text-foreground px-1" title="Split parent — edit child rows instead">
+                          {tx.is_split_parent || isInvestor ? (
+                            <span className="text-foreground px-1" title={tx.is_split_parent ? "Split parent — edit child rows instead" : undefined}>
                               {tx.final_category || tx.predicted_category || '—'}
                             </span>
                           ) : (
@@ -2167,21 +2185,23 @@ export default function Expenses() {
                           )}
                         </div>
                       </td>
-                      <td className="px-2 py-1 text-right whitespace-nowrap" onClick={e => e.stopPropagation()}>
-                        <div className="flex items-center gap-0.5 justify-end">
-                          <Button size="sm" variant="ghost" className="h-5 w-5 p-0" onClick={() => setDetailTx(tx)} title="Edit">
-                            <Edit3 className="h-3 w-3 text-muted-foreground" />
-                          </Button>
-                          <Button size="sm" variant="ghost" className="h-5 w-5 p-0" onClick={() => toggleTransfer(tx)} title={tx.is_transfer ? 'Restore' : 'Transfer'}>
-                            <ArrowLeftRight className={`h-3 w-3 ${tx.is_transfer ? 'text-primary' : 'text-muted-foreground'}`} />
-                          </Button>
-                          {!['approved', 'edited'].includes(tx.review_status) && (
-                            <Button size="sm" variant="ghost" className="h-5 w-5 p-0" onClick={() => approveRow(tx)} title="Approve">
-                              <Check className="h-3 w-3 text-success" />
+                      {!isInvestor && (
+                        <td className="px-2 py-1 text-right whitespace-nowrap" onClick={e => e.stopPropagation()}>
+                          <div className="flex items-center gap-0.5 justify-end">
+                            <Button size="sm" variant="ghost" className="h-5 w-5 p-0" onClick={() => setDetailTx(tx)} title="Edit">
+                              <Edit3 className="h-3 w-3 text-muted-foreground" />
                             </Button>
-                          )}
-                        </div>
-                      </td>
+                            <Button size="sm" variant="ghost" className="h-5 w-5 p-0" onClick={() => toggleTransfer(tx)} title={tx.is_transfer ? 'Restore' : 'Transfer'}>
+                              <ArrowLeftRight className={`h-3 w-3 ${tx.is_transfer ? 'text-primary' : 'text-muted-foreground'}`} />
+                            </Button>
+                            {!['approved', 'edited'].includes(tx.review_status) && (
+                              <Button size="sm" variant="ghost" className="h-5 w-5 p-0" onClick={() => approveRow(tx)} title="Approve">
+                                <Check className="h-3 w-3 text-success" />
+                              </Button>
+                            )}
+                          </div>
+                        </td>
+                      )}
                     </tr>
                   ))
                 )}

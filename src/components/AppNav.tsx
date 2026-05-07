@@ -13,6 +13,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { HealthCheckPanel } from './HealthCheckPanel';
 import { runHealthCheck, shouldAutoRun, type HealthCheckSummary } from '@/lib/health-check';
 
+const INVESTOR_NAV = ['/', '/income', '/insights'];
+
 const navItems = [
   { to: '/', label: 'Expenses', icon: Receipt, active: true, showBadge: true },
   { to: '/income', label: 'Income', icon: DollarSign, active: true },
@@ -28,7 +30,7 @@ const navItems = [
 
 export function AppNav() {
   const location = useLocation();
-  const { user, signOut } = useAuth();
+  const { user, signOut, isInvestor } = useAuth();
   const [healthOpen, setHealthOpen] = useState(false);
   const [healthSummary, setHealthSummary] = useState<HealthCheckSummary | null>(null);
 
@@ -95,7 +97,7 @@ export function AppNav() {
             <span className="font-semibold text-foreground text-xs">Expense Memory</span>
           </Link>
           
-          {navItems.map(({ to, label, icon: Icon, active, showBadge }) => {
+          {navItems.filter(({ to }) => !isInvestor || INVESTOR_NAV.includes(to)).map(({ to, label, icon: Icon, active, showBadge }) => {
             const isActive = to === '/' ? location.pathname === '/' : location.pathname.startsWith(to);
             
             if (!active) {
@@ -129,7 +131,7 @@ export function AppNav() {
               >
                 <Icon className="h-3.5 w-3.5" />
                 <span className="hidden lg:inline">{label}</span>
-                {showBadge && reviewCount > 0 && (
+                {showBadge && !isInvestor && reviewCount > 0 && (
                   <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-destructive text-destructive-foreground text-[9px] font-bold flex items-center justify-center">
                     {reviewCount > 99 ? '99+' : reviewCount}
                   </span>
@@ -140,22 +142,28 @@ export function AppNav() {
         </div>
 
         <div className="flex items-center gap-1.5 shrink-0">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={() => setHealthOpen(true)}
-                className={`flex items-center gap-1.5 h-7 px-2 rounded-lg border text-xs font-medium transition-colors ${healthTone}`}
-              >
-                <Activity className="h-3.5 w-3.5" />
-                <span className="hidden md:inline">
-                  {totalIssues === 0 ? 'Healthy' : `${totalIssues} issue${totalIssues > 1 ? 's' : ''}`}
-                </span>
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" className="text-xs">
-              Data Health Check {healthSummary?.ranAt ? `· last run ${new Date(healthSummary.ranAt).toLocaleString()}` : ''}
-            </TooltipContent>
-          </Tooltip>
+          {!isInvestor && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={() => setHealthOpen(true)}
+                  className={`flex items-center gap-1.5 h-7 px-2 rounded-lg border text-xs font-medium transition-colors ${healthTone}`}
+                >
+                  <Activity className="h-3.5 w-3.5" />
+                  <span className="hidden md:inline">
+                    {totalIssues === 0 ? 'Healthy' : `${totalIssues} issue${totalIssues > 1 ? 's' : ''}`}
+                  </span>
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="text-xs">
+                Data Health Check {healthSummary?.ranAt ? `· last run ${new Date(healthSummary.ranAt).toLocaleString()}` : ''}
+              </TooltipContent>
+            </Tooltip>
+          )}
+
+          {isInvestor && (
+            <span className="text-[10px] text-muted-foreground/60 hidden md:inline">Investor View</span>
+          )}
 
           <Button
             variant="ghost"
@@ -169,12 +177,14 @@ export function AppNav() {
         </div>
       </div>
 
-      <HealthCheckPanel
-        open={healthOpen}
-        onClose={() => setHealthOpen(false)}
-        initialSummary={healthSummary}
-        onSummaryChange={setHealthSummary}
-      />
+      {!isInvestor && (
+        <HealthCheckPanel
+          open={healthOpen}
+          onClose={() => setHealthOpen(false)}
+          initialSummary={healthSummary}
+          onSummaryChange={setHealthSummary}
+        />
+      )}
     </nav>
   );
 }

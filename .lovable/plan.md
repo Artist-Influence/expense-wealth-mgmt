@@ -1,30 +1,66 @@
-## Problem
 
-The nav badge correctly shows 663 issues (from the persisted `totalIssues` in `app_settings`). But when the Health Check dialog opens, it displays all zeros because the persisted summary only stores `totalIssues` and a `breakdown` object — while the reconstructed `HealthCheckSummary` in AppNav (lines 62-70) **hardcodes all detail fields to zero**:
+# Investor Portal: Read-Only Business View
 
-```
-staleReviews: { count: 0, oldestDate: null }
-needsReview: { incomeCount: 0, expenseCount: 0 }
-parseErrors: { count: 0 }
-```
+## Overview
+Add a separate investor login that gives read-only access to **business expenses, income, and insights only**. Personal data is completely filtered out (not shown at all). No uploads, edits, settings, or other pages visible.
 
-So the dialog shows "No stale items", "0 expenses · 0 income", etc. despite 611 stale + 52 near-duplicates.
+## Database Changes
 
-## Fix
+### 1. Create `user_roles` table
+- Columns: `id`, `user_id` (references auth.users), `role` (enum: `owner`, `investor`)
+- RLS: users can read their own role; owner can manage all roles
+- Seed Jared's account as `owner`
 
-**Reconstruct the detail fields from the persisted `breakdown`** when loading from `app_settings` in AppNav:
+### 2. Security-definer helper function
+- `has_role(user_id, role)` — used in RLS and app logic without recursion
 
-1. **AppNav.tsx (lines 62-70)**: Map `breakdown.stale` → `staleReviews.count`, `breakdown.parseErrors` → `parseErrors.count`, `breakdown.expenseNear` → use for near cluster count display, etc. Also compute `needsReview` counts from the breakdown or re-query them.
+## Auth Changes
 
-2. **health-check.ts**: Expand the persisted `breakdown` to also include `needsReviewExpenses` and `needsReviewIncome` so the dialog can show those without re-running.
+### 3. Update `useAuth` hook
+- Remove the hardcoded `ALLOWED_EMAIL` check — instead, after login, look up the user's role from `user_roles`
+- Expose `role: 'owner' | 'investor' | null` alongside `user` and `isAuthorized`
+- Investors are authorized but restricted
 
-3. **HealthCheckPanel**: The dialog already auto-runs when opened with no summary — but `initialSummary` is set (with zeros), so it skips the auto-run. Fix: if the summary came from persistence (no clusters loaded), auto-run on open to get fresh data.
+### 4. Update Login page
+- Allow any email with a valid account to log in (not just Jared's)
+- After login, role determines what they see
+- You'll create investor accounts manually via the backend
 
-**Recommended approach**: Option 3 is simplest and most accurate — always re-run the health check when the dialog opens, regardless of whether a persisted summary exists. This ensures the dialog always shows fresh data. The persisted summary is only used for the nav badge between dialog opens.
+### 5. Disable public signup
+- Use `configure_auth` to ensure `disable_signup: true` — only you can create investor accounts from the backend
 
-## Changes
+## Frontend: Role-Based Access
 
-- **`src/components/AppNav.tsx`**: When setting `healthSummary` from persistence, mark it as `persisted: true` (or simply don't set cluster data). Then in the dialog open handler, always trigger a refresh.
-- **`src/components/HealthCheckPanel.tsx`**: Change the auto-run condition from `!summary` to always run on open (or run when summary has no cluster data).
+### 6. Create `InvestorGuard` component
+- Wraps investor-accessible routes
+- If user is `investor`, renders children; if `owner`, also renders; if neither, redirects to login
 
-This is a 2-file, ~10-line change.
+### 7. Update `AuthGuard`
+- Owner sees everything as before
+- Investor gets redirected to `/expenses` if they try to access restricted pages (Wealth, Tax, Allocations, Merchants, Settings, Accountant, Close Month)
+
+### 8. Update `AppNav`
+- If role is `investor`: only show Expenses, Income, Insights nav items
+- Hide Health Check button, Sign Out stays
+- Hide CSV upload triggers
+
+### 9. Update Expenses page for investors
+- **Filter**: Only fetch `mode = 'business'` transactions — personal rows never loaded
+- **Read-only**: Hide all edit buttons, upload section, bulk actions, review controls, split button
+- **Export**: Keep CSV download button (read-only with export)
+
+### 10. Update Income page for investors
+- **Filter**: Only fetch `mode = 'business'` income
+- **Read-only**: Hide upload, edit, delete, status change controls
+- **Export**: Keep download
+
+### 11. Update Insights page for investors
+- **Filter**: Only load business-mode data
+- **Read-only**: Remove any edit/action controls
+- Charts and summaries render normally but with business data only
+
+## Summary
+- ~1 migration (roles table + enum + helper function)
+- ~6 files modified (useAuth, Login, AuthGuard, AppNav, Expenses, Income, Insights)
+- ~1 new file (InvestorGuard or role context)
+- Personal data never reaches the investor's browser — filtered at the query level
