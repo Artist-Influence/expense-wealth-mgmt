@@ -411,8 +411,39 @@ export default function Wealth() {
     queryFn: async () => {
       const yearStart = `${currentYear}-01-01`;
       const yearEnd = `${currentYear}-12-31`;
+
+      // Auto-seed missing default accounts so Wealthfront etc. appear automatically.
+      const existingNames = new Set(accounts.map(a => a.account_name.toLowerCase()));
+      const seeds: any[] = [];
+      for (const def of DEFAULT_AUTO_ACCOUNTS) {
+        if (!existingNames.has(def.name.toLowerCase())) {
+          seeds.push({
+            owner_id: user!.id,
+            account_name: def.name,
+            account_type: def.account_type,
+            platform: def.platform,
+            auto_track_pattern: def.pattern,
+            mode: 'personal',
+            current_balance: 0,
+            contributions_ytd: 0,
+            starting_balance_year: 0,
+          });
+        }
+      }
+      if (seeds.length > 0) {
+        await supabase.from('investment_accounts').insert(seeds);
+        qc.invalidateQueries({ queryKey: ['investment_accounts'] });
+      }
+
+      // Re-fetch all accounts (including newly seeded ones)
+      const { data: allAccounts } = await supabase
+        .from('investment_accounts')
+        .select('*')
+        .eq('owner_id', user!.id);
+      const accs = (allAccounts || []) as Account[];
+
       const map = new Map<string, number>();
-      for (const acc of accounts) {
+      for (const acc of accs) {
         const pattern = acc.auto_track_pattern?.trim();
         if (!pattern) {
           map.set(acc.id, Number(acc.contributions_ytd) || 0);
