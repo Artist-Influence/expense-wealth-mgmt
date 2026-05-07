@@ -173,6 +173,168 @@ function SnapshotEditor({
   );
 }
 
+// ---------------------------------------------------------------
+// Bulk balance update dialog — update all accounts for a given month at once.
+// ---------------------------------------------------------------
+function BulkBalanceUpdateDialog({
+  open,
+  onOpenChange,
+  accounts,
+  snapshots,
+  userId,
+  onSaved,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  accounts: Account[];
+  snapshots: Snapshot[];
+  userId: string;
+  onSaved: () => void;
+}) {
+  const today = new Date();
+  const defaultMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+  const [month, setMonth] = useState(defaultMonth);
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+
+  const fmt = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 });
+
+  const getLastBalance = (accountId: string): number => {
+    const accSnaps = snapshots
+      .filter(s => s.account_id === accountId)
+      .sort((a, b) => b.as_of_date.localeCompare(a.as_of_date));
+    const monthDate = `${month}-01`;
+    const exact = accSnaps.find(s => s.as_of_date === monthDate);
+    if (exact) return exact.balance;
+    if (accSnaps.length > 0) return accSnaps[0].balance;
+    const acc = accounts.find(a => a.id === accountId);
+    return acc ? Number(acc.current_balance) : 0;
+  };
+
+  const initValues = () => {
+    const v: Record<string, string> = {};
+    for (const a of accounts) {
+      v[a.id] = String(Math.round(getLastBalance(a.id)));
+    }
+    setValues(v);
+  };
+
+  const [lastKey, setLastKey] = useState('');
+  const key = `${open}-${month}-${accounts.map(a => a.id).join(',')}`;
+  if (key !== lastKey) {
+    setLastKey(key);
+    if (open) initValues();
+  }
+
+  const handleSave = async () => {
+    setSaving(true);
+    const monthDate = `${month}-01`;
+    let updated = 0;
+    try {
+      for (const acc of accounts) {
+        const newVal = Number(values[acc.id] || '0');
+        if (!Number.isFinite(newVal) || newVal < 0) continue;
+        const lastBal = getLastBalance(acc.id);
+        if (Math.abs(newVal - lastBal) < 0.01) continue;
+
+        const { error: snapErr } = await supabase
+          .from('account_balance_snapshots')
+          .upsert(
+            { owner_id: userId, account_id: acc.id, as_of_date: monthDate, balance: newVal },
+            { onConflict: 'account_id,as_of_date' }
+          );
+        if (snapErr) { toast.error(`${acc.account_name}: ${snapErr.message}`); continue; }
+
+        await supabase
+          .from('investment_accounts')
+          .update({ current_balance: newVal })
+          .eq('id', acc.id);
+
+        updated++;
+      }
+      if (updated > 0) {
+        toast.success(`Updated ${updated} account${updated !== 1 ? 's' : ''} for ${new Date(monthDate).toLocaleString('en-US', { month: 'long', year: 'numeric' })}`);
+      } else {
+        toast('No changes detected');
+      }
+      onSaved();
+      onOpenChange(false);
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-lg max-h-[80vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="text-sm">Update Balances</DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <Label className="text-xs text-muted-foreground shrink-0">Month</Label>
+            <Input
+              type="month"
+              value={month}
+              onChange={e => setMonth(e.target.value)}
+              className="h-8 text-xs w-44"
+            />
+          </div>
+
+          <div className="border rounded-lg overflow-hidden">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="bg-secondary/30 border-b border-border/40">
+                  <th className="text-left px-3 py-1.5 font-medium text-muted-foreground">Account</th>
+                  <th className="text-right px-3 py-1.5 font-medium text-muted-foreground w-28">Last Known</th>
+                  <th className="text-right px-3 py-1.5 font-medium text-muted-foreground w-32">New Balance</th>
+                </tr>
+              </thead>
+              <tbody>
+                {accounts.map(a => {
+                  const last = getLastBalance(a.id);
+                  const newVal = Number(values[a.id] || '0');
+                  const changed = Math.abs(newVal - last) >= 0.01;
+                  return (
+                    <tr key={a.id} className="border-b border-border/20 last:border-0">
+                      <td className="px-3 py-2">
+                        <div className="font-medium text-foreground">{a.account_name}</div>
+                        <div className="flex items-center gap-1 mt-0.5">
+                          {a.platform && <span className="text-[10px] text-muted-foreground">{a.platform}</span>}
+                          <Badge variant="secondary" className="text-[9px] px-1 py-0">{a.mode === 'business' ? 'Biz' : 'Personal'}</Badge>
+                        </div>
+                      </td>
+                      <td className="px-3 py-2 text-right text-muted-foreground tabular-nums">{fmt(last)}</td>
+                      <td className="px-3 py-2 text-right">
+                        <Input
+                          type="number"
+                          value={values[a.id] || ''}
+                          onChange={e => setValues(v => ({ ...v, [a.id]: e.target.value }))}
+                          className={`h-7 text-xs text-right w-28 ml-auto tabular-nums ${changed ? 'ring-1 ring-primary/50' : ''}`}
+                        />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button size="sm" onClick={handleSave} disabled={saving}>
+            {saving ? 'Saving…' : 'Save All'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export default function Wealth() {
   const { user } = useAuth();
   const qc = useQueryClient();
@@ -181,6 +343,7 @@ export default function Wealth() {
   const [form, setForm] = useState(emptyForm);
   const [scope, setScope] = useState<ModeScope>(() => readPersistedScope('wealth_scope', 'all'));
   const [targetDialogOpen, setTargetDialogOpen] = useState(false);
+  const [bulkUpdateOpen, setBulkUpdateOpen] = useState(false);
   const { data: accounts = [], isLoading } = useQuery({
     queryKey: ['investment_accounts'],
     queryFn: async () => {
@@ -565,6 +728,9 @@ export default function Wealth() {
               <RefreshCw className={`h-3.5 w-3.5 mr-1 ${sync.isPending ? 'animate-spin' : ''}`} />
               {sync.isPending ? 'Syncing…' : 'Sync from Expenses'}
             </Button>
+            <Button size="sm" variant="outline" className="h-8" onClick={() => setBulkUpdateOpen(true)}>
+              <CalendarPlus className="h-3.5 w-3.5 mr-1" />Update Balances
+            </Button>
             <Button size="sm" className="h-8" onClick={openAdd}><Plus className="h-3.5 w-3.5 mr-1" />Add Account</Button>
           </div>
         </div>
@@ -918,6 +1084,19 @@ export default function Wealth() {
         onSave={(amount, year) => saveTarget.mutate({ amount, year })}
         saving={saveTarget.isPending}
       />
+      {user && (
+        <BulkBalanceUpdateDialog
+          open={bulkUpdateOpen}
+          onOpenChange={setBulkUpdateOpen}
+          accounts={scopedAccounts.filter(a => a.is_active)}
+          snapshots={snapshots}
+          userId={user.id}
+          onSaved={() => {
+            qc.invalidateQueries({ queryKey: ['investment_accounts'] });
+            qc.invalidateQueries({ queryKey: ['account_balance_snapshots', user.id] });
+          }}
+        />
+      )}
     </div>
   );
 }
