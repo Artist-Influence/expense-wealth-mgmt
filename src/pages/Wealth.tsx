@@ -613,16 +613,8 @@ export default function Wealth() {
       for (const acc of all) {
         const pattern = acc.auto_track_pattern?.trim();
         if (!pattern) continue;
-        const tokens = pattern.split('|').map(t => t.trim()).filter(Boolean);
-        if (tokens.length === 0) continue;
-
-        // Build OR filter for description_normalized + description_raw across all tokens.
-        const orParts: string[] = [];
-        for (const t of tokens) {
-          const safe = t.replace(/[%,().]/g, ' ').trim();
-          orParts.push(`description_normalized.ilike.%${safe}%`);
-          orParts.push(`description_raw.ilike.%${safe}%`);
-        }
+        const orParts = buildOrFilter(pattern);
+        if (orParts.length === 0) continue;
 
         const { data: matches } = await supabase
           .from('transactions_uploaded')
