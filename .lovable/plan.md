@@ -1,22 +1,21 @@
 ## Problem
 
-The login page keeps flickering between the loading spinner and login form, making it impossible to type. This is caused by a race condition in `useAuth` where both `onAuthStateChange` and `getSession` independently set loading state, and `useUserRole` resets `roleLoading` to `true` on every user change — causing the combined `loading` flag to oscillate.
+The Login page shows a spinner while `useAuth` resolves, but auth state changes (from `onAuthStateChange` firing before/after `getSession`) cause `loading` to oscillate, resulting in an infinite flicker between spinner and form — making the page unusable.
 
-## Fix
+## Root Cause
 
-### 1. Stabilize `useAuth` loading state (`src/hooks/useAuth.ts`)
+The Login page gates its **entire render** on `authLoading`. Every time `useAuth`'s loading state briefly toggles (due to the auth state change listener and role-fetching lifecycle), the Login component swaps between spinner and form. The Login page **should not** need a loading gate at all — it should always show the form and only conditionally redirect when auth is confirmed.
 
-- Use a single `initialLoading` ref that only transitions from `true` → `false` once, never back
-- Remove the duplicate `setLoading(false)` from both `onAuthStateChange` and `getSession` — instead use a pattern where `getSession` resolves first, and `onAuthStateChange` only handles subsequent changes
-- Set up `onAuthStateChange` listener BEFORE calling `getSession` (already done), but only mark initial load complete after `getSession` resolves
+## Fix (2 changes)
 
-### 2. Prevent `useUserRole` from resetting loading (`src/hooks/useUserRole.ts`)
+### 1. Login page: Remove loading gate, only gate the redirect (`src/pages/Login.tsx`)
 
-- Don't reset `roleLoading` back to `true` on subsequent calls when user hasn't changed — only set it `true` on initial mount or actual user ID change
-- Use a ref to track the previous user ID to avoid unnecessary loading resets
+- Remove the `if (authLoading) return <spinner>` block entirely
+- Change the redirect check to: `if (!authLoading && user && isAuthorized)` — only redirect when we're **sure** the user is authenticated
+- The form always renders, so no flicker
 
-### 3. Add loading guard to Login page (`src/pages/Login.tsx`)
+### 2. Harden `useAuth` against re-init (`src/hooks/useAuth.ts`)
 
-- Show a minimal loading state while `useAuth` is still resolving, preventing the form from briefly appearing and disappearing
-
-These three changes together will ensure the login form renders once and stays stable.
+- Remove the `initialised` ref guard (it can silently break on HMR or edge-case remounts)
+- Instead, use standard cleanup: unsubscribe in the effect cleanup, and let `getSession` run on every mount
+- This ensures auth always resolves even after hot reloads
