@@ -1779,7 +1779,7 @@ export default function Expenses() {
           )}
 
 
-          {selectedIds.size === 0 && user && (
+          {!isInvestor && selectedIds.size === 0 && user && (
             <Button
               size="sm"
               variant="outline"
@@ -1813,7 +1813,7 @@ export default function Expenses() {
             </Button>
           )}
 
-          {selectedIds.size === 0 && user && (
+          {!isInvestor && selectedIds.size === 0 && user && (
             <Button
               size="sm"
               variant="outline"
@@ -1827,7 +1827,7 @@ export default function Expenses() {
             </Button>
           )}
 
-          {(exactClusters.length > 0 || nearClusters.length > 0 || crossModePairs.length > 0) && selectedIds.size === 0 && (
+          {!isInvestor && (exactClusters.length > 0 || nearClusters.length > 0 || crossModePairs.length > 0) && selectedIds.size === 0 && (
             <Button
               size="sm"
               variant="outline"
@@ -1839,7 +1839,7 @@ export default function Expenses() {
             </Button>
           )}
 
-          {selectedIds.size === 0 && (() => {
+          {!isInvestor && selectedIds.size === 0 && (() => {
             const suggestedCount = filtered.filter(t => ['suggested', 'ai_suggested', 'auto_categorized'].includes(t.review_status) && !t.is_split_parent && (t.final_category || t.predicted_category)).length;
             return suggestedCount > 0 ? (
               <Button size="sm" variant="outline" className="h-8 gap-1 text-xs border-success/30 text-success hover:bg-success/10" onClick={async () => {
@@ -1852,8 +1852,8 @@ export default function Expenses() {
             ) : null;
           })()}
 
-          {/* Bulk Actions */}
-          {selectedIds.size > 0 && (
+          {/* Bulk Actions — owner only */}
+          {!isInvestor && selectedIds.size > 0 && (
             <>
               <Button size="sm" onClick={bulkApprove} className="h-8 gap-1 text-xs">
                 <CheckCheck className="h-3 w-3" /> Approve {selectedIds.size}
