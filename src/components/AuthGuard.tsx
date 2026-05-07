@@ -1,8 +1,12 @@
 import { useAuth } from '@/hooks/useAuth';
-import { Navigate } from 'react-router-dom';
+import { Navigate, useLocation } from 'react-router-dom';
+
+/** Routes an investor is allowed to access */
+const INVESTOR_ALLOWED = ['/', '/income', '/insights'];
 
 export function AuthGuard({ children }: { children: React.ReactNode }) {
-  const { user, loading, isAuthorized } = useAuth();
+  const { user, loading, isAuthorized, isInvestor } = useAuth();
+  const location = useLocation();
 
   if (loading) {
     return (
@@ -17,6 +21,11 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
 
   if (!user || !isAuthorized) {
     return <Navigate to="/login" replace />;
+  }
+
+  // Investor trying to access a restricted page → redirect to expenses
+  if (isInvestor && !INVESTOR_ALLOWED.includes(location.pathname)) {
+    return <Navigate to="/" replace />;
   }
 
   return <>{children}</>;
