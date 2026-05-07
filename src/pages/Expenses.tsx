@@ -1598,7 +1598,7 @@ export default function Expenses() {
         {/* Top Control Bar */}
         <div className="glass-panel p-3 mb-3 flex flex-wrap items-center gap-2 sticky top-14 z-40">
           {/* 3-Way Mode Toggle — hidden for investors */}
-          {!isInvestor && !isAccountant && (
+          {!isInvestor && (
             <div className="flex rounded-lg border border-border/40 overflow-hidden">
               {(Object.entries(MODE_CONFIG) as [TransactionMode, typeof MODE_CONFIG[TransactionMode]][]).map(([key, cfg]) => (
                 <button
