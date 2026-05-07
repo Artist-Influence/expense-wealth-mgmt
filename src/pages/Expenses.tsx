@@ -2003,9 +2003,11 @@ export default function Expenses() {
             <table className="w-full text-xs">
               <thead className="sticky top-0 z-10 bg-card/90 backdrop-blur-sm">
                 <tr className="border-b border-border/40">
-                  <th className="px-2 py-2 text-left w-8 sticky left-0 bg-card/90 z-20">
-                    <input type="checkbox" checked={selectedIds.size === filtered.length && filtered.length > 0} onChange={selectAll} className="rounded border-border" />
-                  </th>
+                  {!isInvestor && (
+                    <th className="px-2 py-2 text-left w-8 sticky left-0 bg-card/90 z-20">
+                      <input type="checkbox" checked={selectedIds.size === filtered.length && filtered.length > 0} onChange={selectAll} className="rounded border-border" />
+                    </th>
+                  )}
                   <SortHeader col="date" label="Date" />
                   <SortHeader col="description" label="Description" />
                   <SortHeader col="amount" label="Amount" className="text-right" />
