@@ -6,26 +6,22 @@ import { useUserRole, type AppRole } from './useUserRole';
 export function useAuth() {
   const [user, setUser] = useState<User | null>(null);
   const [ready, setReady] = useState(false);
-  const initialised = useRef(false);
   const { role, roleLoading } = useUserRole(user);
 
   useEffect(() => {
-    // Prevent double-init in StrictMode
-    if (initialised.current) return;
-    initialised.current = true;
+    // 1. Listen for auth changes (must be set up before getSession)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (_event, session) => {
+        setUser(session?.user ?? null);
+        setReady(true);
+      }
+    );
 
-    // 1. Restore session from storage first
+    // 2. Restore session from storage
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null);
       setReady(true);
     });
-
-    // 2. Listen for subsequent changes (sign-in / sign-out)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (_event, session) => {
-        setUser(session?.user ?? null);
-      }
-    );
 
     return () => subscription.unsubscribe();
   }, []);
