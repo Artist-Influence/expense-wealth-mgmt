@@ -53,9 +53,9 @@ export function HealthCheckPanel({ open, onClose, initialSummary, onSummaryChang
     }
   }
 
-  // Auto-run when opened with no summary
+  // Auto-run when opened (always refresh to get fresh data)
   useEffect(() => {
-    if (open && !summary && !running) refresh();
+    if (open && !running) refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
