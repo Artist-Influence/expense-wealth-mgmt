@@ -452,14 +452,16 @@ export function WealthProjectionChart({
             <PopoverContent className="w-80 p-3 text-[11px] leading-relaxed" align="start">
               <div className="font-semibold text-foreground mb-1">Methodology</div>
               <p className="text-muted-foreground">
-                Each account compounds monthly at its assumed annual rate, with monthly contributions
-                added until the configured stop age. Defaults are historical-average heuristics
-                (S&P ~8%, crypto ~12%, collectibles ~7%) — edit any value in <span className="text-foreground">Settings</span>.
+                Each account compounds monthly at a <span className="text-foreground">blended rate</span> — your
+                realized returns (from snapshot history) weighted with the live benchmark CAGR.
+                The more history you have, the more your actual performance drives the projection
+                (up to 75% weight at 3+ years). Edit any value in <span className="text-foreground">Settings</span>.
               </p>
               <p className="text-muted-foreground mt-2">
-                The shaded band around <span className="text-foreground">Total</span> shows a ±3% rate range
-                (conservative vs optimistic). Crypto and collectibles carry wider real-world variance —
-                toggle them off to see the baseline trajectory.
+                The shaded band uses each account's <span className="text-foreground">actual volatility</span> (standard
+                deviation of monthly returns from your snapshots) instead of a flat ±3%. Crypto
+                accounts with wild swings get wider bands; steady accounts get narrow ones. Without
+                enough history, asset-class defaults are used (equities ~16%, crypto ~55%).
               </p>
             </PopoverContent>
           </Popover>
