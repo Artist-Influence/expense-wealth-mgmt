@@ -2034,11 +2034,13 @@ export default function Expenses() {
                       key={tx.id}
                       className={`border-b border-border/10 hover:bg-secondary/20 transition-colors cursor-pointer ${tx.exclude_from_expense_totals ? 'opacity-50' : ''}`}
                       style={{ height: '32px' }}
-                      onClick={() => setDetailTx(tx)}
+                      onClick={() => !isInvestor && setDetailTx(tx)}
                     >
-                      <td className="px-2 py-1 sticky left-0 bg-card/60" onClick={e => e.stopPropagation()}>
-                        <input type="checkbox" checked={selectedIds.has(tx.id)} onChange={() => toggleSelect(tx.id)} className="rounded border-border" />
-                      </td>
+                      {!isInvestor && (
+                        <td className="px-2 py-1 sticky left-0 bg-card/60" onClick={e => e.stopPropagation()}>
+                          <input type="checkbox" checked={selectedIds.has(tx.id)} onChange={() => toggleSelect(tx.id)} className="rounded border-border" />
+                        </td>
+                      )}
                       <td className="px-2 py-1 font-mono text-muted-foreground whitespace-nowrap">{tx.date || '—'}</td>
                       <td className="px-2 py-1 max-w-[300px]">
                         <p className="text-foreground truncate" title={tx.description_raw || ''}>{tx.description_raw || '—'}</p>
