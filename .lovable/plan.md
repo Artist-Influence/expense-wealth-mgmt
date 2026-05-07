@@ -1,33 +1,19 @@
 ## Problem
 
-Adding monthly balance updates for each account currently requires: open the tiny popover on each card → pick a month → type a balance → click Save → repeat for every account. For 4-5 accounts this is tedious, especially when you do it at the start of each month.
+The "Last Known" column in the Update Balances dialog shows the most recent **snapshot** balance (e.g. April: $15,118 for Dub), while the account cards show `current_balance` ($21,129 for Dub). This creates a confusing discrepancy — you expect to see the same number that's on the card.
 
-## Solution: "Quick Update" Panel
+## Root Cause
 
-Add a single "Update Balances" button in the Wealth page header (next to "Sync from Expenses"). Clicking it opens a dialog/sheet that shows **all active accounts in one form** so you can type each account's current balance in a single pass and save them all at once.
+`getLastBalance()` prioritizes the latest snapshot over `current_balance`. But `current_balance` on the account is often more up-to-date (set via the account edit dialog or auto-sync), while snapshots are only recorded on specific dates.
 
-### UX Details
+## Fix
 
-1. **Trigger**: New "Update Balances" button (calendar + pencil icon) in the top action bar.
-2. **Dialog content**:
-   - Month selector at the top (defaults to current month, e.g. "May 2026").
-   - A compact table/list of all active accounts (scope-filtered), each row showing:
-     - Account name + platform badge
-     - Last recorded balance (greyed out for reference)
-     - Editable number input for the new balance (pre-filled with the last known balance so you only change what moved)
-   - A "Save All" button that upserts snapshot rows for every account whose value changed.
-3. **Behavior**:
-   - Only accounts with a changed value get written (no unnecessary DB calls).
-   - After save, invalidates snapshot + account queries so charts update immediately.
-   - Also updates `current_balance` on each account to keep the card totals in sync.
-   - Toast confirms how many accounts were updated.
+In `BulkBalanceUpdateDialog.getLastBalance()`:
 
-### Technical Changes
+- Always use the account's `current_balance` as the primary reference for "Last Known" and for pre-filling the input.
+- Only fall back to a snapshot if the selected month already has one recorded (so you see what was previously saved for that month).
+- Pre-fill the input with `current_balance` so you just need to type the new number for accounts that changed.
 
-**File: `src/pages/Wealth.tsx`**
-- Add a `BulkBalanceUpdateDialog` component (inline or extracted).
-- State: `bulkUpdateOpen`, `bulkMonth`, `bulkValues` (map of account_id → new balance).
-- On save: loop through changed values, call `upsertSnapshot` + update `current_balance` on `investment_accounts`.
-- Add the trigger button to the header action bar.
+This aligns the dialog with what you see on each account card.
 
-No database changes needed — uses existing `account_balance_snapshots` upsert and `investment_accounts` update.
+One function change in `src/pages/Wealth.tsx`, ~5 lines.
