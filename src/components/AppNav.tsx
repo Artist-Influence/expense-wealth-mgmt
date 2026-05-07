@@ -13,6 +13,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { HealthCheckPanel } from './HealthCheckPanel';
 import { runHealthCheck, shouldAutoRun, type HealthCheckSummary } from '@/lib/health-check';
 
+const INVESTOR_NAV = ['/', '/income', '/insights'];
+
 const navItems = [
   { to: '/', label: 'Expenses', icon: Receipt, active: true, showBadge: true },
   { to: '/income', label: 'Income', icon: DollarSign, active: true },
