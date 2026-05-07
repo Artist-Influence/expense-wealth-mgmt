@@ -398,7 +398,7 @@ export default function Wealth() {
         }
         const orParts: string[] = [];
         for (const t of tokens) {
-          const safe = t.replace(/[%,]/g, ' ');
+          const safe = t.replace(/[%,().]/g, ' ').trim();
           orParts.push(`description_normalized.ilike.%${safe}%`);
           orParts.push(`description_raw.ilike.%${safe}%`);
         }
@@ -598,7 +598,7 @@ export default function Wealth() {
         // Build OR filter for description_normalized + description_raw across all tokens.
         const orParts: string[] = [];
         for (const t of tokens) {
-          const safe = t.replace(/[%,]/g, ' ');
+          const safe = t.replace(/[%,().]/g, ' ').trim();
           orParts.push(`description_normalized.ilike.%${safe}%`);
           orParts.push(`description_raw.ilike.%${safe}%`);
         }
