@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { useNavigate, Navigate } from 'react-router-dom';
-import { useAuth } from '@/hooks/useAuth';
+import { useNavigate } from 'react-router-dom';
+import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Lock, Mail, AlertCircle } from 'lucide-react';
@@ -10,20 +10,15 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const { signIn, user, isAuthorized, loading: authLoading } = useAuth();
   const navigate = useNavigate();
-
-  if (!authLoading && user && isAuthorized) {
-    return <Navigate to="/" replace />;
-  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setLoading(true);
 
-    const { error: authError } = await signIn(email, password);
-    
+    const { error: authError } = await supabase.auth.signInWithPassword({ email, password });
+
     if (authError) {
       setError(authError.message);
     } else {
