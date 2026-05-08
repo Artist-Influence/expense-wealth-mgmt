@@ -8,45 +8,37 @@ export function useAuth() {
   const [ready, setReady] = useState(false);
   const { role, roleLoading } = useUserRole(user);
   const [effectiveOwnerId, setEffectiveOwnerId] = useState<string | null>(null);
-  const settled = useRef(false);
+  const initialChecked = useRef(false);
 
   useEffect(() => {
-    // Set up listener first
+    // Subscribe first so we don't miss events
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (_event, session) => {
-        // Only accept auth state changes after initial settle,
-        // or if it's the first event
-        if (!settled.current) {
-          settled.current = true;
-          setUser(session?.user ?? null);
-          setReady(true);
-        } else {
-          // For subsequent events, only update if meaningful change
-          setUser(prev => {
-            const newId = session?.user?.id ?? null;
-            const prevId = prev?.id ?? null;
-            if (newId === prevId) return prev;
-            return session?.user ?? null;
-          });
+        const next = session?.user ?? null;
+        setUser(prev => {
+          const prevId = prev?.id ?? null;
+          const nextId = next?.id ?? null;
+          if (prevId === nextId) return prev;
+          return next;
+        });
+        if (initialChecked.current) {
+          // already past initial load, keep ready=true
         }
       }
     );
 
-    // Also call getSession for the initial load
-    supabase.auth.getSession().then(({ data: { session }, error }) => {
-      if (error) {
-        // Stale/broken session — clear it
-        supabase.auth.signOut();
-        setUser(null);
-        setReady(true);
-        settled.current = true;
-        return;
-      }
-      if (!settled.current) {
-        settled.current = true;
-        setUser(session?.user ?? null);
-        setReady(true);
-      }
+    // Authoritative initial session check
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(prev => {
+        const next = session?.user ?? null;
+        if ((prev?.id ?? null) === (next?.id ?? null)) return prev;
+        return next;
+      });
+      initialChecked.current = true;
+      setReady(true);
+    }).catch(() => {
+      initialChecked.current = true;
+      setReady(true);
     });
 
     return () => subscription.unsubscribe();
@@ -54,7 +46,11 @@ export function useAuth() {
 
   // Resolve effective owner ID for accountants
   useEffect(() => {
-    if (!user || roleLoading) return;
+    if (!user) {
+      setEffectiveOwnerId(null);
+      return;
+    }
+    if (roleLoading) return;
 
     if (role === 'accountant') {
       let cancelled = false;
@@ -72,7 +68,7 @@ export function useAuth() {
     }
   }, [user?.id, role, roleLoading]);
 
-  const loading = !ready || roleLoading;
+  const loading = !ready || (!!user && roleLoading);
 
   const isAuthorized = !!role;
   const isInvestor = role === 'investor';

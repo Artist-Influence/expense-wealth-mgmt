@@ -1,19 +1,27 @@
-## Problem
+## Goal
+Stop the successful sign-in from bouncing back to `/login`, while keeping the login page stable and preserving role-based access.
 
-A stale Supabase session triggers repeated `_refreshAccessToken` calls that fail with "Failed to fetch". Each failure fires `onAuthStateChange`, toggling the auth state and causing the Login page to flicker — the form never stays visible long enough to type.
+## Plan
+1. **Make sign-in wait for a real stored session**
+   - Update `src/pages/Login.tsx` so `handleSubmit` reads the returned `data.session` from `signInWithPassword`.
+   - If a session is returned, explicitly set/confirm it before navigating to `/`.
+   - Navigate only after `supabase.auth.getSession()` confirms the session exists, so `AuthGuard` does not mount during a transient unauthenticated state.
 
-## Fix
+2. **Harden the auth hook against transient null sessions**
+   - Update `src/hooks/useAuth.ts` so a quick `null` auth event cannot immediately mark the user unauthenticated while `getSession()` is still resolving.
+   - Keep the route guard in a loading state until the initial session check is definitively complete.
+   - Clear `effectiveOwnerId` when there is no user, preventing stale owner state between login attempts.
 
-### 1. Login.tsx — Stop reacting to passive auth state on the login page
+3. **Make role lookup fail safely and visibly**
+   - Update `src/hooks/useUserRole.ts` to treat role lookup errors separately from “no role found.”
+   - Avoid immediately redirecting a just-signed-in user because of a brief role-query race.
+   - Keep existing security behavior: users without a valid role still cannot access protected pages.
 
-Remove the auto-redirect logic (`if (!authLoading && user && isAuthorized) return <Navigate ...>`) from the render path entirely. Instead, only redirect after an **explicit** sign-in action succeeds (already handled by `navigate('/')` in `handleSubmit`).
+4. **Validate the auth path**
+   - Verify the login page still renders immediately.
+   - Verify signing in routes to the portal instead of returning to `/login`.
+   - Check console/network signals for auth or role lookup failures.
 
-This means:
-- The login form **always** renders, no matter what `onAuthStateChange` is doing in the background.
-- If the user already has a valid session and navigates to `/login`, `AuthGuard` on `/` will handle them — or we can add a one-time check on mount that doesn't cause re-renders.
-
-### 2. useAuth.ts — Clear stale sessions gracefully
-
-Add error handling in the `getSession` call: if the session exists but has an expired/invalid refresh token, sign out to clear the stale session instead of letting Supabase loop on refresh attempts.
-
-These two changes stop the flicker loop and make the login form always usable.
+## Technical notes
+- No database changes are needed for this fix.
+- This stays within the existing Lovable Cloud auth setup and does not alter user roles or permissions.

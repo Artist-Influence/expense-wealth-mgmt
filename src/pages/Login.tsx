@@ -17,13 +17,26 @@ export default function Login() {
     setError('');
     setLoading(true);
 
-    const { error: authError } = await supabase.auth.signInWithPassword({ email, password });
+    const { data, error: authError } = await supabase.auth.signInWithPassword({ email, password });
 
     if (authError) {
       setError(authError.message);
-    } else {
-      navigate('/', { replace: true });
+      setLoading(false);
+      return;
     }
+
+    // Confirm session is actually persisted before navigating, so AuthGuard
+    // doesn't see a transient unauthenticated state and bounce back here.
+    if (data?.session) {
+      const { data: check } = await supabase.auth.getSession();
+      if (!check.session) {
+        setError('Sign-in succeeded but session was not stored. Please try again.');
+        setLoading(false);
+        return;
+      }
+    }
+
+    navigate('/', { replace: true });
     setLoading(false);
   };
 
