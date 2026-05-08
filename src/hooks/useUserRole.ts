@@ -26,15 +26,28 @@ export function useUserRole(user: User | null): { role: AppRole; roleLoading: bo
     setRoleLoading(true);
 
     (async () => {
-      const { data } = await supabase
-        .from('user_roles')
-        .select('role')
-        .eq('user_id', uid)
-        .maybeSingle();
+      try {
+        const { data, error } = await supabase
+          .from('user_roles')
+          .select('role')
+          .eq('user_id', uid)
+          .maybeSingle();
 
-      if (!cancelled) {
-        setRole((data?.role as AppRole) ?? null);
-        setRoleLoading(false);
+        if (cancelled) return;
+        if (error) {
+          // Network/transient error — leave role null but stop blocking UI
+          console.error('Role lookup failed:', error);
+          setRole(null);
+        } else {
+          setRole((data?.role as AppRole) ?? null);
+        }
+      } catch (e) {
+        if (!cancelled) {
+          console.error('Role lookup threw:', e);
+          setRole(null);
+        }
+      } finally {
+        if (!cancelled) setRoleLoading(false);
       }
     })();
 
