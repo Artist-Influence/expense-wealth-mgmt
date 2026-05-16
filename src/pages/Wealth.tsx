@@ -131,39 +131,39 @@ function SnapshotEditor({
   onDelete: (date: string) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const today = new Date();
-  const defaultMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
-  const [month, setMonth] = useState(defaultMonth);
+  const [date, setDate] = useState<Date>(new Date());
+  const [dateOpen, setDateOpen] = useState(false);
   const [amount, setAmount] = useState<string>('');
   const fmtUsd = (n: number) => '$' + Math.round(n).toLocaleString();
 
   const handleAdd = () => {
-    const num = Number(amount);
+    const num = Number(amount.replace(/,/g, ''));
     if (!Number.isFinite(num) || num <= 0) {
       toast.error('Enter a valid balance');
       return;
     }
-    onSave(`${month}-01`, num);
+    const iso = format(date, 'yyyy-MM-dd');
+    onSave(iso, num);
     setAmount('');
   };
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button variant="ghost" size="icon" className="h-5 w-5" title="Edit monthly balances">
+        <Button variant="ghost" size="icon" className="h-5 w-5" title="Edit balance history">
           <CalendarPlus className="h-3 w-3" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-72 p-3 space-y-2.5" align="end">
+      <PopoverContent className="w-96 p-3 space-y-2.5" align="end">
         <div className="text-xs font-semibold text-foreground">{account.account_name} balances</div>
         <div className="space-y-1 max-h-40 overflow-y-auto">
           {snapshots.length === 0 && (
-            <div className="text-[10px] text-muted-foreground italic">No history yet — add a month below.</div>
+            <div className="text-[10px] text-muted-foreground italic">No history yet — add an entry below.</div>
           )}
           {snapshots.map(s => (
             <div key={s.as_of_date} className="flex items-center justify-between gap-2 text-[11px] py-0.5">
               <span className="text-muted-foreground tabular-nums">
-                {new Date(s.as_of_date).toLocaleString('en-US', { month: 'short', year: 'numeric' })}
+                {format(parseISO(s.as_of_date), 'MMM d, yyyy')}
               </span>
               <div className="flex items-center gap-1.5">
                 <span className="text-foreground tabular-nums font-medium">{fmtUsd(Number(s.balance))}</span>
@@ -180,23 +180,41 @@ function SnapshotEditor({
             </div>
           ))}
         </div>
-        <div className="pt-2 border-t border-border/50 space-y-1.5">
-          <Label className="text-[10px] text-muted-foreground">Add / overwrite a month</Label>
-          <div className="flex gap-1.5">
-            <Input
-              type="month"
-              value={month}
-              onChange={e => setMonth(e.target.value)}
-              className="h-7 text-xs"
-            />
-            <Input
-              type="number"
-              placeholder="Balance"
-              value={amount}
-              onChange={e => setAmount(e.target.value)}
-              className="h-7 text-xs"
-            />
-            <Button size="sm" className="h-7 text-xs px-2" onClick={handleAdd}>Save</Button>
+        <div className="pt-2 border-t border-border/50 space-y-2">
+          <Label className="text-[10px] text-muted-foreground">Add / overwrite an entry</Label>
+          <Popover open={dateOpen} onOpenChange={setDateOpen}>
+            <PopoverTrigger asChild>
+              <Button
+                variant="outline"
+                className={cn('w-full h-8 text-xs justify-start font-normal', !date && 'text-muted-foreground')}
+              >
+                <CalendarIcon className="mr-2 h-3.5 w-3.5" />
+                {date ? format(date, 'MMM d, yyyy') : 'Pick a date'}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0 pointer-events-auto" align="start">
+              <Calendar
+                mode="single"
+                selected={date}
+                onSelect={(d) => { if (d) { setDate(d); setDateOpen(false); } }}
+                initialFocus
+                className={cn('p-3 pointer-events-auto')}
+              />
+            </PopoverContent>
+          </Popover>
+          <div className="flex gap-1.5 items-center">
+            <div className="relative flex-1">
+              <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">$</span>
+              <Input
+                type="text"
+                inputMode="decimal"
+                placeholder="0.00"
+                value={amount}
+                onChange={e => setAmount(e.target.value)}
+                className="h-8 text-sm pl-5 tabular-nums"
+              />
+            </div>
+            <Button size="sm" className="h-8 text-xs px-3" onClick={handleAdd}>Save</Button>
           </div>
         </div>
       </PopoverContent>
