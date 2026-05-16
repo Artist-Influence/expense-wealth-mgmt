@@ -1,27 +1,23 @@
-## Backfill stale current_balance + harden the sync
+## Fix query-key mismatch so cards refresh after a snapshot save
 
-**Findings (from DB):** Collectr has a snapshot for `2026-05-16 = $41,511.21` (the latest), but `investment_accounts.current_balance` is still `$40,561.32`. The new snapshot was saved before the auto-sync fix deployed, so it never updated `current_balance`.
+**Root cause (verified in DB):** Gemini and S&P 500 `current_balance` are correctly set to the new amounts ($13,493.58 and $15,403.52) in the database — the writes are working. But the card stays stale because of a React Query key mismatch:
 
-### Two-part fix
+- Query (line 397): `queryKey: ['investment_accounts']`
+- Invalidations in `upsertSnapshot` / `deleteSnapshot` (lines 569, 588): `['investment_accounts', user?.id]`
 
-1. **Backfill — one-time data update.** For every investment account, set `current_balance` to the `balance` of its most recent `account_balance_snapshots` row. This brings Collectr (and any other account with the same drift) into sync immediately. Run via `supabase--migration` so it's applied with elevated privileges.
+These don't match, so the cache never refetches and the UI shows the old value until a full page reload.
 
-   ```sql
-   UPDATE public.investment_accounts a
-   SET current_balance = s.balance,
-       updated_at = now()
-   FROM (
-     SELECT DISTINCT ON (account_id) account_id, balance, as_of_date
-     FROM public.account_balance_snapshots
-     ORDER BY account_id, as_of_date DESC
-   ) s
-   WHERE s.account_id = a.id
-     AND a.current_balance <> s.balance;
-   ```
+### Fix (single file: `src/pages/Wealth.tsx`)
 
-2. **Harden `upsertSnapshot` and `deleteSnapshot` in `src/pages/Wealth.tsx`.** After mutating snapshots, always recompute the latest snapshot for that account and set `investment_accounts.current_balance` to that value (or leave alone only if no snapshots remain). Simpler and resilient to ordering issues — no `as_of_date` comparison branch needed.
+1. Change both invalidations in `upsertSnapshot.onSuccess` and `deleteSnapshot.onSuccess` from `['investment_accounts', user?.id]` to `['investment_accounts']` to match the query key.
+2. Do the same audit pass on the `account_balance_snapshots` queries — confirm key and invalidations match (they currently use `['account_balance_snapshots', user?.id]` on both sides, which is fine).
+
+### Guardrail to prevent recurrence
+
+Add a short top-of-file comment block near the query definitions documenting the convention: "Invalidation keys MUST exactly match query keys. When in doubt, omit `user?.id` since RLS already scopes results."
+
+No schema, no UI changes.
 
 ### Validation
-- Reload `/wealth` → Collectr card shows `$41,511.21`.
-- Add a new snapshot dated earlier than today → card still reflects the actual latest snapshot.
-- Delete the latest snapshot → card falls back to the previous latest.
+- Save a new snapshot for any investment → card total updates immediately (no reload).
+- Delete the latest snapshot → card total falls back without reload.

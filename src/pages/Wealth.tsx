@@ -566,7 +566,7 @@ export default function Wealth() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['account_balance_snapshots', user?.id] });
-      qc.invalidateQueries({ queryKey: ['investment_accounts', user?.id] });
+      qc.invalidateQueries({ queryKey: ['investment_accounts'] });
       toast.success('Balance saved');
     },
     onError: (e: any) => toast.error(e.message),
@@ -585,7 +585,7 @@ export default function Wealth() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['account_balance_snapshots', user?.id] });
-      qc.invalidateQueries({ queryKey: ['investment_accounts', user?.id] });
+      qc.invalidateQueries({ queryKey: ['investment_accounts'] });
       toast.success('Balance removed');
     },
     onError: (e: any) => toast.error(e.message),
