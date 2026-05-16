@@ -537,6 +537,22 @@ export default function Wealth() {
     onError: (e: any) => toast.error(e.message),
   });
 
+  const syncCurrentBalance = async (account_id: string) => {
+    const { data: latest } = await supabase
+      .from('account_balance_snapshots')
+      .select('balance')
+      .eq('account_id', account_id)
+      .order('as_of_date', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (latest) {
+      await supabase
+        .from('investment_accounts')
+        .update({ current_balance: Number(latest.balance) })
+        .eq('id', account_id);
+    }
+  };
+
   const upsertSnapshot = useMutation({
     mutationFn: async ({ account_id, as_of_date, balance }: { account_id: string; as_of_date: string; balance: number }) => {
       const { error } = await supabase
@@ -546,21 +562,7 @@ export default function Wealth() {
           { onConflict: 'account_id,as_of_date' }
         );
       if (error) throw error;
-
-      // If this snapshot is the latest for the account, sync current_balance on the card.
-      const { data: latest } = await supabase
-        .from('account_balance_snapshots')
-        .select('as_of_date')
-        .eq('account_id', account_id)
-        .order('as_of_date', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (!latest || as_of_date >= latest.as_of_date) {
-        await supabase
-          .from('investment_accounts')
-          .update({ current_balance: balance })
-          .eq('id', account_id);
-      }
+      await syncCurrentBalance(account_id);
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['account_balance_snapshots', user?.id] });
