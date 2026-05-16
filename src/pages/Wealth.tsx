@@ -581,20 +581,7 @@ export default function Wealth() {
         .eq('as_of_date', as_of_date);
       if (error) throw error;
 
-      // If we removed the latest snapshot, fall back to the new latest for current_balance.
-      const { data: nextLatest } = await supabase
-        .from('account_balance_snapshots')
-        .select('as_of_date, balance')
-        .eq('account_id', account_id)
-        .order('as_of_date', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (nextLatest && as_of_date > nextLatest.as_of_date) {
-        await supabase
-          .from('investment_accounts')
-          .update({ current_balance: Number(nextLatest.balance) })
-          .eq('id', account_id);
-      }
+      await syncCurrentBalance(account_id);
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['account_balance_snapshots', user?.id] });
