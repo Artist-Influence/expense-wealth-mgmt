@@ -1,22 +1,27 @@
-## Sync investment card balance when a new snapshot is saved
+## Backfill stale current_balance + harden the sync
 
-**Bug:** `upsertSnapshot` only writes to `account_balance_snapshots`. The card displays `investment_accounts.current_balance`, which never updates, so the card stays stale.
+**Findings (from DB):** Collectr has a snapshot for `2026-05-16 = $41,511.21` (the latest), but `investment_accounts.current_balance` is still `$40,561.32`. The new snapshot was saved before the auto-sync fix deployed, so it never updated `current_balance`.
 
-### Fix (single file: `src/pages/Wealth.tsx`)
+### Two-part fix
 
-Update the `upsertSnapshot` mutation so, after upserting the snapshot, it also updates `investment_accounts.current_balance` — but **only when the saved snapshot is the latest** for that account (so backfilling an older historical entry doesn't overwrite today's balance with an old number).
+1. **Backfill — one-time data update.** For every investment account, set `current_balance` to the `balance` of its most recent `account_balance_snapshots` row. This brings Collectr (and any other account with the same drift) into sync immediately. Run via `supabase--migration` so it's applied with elevated privileges.
 
-Logic:
-1. Upsert the snapshot row as today.
-2. Query the max `as_of_date` for that `account_id` from `account_balance_snapshots`.
-3. If the just-saved `as_of_date >=` that max, update `investment_accounts.current_balance` to the new balance for that account.
-4. On success, invalidate both `['account_balance_snapshots', user?.id]` and `['investment_accounts', user?.id]` so the card re-renders.
+   ```sql
+   UPDATE public.investment_accounts a
+   SET current_balance = s.balance,
+       updated_at = now()
+   FROM (
+     SELECT DISTINCT ON (account_id) account_id, balance, as_of_date
+     FROM public.account_balance_snapshots
+     ORDER BY account_id, as_of_date DESC
+   ) s
+   WHERE s.account_id = a.id
+     AND a.current_balance <> s.balance;
+   ```
 
-Apply the same "latest wins" rule to `deleteSnapshot`: after deleting, if the removed date was the latest, refresh `current_balance` to the new latest snapshot's balance (or leave unchanged if no snapshots remain).
-
-No schema changes. No UI changes beyond the card auto-refreshing.
+2. **Harden `upsertSnapshot` and `deleteSnapshot` in `src/pages/Wealth.tsx`.** After mutating snapshots, always recompute the latest snapshot for that account and set `investment_accounts.current_balance` to that value (or leave alone only if no snapshots remain). Simpler and resilient to ordering issues — no `as_of_date` comparison branch needed.
 
 ### Validation
-- Add a snapshot dated today with a new amount → card total updates immediately.
-- Add a snapshot dated 6 months ago with a different amount → card total does NOT change (older history backfill).
-- Delete the latest snapshot → card total falls back to the prior latest snapshot.
+- Reload `/wealth` → Collectr card shows `$41,511.21`.
+- Add a new snapshot dated earlier than today → card still reflects the actual latest snapshot.
+- Delete the latest snapshot → card falls back to the previous latest.
