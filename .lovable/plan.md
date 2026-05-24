@@ -1,23 +1,29 @@
-## Fix query-key mismatch so cards refresh after a snapshot save
+## Goal
+Render a dot on the wealth chart at every actual snapshot entry (not just month buckets), with larger dots on the Total line and smaller dots on each per-account line.
 
-**Root cause (verified in DB):** Gemini and S&P 500 `current_balance` are correctly set to the new amounts ($13,493.58 and $15,403.52) in the database — the writes are working. But the card stays stale because of a React Query key mismatch:
+## Changes — `src/components/CombinedWealthChart.tsx`
 
-- Query (line 397): `queryKey: ['investment_accounts']`
-- Invalidations in `upsertSnapshot` / `deleteSnapshot` (lines 569, 588): `['investment_accounts', user?.id]`
+1. **Replace month-bucketed x-axis with snapshot-date x-axis**
+   - Build the `series` from the union of every `snapshots[].as_of_date` (deduped, sorted) instead of synthesized month-firsts.
+   - Keep clamping to `startDate` (default Jan 2026) so pre-2026 stray snapshots don't drag the axis back.
+   - For each date row, fill every account's value using the existing "most recent snapshot at-or-before this date" carry-forward, so lines stay continuous even on dates where only one account had an entry.
+   - Keep the "Today" anchor (uses `current_balance`) appended only if today is after the last snapshot date.
 
-These don't match, so the cache never refetches and the UI shows the old value until a full page reload.
+2. **Dot sizing**
+   - Total line: `dot={{ r: 3.5 }}`, `activeDot={{ r: 5 }}` (slightly bigger than today).
+   - Per-account lines: `dot={{ r: 2 }}`, `activeDot={{ r: 3.5 }}` (smaller).
+   - Hidden accounts: `dot={false}` (unchanged).
 
-### Fix (single file: `src/pages/Wealth.tsx`)
+3. **X-axis label formatting**
+   - Since ticks are now arbitrary dates, format as `MMM D` (e.g. `Jan 26`) using `parseLocalDate`. For the "Today" row keep the label `Today`.
+   - Add `interval="preserveStartEnd"` and `minTickGap={24}` so dense entry days don't overlap labels.
 
-1. Change both invalidations in `upsertSnapshot.onSuccess` and `deleteSnapshot.onSuccess` from `['investment_accounts', user?.id]` to `['investment_accounts']` to match the query key.
-2. Do the same audit pass on the `account_balance_snapshots` queries — confirm key and invalidations match (they currently use `['account_balance_snapshots', user?.id]` on both sides, which is fine).
+4. **Tooltip**
+   - Update label formatter to show the full `MMM D, YYYY` for the hovered date (or `Today`).
 
-### Guardrail to prevent recurrence
+No backend, query, or other-file changes.
 
-Add a short top-of-file comment block near the query definitions documenting the convention: "Invalidation keys MUST exactly match query keys. When in doubt, omit `user?.id` since RLS already scopes results."
-
-No schema, no UI changes.
-
-### Validation
-- Save a new snapshot for any investment → card total updates immediately (no reload).
-- Delete the latest snapshot → card total falls back without reload.
+## Validation
+- Add a snapshot mid-month → a new dot appears on that exact date on both the total and that account's line.
+- Multiple snapshots in one month → multiple dots, not a single monthly average.
+- Toggling an account off → its dots disappear and the Total line recomputes (already handled).

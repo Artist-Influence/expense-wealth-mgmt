@@ -27,6 +27,10 @@ const parseLocalDate = (yyyymmdd: string) => {
 };
 const labelForMonth = (yyyymmdd: string) =>
   parseLocalDate(yyyymmdd).toLocaleString('en-US', { month: 'short', year: '2-digit' });
+const labelForDate = (yyyymmdd: string) =>
+  parseLocalDate(yyyymmdd).toLocaleString('en-US', { month: 'short', day: 'numeric' });
+const fullDateLabel = (yyyymmdd: string) =>
+  parseLocalDate(yyyymmdd).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
 export function CombinedWealthChart({
   accounts,
@@ -77,16 +81,14 @@ export function CombinedWealthChart({
     // auto-snapshots from account-creation day don't shift the x-axis backwards.
     const earliest = allDates[0];
     const effectiveStart = startDate > earliest ? startDate : earliest;
-    const startD = parseLocalDate(effectiveStart);
     const now = new Date();
-    const months: string[] = [];
-    const cur = new Date(startD.getFullYear(), startD.getMonth(), 1);
-    while (cur <= now) {
-      months.push(`${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, '0')}-01`);
-      cur.setMonth(cur.getMonth() + 1);
-    }
-    // Append a "Today" anchor that uses current_balance for accounts (live value)
     const todayKey = now.toISOString().slice(0, 10);
+
+    // Use the actual set of snapshot dates (deduped, sorted, clamped to effectiveStart)
+    // so each entry produces its own dot on the chart.
+    const dates = Array.from(new Set(snapshots.map(s => s.as_of_date)))
+      .filter(d => d >= effectiveStart && d <= todayKey)
+      .sort();
 
     // Helper: most recent snapshot at-or-before a given date for an account.
     const balanceAt = (accId: string, dateStr: string): number | null => {
@@ -99,13 +101,13 @@ export function CombinedWealthChart({
       return last;
     };
 
-    const rows = months.map(m => {
-      const label = labelForMonth(m);
-      const row: any = { label, _date: m };
+    const rows = dates.map(d => {
+      const label = labelForDate(d);
+      const row: any = { label, _date: d };
       let total = 0;
       let any = false;
       for (const a of accounts) {
-        const v = balanceAt(a.id, m);
+        const v = balanceAt(a.id, d);
         if (v != null) {
           row[a.id] = v;
           if (!hidden.has(a.id)) {
@@ -118,9 +120,8 @@ export function CombinedWealthChart({
       return row;
     });
 
-    // Append a "Today" anchor only if today is on/after the chart start date.
-    // Otherwise we'd plant a phantom point in Nov/Dec 2025 left of Jan-26 data.
-    if (todayKey >= effectiveStart) {
+    // Append a "Today" anchor only if today is strictly after the last snapshot date.
+    if (dates.length === 0 || todayKey > dates[dates.length - 1]) {
       const todayRow: any = { label: 'Today', _date: todayKey };
       let totalToday = 0;
       let anyToday = false;
@@ -133,11 +134,9 @@ export function CombinedWealthChart({
         }
       }
       todayRow.total = anyToday ? totalToday : null;
-      // Only add the Today anchor if it's strictly after the last monthly snapshot
-      // so it doesn't collide with that month's bar.
-      const lastMonthKey = months[months.length - 1];
-      if (todayKey > lastMonthKey) rows.push(todayRow);
+      rows.push(todayRow);
     }
+
 
     // Defensive: chronological order regardless of how anchors were added.
     rows.sort((a, b) => a._date.localeCompare(b._date));
@@ -176,7 +175,12 @@ export function CombinedWealthChart({
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={series} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="2 4" stroke="hsl(var(--border))" opacity={0.5} />
-              <XAxis dataKey="label" tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} />
+              <XAxis
+                dataKey="label"
+                tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
+                interval="preserveStartEnd"
+                minTickGap={24}
+              />
               <YAxis
                 tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
                 tickFormatter={(v) => v >= 1000 ? `$${Math.round(v / 1000)}k` : `$${v}`}
@@ -187,6 +191,12 @@ export function CombinedWealthChart({
                   border: '1px solid hsl(var(--border))',
                   borderRadius: 8,
                   fontSize: 11,
+                }}
+                labelFormatter={(_label: any, payload: any) => {
+                  const d = payload?.[0]?.payload?._date;
+                  if (!d) return _label;
+                  const today = new Date().toISOString().slice(0, 10);
+                  return d === today ? 'Today' : fullDateLabel(d);
                 }}
                 formatter={(value: any, name: any) => {
                   if (value == null) return ['—', name];
@@ -200,7 +210,8 @@ export function CombinedWealthChart({
                 dataKey="total"
                 stroke="hsl(var(--foreground))"
                 strokeWidth={2.5}
-                dot={{ r: 3 }}
+                dot={{ r: 3.5 }}
+                activeDot={{ r: 5 }}
                 connectNulls
                 name="total"
               />
@@ -212,6 +223,7 @@ export function CombinedWealthChart({
                   stroke={colorFor(a.id)}
                   strokeWidth={hidden.has(a.id) ? 0 : 1.75}
                   dot={hidden.has(a.id) ? false : { r: 2 }}
+                  activeDot={hidden.has(a.id) ? false : { r: 3.5 }}
                   connectNulls
                   name={a.id}
                   hide={hidden.has(a.id)}
