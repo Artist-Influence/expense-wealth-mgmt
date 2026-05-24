@@ -175,7 +175,12 @@ export function CombinedWealthChart({
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={series} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="2 4" stroke="hsl(var(--border))" opacity={0.5} />
-              <XAxis dataKey="label" tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} />
+              <XAxis
+                dataKey="label"
+                tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
+                interval="preserveStartEnd"
+                minTickGap={24}
+              />
               <YAxis
                 tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
                 tickFormatter={(v) => v >= 1000 ? `$${Math.round(v / 1000)}k` : `$${v}`}
@@ -186,6 +191,12 @@ export function CombinedWealthChart({
                   border: '1px solid hsl(var(--border))',
                   borderRadius: 8,
                   fontSize: 11,
+                }}
+                labelFormatter={(_label: any, payload: any) => {
+                  const d = payload?.[0]?.payload?._date;
+                  if (!d) return _label;
+                  const today = new Date().toISOString().slice(0, 10);
+                  return d === today ? 'Today' : fullDateLabel(d);
                 }}
                 formatter={(value: any, name: any) => {
                   if (value == null) return ['—', name];
@@ -199,7 +210,8 @@ export function CombinedWealthChart({
                 dataKey="total"
                 stroke="hsl(var(--foreground))"
                 strokeWidth={2.5}
-                dot={{ r: 3 }}
+                dot={{ r: 3.5 }}
+                activeDot={{ r: 5 }}
                 connectNulls
                 name="total"
               />
@@ -211,6 +223,7 @@ export function CombinedWealthChart({
                   stroke={colorFor(a.id)}
                   strokeWidth={hidden.has(a.id) ? 0 : 1.75}
                   dot={hidden.has(a.id) ? false : { r: 2 }}
+                  activeDot={hidden.has(a.id) ? false : { r: 3.5 }}
                   connectNulls
                   name={a.id}
                   hide={hidden.has(a.id)}
