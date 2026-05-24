@@ -27,6 +27,10 @@ const parseLocalDate = (yyyymmdd: string) => {
 };
 const labelForMonth = (yyyymmdd: string) =>
   parseLocalDate(yyyymmdd).toLocaleString('en-US', { month: 'short', year: '2-digit' });
+const labelForDate = (yyyymmdd: string) =>
+  parseLocalDate(yyyymmdd).toLocaleString('en-US', { month: 'short', day: 'numeric' });
+const fullDateLabel = (yyyymmdd: string) =>
+  parseLocalDate(yyyymmdd).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
 export function CombinedWealthChart({
   accounts,
