@@ -81,16 +81,14 @@ export function CombinedWealthChart({
     // auto-snapshots from account-creation day don't shift the x-axis backwards.
     const earliest = allDates[0];
     const effectiveStart = startDate > earliest ? startDate : earliest;
-    const startD = parseLocalDate(effectiveStart);
     const now = new Date();
-    const months: string[] = [];
-    const cur = new Date(startD.getFullYear(), startD.getMonth(), 1);
-    while (cur <= now) {
-      months.push(`${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, '0')}-01`);
-      cur.setMonth(cur.getMonth() + 1);
-    }
-    // Append a "Today" anchor that uses current_balance for accounts (live value)
     const todayKey = now.toISOString().slice(0, 10);
+
+    // Use the actual set of snapshot dates (deduped, sorted, clamped to effectiveStart)
+    // so each entry produces its own dot on the chart.
+    const dates = Array.from(new Set(snapshots.map(s => s.as_of_date)))
+      .filter(d => d >= effectiveStart && d <= todayKey)
+      .sort();
 
     // Helper: most recent snapshot at-or-before a given date for an account.
     const balanceAt = (accId: string, dateStr: string): number | null => {
@@ -103,8 +101,27 @@ export function CombinedWealthChart({
       return last;
     };
 
-    const rows = months.map(m => {
-      const label = labelForMonth(m);
+    const rows = dates.map(d => {
+      const label = labelForDate(d);
+      const row: any = { label, _date: d };
+      let total = 0;
+      let any = false;
+      for (const a of accounts) {
+        const v = balanceAt(a.id, d);
+        if (v != null) {
+          row[a.id] = v;
+          if (!hidden.has(a.id)) {
+            total += v;
+            any = true;
+          }
+        }
+      }
+      row.total = any ? total : null;
+      return row;
+    });
+
+    // Append a "Today" anchor only if today is strictly after the last snapshot date.
+    if (dates.length === 0 || todayKey > dates[dates.length - 1]) {
       const row: any = { label, _date: m };
       let total = 0;
       let any = false;
