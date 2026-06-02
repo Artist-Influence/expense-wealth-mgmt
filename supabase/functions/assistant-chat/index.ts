@@ -365,7 +365,7 @@ Deno.serve(async (req) => {
 
     const result = streamText({
       model,
-      system: PLATFORM_GUIDE,
+      system: buildDateBlock(dateCtx) + PLATFORM_GUIDE,
       messages: await convertToModelMessages(messages),
       tools,
       stopWhen: stepCountIs(50),
