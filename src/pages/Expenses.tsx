@@ -2279,6 +2279,8 @@ export default function Expenses() {
         onConfirm={handlePreviewConfirm}
         onCancel={handlePreviewCancel}
         filePreviews={filePreviews}
+        paymentMethods={paymentMethods}
+        onMethodChange={handlePreviewMethodChange}
       />
 
       {/* Duplicate Resolver Dialog */}
