@@ -181,7 +181,39 @@ export default function SettingsPage() {
     setRules((data || []) as Rule[]);
   };
 
-  const addCategory = async (mode: 'personal' | 'business', name: string) => {
+  const loadMethods = async () => {
+    const { data } = await supabase.from('payment_methods').select('*').eq('owner_id', ownerId!).order('sort_order');
+    setMethods((data || []) as PaymentMethod[]);
+  };
+
+  const addMethod = async () => {
+    const name = newMethod.name.trim();
+    if (!name) { toast.error('Method name is required'); return; }
+    const duplicate = methods.find(m => m.name.toLowerCase() === name.toLowerCase());
+    if (duplicate) { toast.error(`Method "${name}" already exists`); return; }
+    await supabase.from('payment_methods').insert({
+      name,
+      mode: newMethod.mode,
+      account_type: newMethod.account_type,
+      match_pattern: newMethod.match_pattern.trim() || null,
+      sort_order: methods.length,
+      owner_id: user!.id,
+    });
+    setNewMethod({ name: '', mode: 'personal', account_type: 'credit_card', match_pattern: '' });
+    await loadMethods();
+    toast.success(`Method "${name}" added`);
+  };
+
+  const updateMethod = async (id: string, patch: Partial<PaymentMethod>) => {
+    await supabase.from('payment_methods').update(patch).eq('id', id);
+    await loadMethods();
+  };
+
+  const deleteMethod = async (id: string) => {
+    await supabase.from('payment_methods').delete().eq('id', id);
+    await loadMethods();
+    toast.success('Method deleted');
+  };
     if (!name.trim()) return;
     const cats = mode === 'personal' ? personalCats : businessCats;
     const duplicate = cats.find(c => c.category_name.toLowerCase() === name.trim().toLowerCase());
