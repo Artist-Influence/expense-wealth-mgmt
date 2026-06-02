@@ -99,6 +99,18 @@ export function ImportPreviewDialog({ open, onConfirm, onCancel, filePreviews, p
                 {/* Expanded: column mappings */}
                 {isExpanded && fp.preview && (
                   <div className="mt-3 space-y-3">
+                    {onMethodChange && (
+                      <div>
+                        <h4 className="text-[10px] font-medium text-muted-foreground mb-1.5">Payment Method</h4>
+                        <MethodSelect
+                          value={fp.method || ''}
+                          methods={paymentMethods}
+                          onChange={v => onMethodChange(idx, v)}
+                          className="h-8 text-xs"
+                          placeholder="Auto-detect / select"
+                        />
+                      </div>
+                    )}
                     <div>
                       <h4 className="text-[10px] font-medium text-muted-foreground mb-1.5">Column Mappings</h4>
                       <div className="space-y-1">
