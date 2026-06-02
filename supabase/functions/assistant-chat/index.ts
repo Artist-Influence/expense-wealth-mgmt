@@ -12,6 +12,73 @@ const corsHeaders = {
 // Statuses that count toward financial totals (mirrors the app's "suggested" review mode).
 const COUNTED_STATUSES = ["approved", "auto_categorized", "edited", "suggested", "ai_suggested"];
 
+// The owner is based in NYC (matches NYS/NYC tax context), so resolve "today" in that timezone.
+const OWNER_TIMEZONE = "America/New_York";
+
+// Returns YYYY-MM-DD for a given Date in the owner's timezone.
+function ymdInTz(d: Date, timeZone = OWNER_TIMEZONE): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(d);
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
+  return `${get("year")}-${get("month")}-${get("day")}`;
+}
+
+// Builds an authoritative current-date context with pre-computed common ranges.
+function getDateContext() {
+  const now = new Date();
+  const today = ymdInTz(now);
+  const [y, m] = today.split("-").map(Number);
+
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const lastDayOfMonth = (yy: number, mm: number) => new Date(Date.UTC(yy, mm, 0)).getUTCDate();
+
+  const prevMonthY = m === 1 ? y - 1 : y;
+  const prevMonth = m === 1 ? 12 : m - 1;
+
+  const weekday = new Intl.DateTimeFormat("en-US", {
+    timeZone: OWNER_TIMEZONE,
+    weekday: "long",
+  }).format(now);
+  const longDate = new Intl.DateTimeFormat("en-US", {
+    timeZone: OWNER_TIMEZONE,
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  }).format(now);
+
+  return {
+    today,
+    current_year: y,
+    current_month: `${y}-${pad(m)}`,
+    weekday,
+    long_date: longDate,
+    this_year_start: `${y}-01-01`,
+    this_month_start: `${y}-${pad(m)}-01`,
+    last_month_start: `${prevMonthY}-${pad(prevMonth)}-01`,
+    last_month_end: `${prevMonthY}-${pad(prevMonth)}-${pad(lastDayOfMonth(prevMonthY, prevMonth))}`,
+    last_year_start: `${y - 1}-01-01`,
+    last_year_end: `${y - 1}-12-31`,
+  };
+}
+
+function buildDateBlock(ctx: ReturnType<typeof getDateContext>): string {
+  return `
+CURRENT DATE CONTEXT (authoritative — never override from training data or memory):
+- Today is ${ctx.today} (${ctx.weekday}, ${ctx.long_date}).
+- Current year = ${ctx.current_year}. Current month = ${ctx.current_month}.
+- "this year" / "YTD" = ${ctx.this_year_start} through ${ctx.today}.
+- "this month" = ${ctx.this_month_start} through ${ctx.today}.
+- "last month" = ${ctx.last_month_start} through ${ctx.last_month_end}.
+- "last year" = ${ctx.last_year_start} through ${ctx.last_year_end}.
+- NEVER assume any other year. If the user does not name a year, use the current year (${ctx.current_year}).
+- You may call get_today to re-confirm these computed ranges before any data query.
+`;
+}
+
 const PLATFORM_GUIDE = `
 You are the in-app AI assistant for a personal + business cash-control and wealth platform used by a single owner.
 You can (1) explain how the platform works and (2) answer questions about the owner's live financial data using the provided tools.
