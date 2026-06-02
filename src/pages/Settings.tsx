@@ -214,6 +214,8 @@ export default function SettingsPage() {
     await loadMethods();
     toast.success('Method deleted');
   };
+
+  const addCategory = async (mode: 'personal' | 'business', name: string) => {
     if (!name.trim()) return;
     const cats = mode === 'personal' ? personalCats : businessCats;
     const duplicate = cats.find(c => c.category_name.toLowerCase() === name.trim().toLowerCase());
