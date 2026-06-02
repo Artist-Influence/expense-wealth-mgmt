@@ -1,34 +1,36 @@
-## Goal
-Make the Assistant chat reliably stream answers instead of failing with "Assistant error / Failed to fetch".
+# Fix: Assistant uses wrong year ("2024 YTD" instead of 2026)
 
 ## Root cause
-The `assistant-chat` edge function streams its reply with `result.toUIMessageStreamResponse({ originalMessages, onFinish })` but does **not** attach CORS headers. The browser blocks the cross-origin streamed response (no `Access-Control-Allow-Origin`), producing `TypeError: Failed to fetch` on the client and `Http: connection closed before message completed` in the function logs. The preflight (`OPTIONS`) and the 500 error path already include `corsHeaders`; only the success/streaming path is missing them.
+The `assistant-chat` edge function's system prompt (`PLATFORM_GUIDE`) never tells the model **what today's date is**. Large language models have no clock — when a user says "this year" or "YTD", the model guesses a year from its training data (it picked **2024**), even though the underlying data is from **2026**.
 
-## Changes
+I verified the data: business transactions are almost entirely dated **2026** (1,152 rows) with a handful in 2025. So the figures shown are likely real, but the model mislabeled the period as "2024 (YTD)" purely because it didn't know the current date.
 
-### 1. `supabase/functions/assistant-chat/index.ts`
-Add CORS headers to the streaming response:
+## The fix
+Make date handling deterministic and impossible to get wrong by giving the model the real date and forcing it to use computed ranges instead of guessing.
 
-```ts
-return result.toUIMessageStreamResponse({
-  headers: corsHeaders,
-  originalMessages: messages,
-  onFinish: async ({ responseMessage }) => { /* unchanged */ },
-});
+### 1. Inject the live current date into the system prompt
+In `supabase/functions/assistant-chat/index.ts`, compute the server date at request time (in the owner's timezone, America/New_York to match the NYS/NYC tax context) and prepend a hard, explicit block to the system prompt, e.g.:
+
+```text
+CURRENT DATE CONTEXT (authoritative — never override from memory):
+- Today is {YYYY-MM-DD} ({weekday}, {Month D, YYYY}).
+- Current year = {YYYY}. Current month = {YYYY-MM}.
+- "this year" / "YTD" = {YYYY}-01-01 through today.
+- "last year" = {YYYY-1}. "last month" = previous calendar month.
+- "this month" = {YYYY-MM-01} through today.
+NEVER assume any other year. If a user does not name a year, use the current year above.
 ```
 
-No other logic in the function changes. Then redeploy the function (automatic).
+### 2. Add an explicit `get_today` tool
+Add a tiny tool that returns the current date and pre-computed common ranges (this_year_start, today, this_month_start, last_month_start/end, last_year_start/end). This gives the model a reliable source to call and removes any ambiguity about how to compute ranges before calling `query_expenses` / `query_top_merchants` / `query_income`.
 
-### 2. (Optional, minor) `src/components/AssistantChat.tsx` / `prompt-input.tsx`
-The console shows a non-fatal warning: "Function components cannot be given refs" for `PromptInputTextarea`. This does not break the chat, but if desired I can wrap `PromptInputTextarea` in `React.forwardRef` so the composer `textareaRef` attaches cleanly. This is cosmetic and can be skipped.
+### 3. Harden the period-labeling rule
+Add a STYLE rule: when reporting a number, the model must state the exact date range it used (from the computed values), e.g. "Jan 1, 2026 – Jun 2, 2026 (YTD)", and must never state a year it did not compute from the current-date context.
 
-## Validation
-1. Deploy the edge function.
-2. Open `/assistant`, send a message (e.g. "What are my top business expenses this year?").
-3. Confirm the response streams in with no "Assistant error" toast.
-4. Confirm the network response for `assistant-chat` carries `access-control-allow-origin: *` and the function logs no longer show "connection closed before message completed".
-5. Verify tool calls (expenses/income/etc.) still render and the message persists on reload.
+### 4. Deploy & verify
+- Redeploy `assistant-chat`.
+- Test via a direct call asking "What are my top business expenses this year?" and confirm the response references **2026** with the correct YTD range, and that the totals match the 2026 data.
 
 ## Technical notes
-- The earlier `Content-Type` removal was correct and stays as-is; the AI SDK's `DefaultChatTransport` sets it automatically.
-- Accuracy of answers is governed by the existing read-only tools and financial-integrity filters, which are unchanged; once the stream is unblocked the assistant will return data-backed answers as designed.
+- Date computation uses `Intl.DateTimeFormat` with `timeZone: "America/New_York"` so "today" and YTD boundaries are correct regardless of the server's UTC clock.
+- No database schema changes, no client changes required — this is contained to the edge function. (Optional: the same current-date block could later be surfaced to other AI functions, but that's out of scope here.)
