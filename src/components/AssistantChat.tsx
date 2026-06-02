@@ -145,11 +145,18 @@ export function AssistantChat({ threadId, ownerId, initialMessages, canSend, onF
                   }
                   if (part.type.startsWith('tool-') || part.type === 'dynamic-tool') {
                     const toolPart = part as unknown as ToolPart;
+                    const niceName =
+                      toolPart.type === 'dynamic-tool'
+                        ? (toolPart as { toolName: string }).toolName
+                        : toolPart.type.replace(/^tool-/, '');
+                    const title = niceName.replace(/_/g, ' ');
                     return (
                       <Tool key={i} defaultOpen={false}>
                         <ToolHeader
-                          type={toolPart.type as ToolPart['type']}
+                          title={title}
+                          type={'dynamic-tool'}
                           state={toolPart.state}
+                          toolName={niceName}
                         />
                         <ToolContent>
                           <ToolInput input={toolPart.input} />
