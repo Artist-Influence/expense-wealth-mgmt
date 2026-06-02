@@ -496,7 +496,7 @@ export default function Wealth() {
       }
       return map;
     },
-    enabled: !!user && accounts.length > 0,
+    enabled: !!user && !!ownerId && accounts.length > 0,
   });
 
   // App settings — holds portfolio-wide end-of-year wealth target.
