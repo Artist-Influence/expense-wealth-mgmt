@@ -66,6 +66,7 @@ interface TransactionDetailDrawerProps {
   open: boolean;
   onClose: () => void;
   categories: string[];
+  paymentMethods?: PaymentMethod[];
   onSave: (id: string, values: any) => Promise<void>;
   onApprove: (tx: Transaction) => Promise<void>;
   onToggleTransfer: (tx: Transaction) => Promise<void>;
