@@ -59,7 +59,6 @@ export function AssistantChat({ threadId, ownerId, initialMessages, canSend, onF
             headers: {
               Authorization: `Bearer ${token}`,
               apikey: ANON_KEY,
-              'Content-Type': 'application/json',
             },
             body: { messages, threadId: id, ownerId },
           };
