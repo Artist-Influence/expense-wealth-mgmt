@@ -2226,6 +2226,7 @@ export default function Expenses() {
         open={!!detailTx}
         onClose={() => setDetailTx(null)}
         categories={categories}
+        paymentMethods={paymentMethods}
         onSave={handleDrawerSave}
         onApprove={approveRow}
         onToggleTransfer={toggleTransfer}
