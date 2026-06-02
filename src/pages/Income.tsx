@@ -105,7 +105,7 @@ export default function Income() {
     }
     setTransactions(allData);
     setLoading(false);
-  }, [user]);
+  }, [user, ownerId]);
 
   useEffect(() => { fetchTransactions(); }, [fetchTransactions]);
 
