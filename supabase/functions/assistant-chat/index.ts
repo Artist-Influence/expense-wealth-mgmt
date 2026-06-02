@@ -2,15 +2,28 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import { createOpenAICompatible } from "npm:@ai-sdk/openai-compatible";
 import { convertToModelMessages, streamText, tool, stepCountIs, type UIMessage } from "npm:ai";
 import { z } from "npm:zod";
+import {
+  getIncomeSummary,
+  getExpenseSummary,
+  getProfitAndLoss,
+  getCashFlow,
+  getNetWorth,
+  getRunway,
+  getCategoryDrilldown,
+  getMerchantDrilldown,
+  getRecurring,
+  getAnomalies,
+  getAffordability,
+  getDataQuality,
+  COUNTED_STATUSES,
+  type Scope,
+} from "./finance.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
-
-// Statuses that count toward financial totals (mirrors the app's "suggested" review mode).
-const COUNTED_STATUSES = ["approved", "auto_categorized", "edited", "suggested", "ai_suggested"];
 
 // The owner is based in NYC (matches NYS/NYC tax context), so resolve "today" in that timezone.
 const OWNER_TIMEZONE = "America/New_York";
@@ -35,14 +48,12 @@ function getDateContext() {
 
   const pad = (n: number) => String(n).padStart(2, "0");
   const lastDayOfMonth = (yy: number, mm: number) => new Date(Date.UTC(yy, mm, 0)).getUTCDate();
+  const minus = (days: number) => ymdInTz(new Date(now.getTime() - days * 86_400_000));
 
   const prevMonthY = m === 1 ? y - 1 : y;
   const prevMonth = m === 1 ? 12 : m - 1;
 
-  const weekday = new Intl.DateTimeFormat("en-US", {
-    timeZone: OWNER_TIMEZONE,
-    weekday: "long",
-  }).format(now);
+  const weekday = new Intl.DateTimeFormat("en-US", { timeZone: OWNER_TIMEZONE, weekday: "long" }).format(now);
   const longDate = new Intl.DateTimeFormat("en-US", {
     timeZone: OWNER_TIMEZONE,
     year: "numeric",
@@ -62,6 +73,9 @@ function getDateContext() {
     last_month_end: `${prevMonthY}-${pad(prevMonth)}-${pad(lastDayOfMonth(prevMonthY, prevMonth))}`,
     last_year_start: `${y - 1}-01-01`,
     last_year_end: `${y - 1}-12-31`,
+    trailing_30_start: minus(30),
+    trailing_90_start: minus(90),
+    trailing_180_start: minus(180),
   };
 }
 
@@ -74,38 +88,47 @@ CURRENT DATE CONTEXT (authoritative — never override from training data or mem
 - "this month" = ${ctx.this_month_start} through ${ctx.today}.
 - "last month" = ${ctx.last_month_start} through ${ctx.last_month_end}.
 - "last year" = ${ctx.last_year_start} through ${ctx.last_year_end}.
+- "trailing 30 days" = ${ctx.trailing_30_start} through ${ctx.today}.
+- "trailing 90 days" = ${ctx.trailing_90_start} through ${ctx.today}.
 - NEVER assume any other year. If the user does not name a year, use the current year (${ctx.current_year}).
 - You may call get_today to re-confirm these computed ranges before any data query.
 `;
 }
 
 const PLATFORM_GUIDE = `
-You are the in-app AI assistant for a personal + business cash-control and wealth platform used by a single owner.
-You can (1) explain how the platform works and (2) answer questions about the owner's live financial data using the provided tools.
+You are the in-app FINANCE ANALYST for a single owner who runs a business (Artist Influence) alongside personal finances.
+Act like an analyst, not a generic assistant: CALCULATE FIRST, EXPLAIN SECOND. You never do arithmetic yourself and you never invent numbers — you ONLY narrate figures returned by the deterministic finance tools.
 
-HOW THE PLATFORM WORKS (pages):
-- Expenses (/): Airtable-style dense spreadsheet of uploaded bank/credit-card transactions. CSVs are imported, auto-categorized through a 5-layer engine (exact merchant memory, fuzzy match, rules, CSV hints, AI), and reviewed. Each transaction has a mode (personal / business / reimbursable_work), a treatment, a tax treatment, and a category.
-- Income (/income): imported inflows (earnings vs reimbursements).
-- Insights (/insights): charts and totals of spend & income by category/month.
-- Wealth (/wealth): net worth & investment account tracking toward a target.
-- Allocate (/allocations): monthly waterfall splitting free cash into emergency fund, tax reserve, and investments.
-- Tax (/tax): flat-rate Federal/NYS/NYC reserve estimates based on a tax profile.
-- Memory (/merchants): learned merchant defaults (category, method, mode).
-- Accountant (/accountant): read-only full-data exports.
-- Close (/close-month): guided monthly reconciliation & finalization.
-- Settings (/settings): thresholds, categories, payment methods, passcode.
+ANSWERING PROTOCOL (follow every time a question touches money):
+1. Parse INTENT: income / expense / profit / cash-flow / personal-spend / business-spend / transfer / debt / net-worth / category drilldown / merchant drilldown / affordability / anomaly / recurring / runway / tax.
+2. Parse the PERIOD and pass it via the tool's "period" parameter — one of this_year/ytd, this_month, last_month, last_year, trailing_30, trailing_90, all. The SERVER converts the period to exact dates, so you must NOT compute or pass start_date/end_date for relative periods. Only pass start_date/end_date for an explicit custom range the user gives (e.g. "March 2026"). If no period is named, use "this_year" for totals questions and "this_month" for "right now" questions.
+3. Parse SCOPE: business / personal / all (or a specific category/merchant). "The business" = business scope. "Personally" = personal scope.
+4. CALL the matching tool with period + scope. You may call several (e.g. data_quality alongside the main one). Never answer a numeric question without a tool call.
+5. Generate the answer ONLY from returned fields, and report the date range from the tool's returned "range" object — never a year you typed yourself. If a tool returns an error or empty data, say so plainly.
 
-FINANCIAL-INTEGRITY RULES (always honored by the tools, explain them when relevant):
-- Only reviewed transactions count toward totals (statuses: ${COUNTED_STATUSES.join(", ")}). Raw "needs_review" rows are excluded by default.
-- Split-parent rows and transfers / non-expense cash movements are excluded from spend totals.
-- Category used for reporting is the edited/final category, falling back to the predicted category.
+DEFAULT DEFINITIONS (use unless the user overrides):
+- "How much did I make?" → income_summary: lead with gross_income, then also give true_operating_income (and net_operating_profit via profit_and_loss for business).
+- "How much did I spend?" → expense_summary.total_expenses (TRUE expenses, excludes transfers & credit-card payments). Mention total cash outflow (cash_flow.total_cash_out) only if it differs and is relevant.
+- "What's my profit?" → profit_and_loss (business income − business operating expenses). Excludes owner draws, transfers, CC payments, loan proceeds, owner contributions.
+- "What's my cash flow / why did cash go down?" → cash_flow: break out operating out, credit-card payments, taxes, debt payments and owner draws separately.
+- "What did I take home / take out of the business?" → cash_flow.owner_draws_estimate (flag it's an estimate).
+- "How much went to credit cards?" → expense_summary.credit_card_payments (NOT counted as spend).
+- "How much did I spend on <card/merchant>?" → merchant_drilldown for the actual card transactions, not the payments to the card.
+- "What's my net worth?" → net_worth (ASSETS-ONLY; always disclose liabilities are not tracked).
+- "Can I afford $X?" → affordability (uses cash, burn, buffer, upcoming bills) — never just the raw cash balance.
+- "What subscriptions / recurring bills do I have?" → recurring. "How long will my cash last?" → runway.
 
-STYLE:
-- Be concise and use markdown. Format money as US dollars.
-- When you state a number, ALWAYS state the exact date range you used (e.g. "Jan 1, 2026 – Jun 2, 2026 (YTD)") and the mode. Derive the range only from the CURRENT DATE CONTEXT above — never state a year you did not compute from it.
-- For any relative period ("this year", "YTD", "last month", "this month", "last year"), use the pre-computed ranges from the CURRENT DATE CONTEXT and pass them as start_date/end_date to the data tools.
-- If a question needs data, call the appropriate tool. Never invent figures.
-- If data is missing or empty, say so plainly.
+GUARDRAILS — always append relevant warnings returned by the tools, e.g.:
+- uncategorized > 5% of value/volume, transactions needing review, unmatched transfers, assumes CC transactions are imported, cash-basis only, taxes excluded unless reserve enabled.
+If data_quality.reliable is false, lead the warning with the uncategorized figure.
+
+RESPONSE FORMAT (markdown, concise, money as US dollars):
+1. One-sentence ANSWER first, stating the exact date range and scope (e.g. "Jan 1–May 31, 2026, business").
+2. A short BREAKDOWN bullet list of the key figures.
+3. One INSIGHT line (biggest driver, MoM change, anomaly) when useful.
+4. A WARNING line only if the data needs caveats.
+
+PLATFORM CONTEXT: pages are Expenses (/), Income, Insights, Wealth, Allocate, Tax, Memory, Accountant, Close, Settings. Only reviewed transactions (${COUNTED_STATUSES.join(", ")}) count; split-parents, transfers and non-expense movements are excluded from spend. Reporting category = final category, falling back to predicted.
 `;
 
 Deno.serve(async (req) => {
@@ -154,159 +177,168 @@ Deno.serve(async (req) => {
     const provider = createOpenAICompatible({
       name: "lovable",
       baseURL: "https://ai.gateway.lovable.dev/v1",
-      headers: {
-        "Lovable-API-Key": LOVABLE_API_KEY,
-        "X-Lovable-AIG-SDK": "vercel-ai-sdk",
-      },
+      headers: { "Lovable-API-Key": LOVABLE_API_KEY, "X-Lovable-AIG-SDK": "vercel-ai-sdk" },
     });
     const model = provider("google/gemini-3-flash-preview");
 
-    // ---- Helpers ----
-    const expenseBase = () =>
-      supabase
-        .from("transactions_uploaded")
-        .select(
-          "date, amount, mode, transaction_mode, final_category, predicted_category, description_raw, description_normalized, review_status",
-        )
-        .eq("owner_id", ownerId)
-        .eq("is_split_parent", false)
-        .eq("exclude_from_expense_totals", false)
-        .eq("is_transfer", false)
-        .eq("is_non_expense_cash_movement", false)
-        .in("review_status", COUNTED_STATUSES);
+    const dateCtx = getDateContext();
 
-    const applyRange = (q: any, start?: string, end?: string) => {
-      if (start) q = q.gte("date", start);
-      if (end) q = q.lte("date", end);
-      return q;
+    // Finance preferences (cash buffers, tax reserve, etc.)
+    const { data: settings } = await supabase
+      .from("app_settings")
+      .select(
+        "min_personal_cash_buffer, min_business_cash_buffer, tax_reserve_percent, monthly_savings_goal, monthly_personal_spend_limit, monthly_business_expense_target, report_basis, report_excluded_categories",
+      )
+      .eq("owner_id", ownerId)
+      .maybeSingle();
+    const prefs = settings ?? {};
+    const reservePct = Number((prefs as any)?.tax_reserve_percent) || 30;
+
+    const scopeSchema = z.enum(["business", "personal", "all"]).optional()
+      .describe("business = Artist Influence, personal = personal money, all = both");
+
+    const periodSchema = z
+      .enum(["this_year", "ytd", "this_month", "last_month", "last_year", "trailing_30", "trailing_90", "all"])
+      .optional()
+      .describe("Relative period — STRONGLY PREFERRED over start_date/end_date. The server resolves it to exact dates from the authoritative current date, so you can never pick the wrong year.");
+
+    const dateParams = {
+      period: periodSchema,
+      start_date: z.string().optional().describe("Inclusive start YYYY-MM-DD. Only use if no period fits."),
+      end_date: z.string().optional().describe("Inclusive end YYYY-MM-DD. Only use if no period fits."),
     };
 
-    const dateCtx = getDateContext();
+    // Resolve a relative period to concrete dates, overriding any model-supplied dates.
+    const resolvePeriod = (p: any) => {
+      const out: any = { ...p };
+      switch (p?.period) {
+        case "this_year":
+        case "ytd":
+          out.start_date = dateCtx.this_year_start; out.end_date = dateCtx.today; break;
+        case "this_month":
+          out.start_date = dateCtx.this_month_start; out.end_date = dateCtx.today; break;
+        case "last_month":
+          out.start_date = dateCtx.last_month_start; out.end_date = dateCtx.last_month_end; break;
+        case "last_year":
+          out.start_date = dateCtx.last_year_start; out.end_date = dateCtx.last_year_end; break;
+        case "trailing_30":
+          out.start_date = dateCtx.trailing_30_start; out.end_date = dateCtx.today; break;
+        case "trailing_90":
+          out.start_date = dateCtx.trailing_90_start; out.end_date = dateCtx.today; break;
+        case "all":
+          out.start_date = undefined; out.end_date = undefined; break;
+      }
+      delete out.period;
+      return out;
+    };
 
     const tools = {
       get_today: tool({
         description:
-          "Returns the authoritative current date (owner's timezone) and pre-computed date ranges for this year/YTD, this month, last month, and last year. Call this whenever a question involves a relative period before querying data.",
+          "Authoritative current date (owner timezone) plus pre-computed ranges (YTD, this/last month, trailing 30/90/180). Call before any relative-period query.",
         inputSchema: z.object({}),
         execute: async () => dateCtx,
       }),
 
-      query_expenses: tool({
+      income_summary: tool({
         description:
-          "Total and category breakdown of the owner's expenses for an optional date range, mode, and category. Returns counted (reviewed) spend only.",
-        inputSchema: z.object({
-          start_date: z.string().optional().describe("Inclusive start date YYYY-MM-DD"),
-          end_date: z.string().optional().describe("Inclusive end date YYYY-MM-DD"),
-          mode: z.enum(["personal", "business", "reimbursable_work"]).optional(),
-          category: z.string().optional().describe("Filter to a single category name"),
-        }),
-        execute: async ({ start_date, end_date, mode, category }) => {
-          let q = applyRange(expenseBase(), start_date, end_date);
-          if (mode) q = q.eq("mode", mode);
-          const { data, error } = await q.limit(5000);
-          if (error) return { error: error.message };
-          let rows = data ?? [];
-          const catOf = (r: any) => r.final_category ?? r.predicted_category ?? "Uncategorized";
-          if (category) rows = rows.filter((r: any) => catOf(r)?.toLowerCase() === category.toLowerCase());
-          const byCategory: Record<string, number> = {};
-          let total = 0;
-          for (const r of rows) {
-            const amt = Math.abs(Number(r.amount) || 0);
-            total += amt;
-            const c = catOf(r);
-            byCategory[c] = (byCategory[c] || 0) + amt;
-          }
-          const breakdown = Object.entries(byCategory)
-            .map(([c, amount]) => ({ category: c, amount: Math.round(amount * 100) / 100 }))
-            .sort((a, b) => b.amount - a.amount)
-            .slice(0, 25);
-          return {
-            total: Math.round(total * 100) / 100,
-            transaction_count: rows.length,
-            filters: { start_date, end_date, mode, category },
-            breakdown,
-          };
-        },
+          "Income for a period/scope: gross_income, true_operating_income (excludes refunds/reimbursements/loans/contributions), plus breakdowns by source and month.",
+        inputSchema: z.object({ ...dateParams, scope: scopeSchema }),
+        execute: async (p) => getIncomeSummary(supabase, ownerId, resolvePeriod(p)),
       }),
 
-      query_top_merchants: tool({
-        description: "Top merchants/descriptions by total spend for an optional date range and mode.",
-        inputSchema: z.object({
-          start_date: z.string().optional(),
-          end_date: z.string().optional(),
-          mode: z.enum(["personal", "business", "reimbursable_work"]).optional(),
-          limit: z.number().int().min(1).max(50).optional(),
-        }),
-        execute: async ({ start_date, end_date, mode, limit }) => {
-          let q = applyRange(expenseBase(), start_date, end_date);
-          if (mode) q = q.eq("mode", mode);
-          const { data, error } = await q.limit(5000);
-          if (error) return { error: error.message };
-          const byMerchant: Record<string, { amount: number; count: number }> = {};
-          for (const r of data ?? []) {
-            const key = (r.description_normalized || r.description_raw || "Unknown").trim();
-            const amt = Math.abs(Number(r.amount) || 0);
-            if (!byMerchant[key]) byMerchant[key] = { amount: 0, count: 0 };
-            byMerchant[key].amount += amt;
-            byMerchant[key].count += 1;
-          }
-          const top = Object.entries(byMerchant)
-            .map(([merchant, v]) => ({ merchant, amount: Math.round(v.amount * 100) / 100, count: v.count }))
-            .sort((a, b) => b.amount - a.amount)
-            .slice(0, limit ?? 10);
-          return { filters: { start_date, end_date, mode }, top };
-        },
+      expense_summary: tool({
+        description:
+          "Expenses for a period/scope: total_expenses (TRUE spend, excludes transfers & CC payments), personal vs business, tax/debt/credit-card payments separated, plus breakdowns by category, vendor and month.",
+        inputSchema: z.object({ ...dateParams, scope: scopeSchema }),
+        execute: async (p) => getExpenseSummary(supabase, ownerId, resolvePeriod(p)),
       }),
 
-      query_income: tool({
-        description: "Total income for an optional date range, mode and income type. Counts reviewed income only.",
-        inputSchema: z.object({
-          start_date: z.string().optional(),
-          end_date: z.string().optional(),
-          mode: z.enum(["personal", "business"]).optional(),
-          income_type: z.string().optional(),
-        }),
-        execute: async ({ start_date, end_date, mode, income_type }) => {
-          let q = supabase
-            .from("income_transactions")
-            .select("date, amount, mode, income_type, taxable_status, status, description_raw")
-            .eq("owner_id", ownerId)
-            .neq("status", "needs_review");
-          q = applyRange(q, start_date, end_date);
-          if (mode) q = q.eq("mode", mode);
-          if (income_type) q = q.eq("income_type", income_type);
-          const { data, error } = await q.limit(5000);
-          if (error) return { error: error.message };
-          let total = 0;
-          const byType: Record<string, number> = {};
-          for (const r of data ?? []) {
-            const amt = Math.abs(Number(r.amount) || 0);
-            total += amt;
-            byType[r.income_type || "other"] = (byType[r.income_type || "other"] || 0) + amt;
-          }
-          return {
-            total: Math.round(total * 100) / 100,
-            count: (data ?? []).length,
-            by_type: byType,
-            filters: { start_date, end_date, mode, income_type },
-          };
-        },
+      profit_and_loss: tool({
+        description:
+          "Business P&L for a period: gross_revenue, operating_expenses, net_operating_profit, margin, owner_draws_estimate, taxes, estimated_tax_reserve, net cash after draws, biggest categories and MoM change.",
+        inputSchema: z.object({ ...dateParams }),
+        execute: async (p) =>
+          getProfitAndLoss(supabase, ownerId, { ...resolvePeriod(p), tax_reserve_percent: reservePct }),
       }),
 
-      query_allocations: tool({
-        description: "Allocation plans (free cash, emergency fund, tax reserve, investments). Optionally filter by month (YYYY-MM).",
-        inputSchema: z.object({ month: z.string().optional() }),
-        execute: async ({ month }) => {
-          let q = supabase
-            .from("allocation_plans")
-            .select("month, status, free_cash, emergency_fund_amount, tax_reserve_amount, total_income, total_expenses, notes")
-            .eq("owner_id", ownerId)
-            .order("month", { ascending: false });
-          if (month) q = q.eq("month", month);
-          const { data, error } = await q.limit(24);
-          if (error) return { error: error.message };
-          return { plans: data ?? [] };
-        },
+      cash_flow: tool({
+        description:
+          "Cash flow for a period/scope: cash in/out, operating vs transfers/debt/owner-draws, and starting/ending cash from balance snapshots. Use for 'why did my cash change'.",
+        inputSchema: z.object({ ...dateParams, scope: scopeSchema }),
+        execute: async (p) => getCashFlow(supabase, ownerId, resolvePeriod(p)),
+      }),
+
+      net_worth: tool({
+        description:
+          "ASSETS-ONLY net worth (cash snapshots + investments). Liabilities are NOT tracked — always disclose that. Optional as_of date.",
+        inputSchema: z.object({ as_of: z.string().optional() }),
+        execute: async (p) => getNetWorth(supabase, ownerId, p as any),
+      }),
+
+      cash_runway: tool({
+        description: "Available cash, average 3mo/6mo monthly burn, and runway in months for a scope.",
+        inputSchema: z.object({ scope: scopeSchema }),
+        execute: async (p) =>
+          getRunway(supabase, ownerId, {
+            scope: (p as any).scope as Scope,
+            today: dateCtx.today,
+            start_3mo: dateCtx.trailing_90_start,
+            start_6mo: dateCtx.trailing_180_start,
+          }),
+      }),
+
+      category_drilldown: tool({
+        description: "Deep dive on one category: total, count, average size, top merchants, MoM change.",
+        inputSchema: z.object({ category: z.string(), ...dateParams, scope: scopeSchema }),
+        execute: async (p) => getCategoryDrilldown(supabase, ownerId, resolvePeriod(p)),
+      }),
+
+      merchant_drilldown: tool({
+        description:
+          "Deep dive on one merchant/card name: total spend, count, categories used and recent transactions. Use for 'how much did I spend on <merchant or card>'.",
+        inputSchema: z.object({ merchant: z.string(), ...dateParams, scope: scopeSchema }),
+        execute: async (p) => getMerchantDrilldown(supabase, ownerId, resolvePeriod(p)),
+      }),
+
+      recurring: tool({
+        description: "Detected recurring charges / subscriptions and estimated monthly fixed overhead.",
+        inputSchema: z.object({ scope: scopeSchema }),
+        execute: async (p) => getRecurring(supabase, ownerId, p as any),
+      }),
+
+      anomalies: tool({
+        description: "Spending anomalies this month vs last month: category spikes and unusually large transactions.",
+        inputSchema: z.object({ scope: scopeSchema }),
+        execute: async (p) =>
+          getAnomalies(supabase, ownerId, {
+            this_month_start: dateCtx.this_month_start,
+            today: dateCtx.today,
+            last_month_start: dateCtx.last_month_start,
+            last_month_end: dateCtx.last_month_end,
+            scope: (p as any).scope as Scope,
+          }),
+      }),
+
+      affordability: tool({
+        description:
+          "Whether the owner can afford to spend a given amount, using available cash, trailing burn, cash buffer and upcoming recurring bills. Returns a yes / yes_but / no verdict.",
+        inputSchema: z.object({ amount: z.number().positive(), scope: scopeSchema }),
+        execute: async (p) =>
+          getAffordability(supabase, ownerId, {
+            amount: (p as any).amount,
+            scope: (p as any).scope as Scope,
+            today: dateCtx.today,
+            trailing_start: dateCtx.trailing_90_start,
+            prefs,
+          }),
+      }),
+
+      data_quality: tool({
+        description:
+          "Data-reliability check for a period/scope: uncategorized count & %, needs-review count, unmatched transfers and warnings. Call alongside financial answers when totals matter.",
+        inputSchema: z.object({ ...dateParams, scope: scopeSchema }),
+        execute: async (p) => getDataQuality(supabase, ownerId, resolvePeriod(p)),
       }),
 
       query_tax: tool({
@@ -321,15 +353,13 @@ Deno.serve(async (req) => {
             .eq("owner_id", ownerId)
             .maybeSingle();
           if (error) return { error: error.message };
-          return { tax_profile: data };
+          return { tax_profile: data, configured_reserve_percent: reservePct };
         },
       }),
 
       query_reimbursements: tool({
         description: "Reimbursement groups (money fronted and awaiting / received). Optionally filter by status.",
-        inputSchema: z.object({
-          status: z.enum(["pending", "partial", "received"]).optional(),
-        }),
+        inputSchema: z.object({ status: z.enum(["pending", "partial", "received"]).optional() }),
         execute: async ({ status }) => {
           let q = supabase
             .from("reimbursement_groups")
@@ -340,25 +370,10 @@ Deno.serve(async (req) => {
           const { data, error } = await q.limit(100);
           if (error) return { error: error.message };
           const outstanding = (data ?? []).reduce(
-            (sum, g: any) => sum + Math.max(0, (Number(g.total_expected) || 0) - (Number(g.total_received) || 0)),
+            (sum: number, g: any) => sum + Math.max(0, (Number(g.total_expected) || 0) - (Number(g.total_received) || 0)),
             0,
           );
           return { groups: data ?? [], total_outstanding: Math.round(outstanding * 100) / 100 };
-        },
-      }),
-
-      query_investments: tool({
-        description: "Investment / brokerage accounts with current balances and contribution targets.",
-        inputSchema: z.object({}),
-        execute: async () => {
-          const { data, error } = await supabase
-            .from("investment_accounts")
-            .select("account_name, account_type, platform, mode, current_balance, contributions_ytd, contribution_target_yearly")
-            .eq("owner_id", ownerId)
-            .eq("is_active", true);
-          if (error) return { error: error.message };
-          const total = (data ?? []).reduce((s, a: any) => s + (Number(a.current_balance) || 0), 0);
-          return { accounts: data ?? [], total_balance: Math.round(total * 100) / 100 };
         },
       }),
     };

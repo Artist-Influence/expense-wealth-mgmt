@@ -97,6 +97,10 @@ interface AppSettingsData {
   ai_enabled: boolean; passcode_enabled: boolean;
   prevent_exact_duplicates: boolean; flag_possible_duplicates: boolean;
   exclude_transfers_from_totals: boolean;
+  min_personal_cash_buffer: number; min_business_cash_buffer: number;
+  tax_reserve_percent: number; monthly_savings_goal: number;
+  monthly_personal_spend_limit: number; monthly_business_expense_target: number;
+  report_basis: string;
 }
 
 interface Rule {
@@ -122,6 +126,10 @@ export default function SettingsPage() {
     ai_enabled: false, passcode_enabled: false,
     prevent_exact_duplicates: true, flag_possible_duplicates: true,
     exclude_transfers_from_totals: true,
+    min_personal_cash_buffer: 5000, min_business_cash_buffer: 10000,
+    tax_reserve_percent: 30, monthly_savings_goal: 0,
+    monthly_personal_spend_limit: 0, monthly_business_expense_target: 0,
+    report_basis: 'cash',
   });
   const [seedingPersonal, setSeedingPersonal] = useState(false);
   const [seedingBusiness, setSeedingBusiness] = useState(false);
@@ -172,6 +180,13 @@ export default function SettingsPage() {
         prevent_exact_duplicates: data.prevent_exact_duplicates ?? true,
         flag_possible_duplicates: data.flag_possible_duplicates ?? true,
         exclude_transfers_from_totals: data.exclude_transfers_from_totals ?? true,
+        min_personal_cash_buffer: Number(data.min_personal_cash_buffer ?? 5000),
+        min_business_cash_buffer: Number(data.min_business_cash_buffer ?? 10000),
+        tax_reserve_percent: Number(data.tax_reserve_percent ?? 30),
+        monthly_savings_goal: Number(data.monthly_savings_goal ?? 0),
+        monthly_personal_spend_limit: Number(data.monthly_personal_spend_limit ?? 0),
+        monthly_business_expense_target: Number(data.monthly_business_expense_target ?? 0),
+        report_basis: data.report_basis ?? 'cash',
       });
     }
   };
@@ -586,7 +601,52 @@ export default function SettingsPage() {
             </div>
           </div>
 
+          {/* Finance Preferences (used by the AI assistant for affordability, runway & tax) */}
+          <div className="glass-panel p-4 space-y-4">
+            <div>
+              <h3 className="text-sm font-medium text-foreground">Finance Preferences</h3>
+              <p className="text-[11px] text-muted-foreground">
+                Used by the AI assistant for affordability, runway, profit and tax-reserve answers.
+              </p>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {([
+                ['min_personal_cash_buffer', 'Minimum personal cash buffer ($)'],
+                ['min_business_cash_buffer', 'Minimum business cash buffer ($)'],
+                ['tax_reserve_percent', 'Tax reserve (% of net profit)'],
+                ['monthly_savings_goal', 'Monthly savings goal ($)'],
+                ['monthly_personal_spend_limit', 'Monthly personal spend limit ($)'],
+                ['monthly_business_expense_target', 'Monthly business expense target ($)'],
+              ] as const).map(([key, label]) => (
+                <div key={key} className="space-y-1.5">
+                  <label className="text-xs text-muted-foreground">{label}</label>
+                  <Input
+                    type="number"
+                    value={settings[key]}
+                    onChange={e =>
+                      setSettings(s => ({ ...s, [key]: Number(e.target.value) || 0 }))
+                    }
+                  />
+                </div>
+              ))}
+              <div className="space-y-1.5">
+                <label className="text-xs text-muted-foreground">Reporting basis</label>
+                <Select
+                  value={settings.report_basis}
+                  onValueChange={v => setSettings(s => ({ ...s, report_basis: v }))}
+                >
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="cash">Cash basis</SelectItem>
+                    <SelectItem value="accrual">Accrual basis</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </div>
+
           <Button size="sm" onClick={saveSettings}>Save Settings</Button>
+
 
           {/* Historical Seed Import */}
           <div className="glass-panel p-4">

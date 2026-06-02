@@ -153,12 +153,20 @@ export type Database = {
           id: string
           last_health_check_at: string | null
           last_health_check_summary: Json | null
+          min_business_cash_buffer: number
+          min_personal_cash_buffer: number
+          monthly_business_expense_target: number
+          monthly_personal_spend_limit: number
+          monthly_savings_goal: number
           owner_id: string
           passcode_enabled: boolean
           passcode_hash: string | null
           personal_auto_threshold: number
           personal_suggest_threshold: number
           prevent_exact_duplicates: boolean
+          report_basis: string
+          report_excluded_categories: string[]
+          tax_reserve_percent: number
           updated_at: string
           wealth_target_amount: number
           wealth_target_year: number
@@ -173,12 +181,20 @@ export type Database = {
           id?: string
           last_health_check_at?: string | null
           last_health_check_summary?: Json | null
+          min_business_cash_buffer?: number
+          min_personal_cash_buffer?: number
+          monthly_business_expense_target?: number
+          monthly_personal_spend_limit?: number
+          monthly_savings_goal?: number
           owner_id: string
           passcode_enabled?: boolean
           passcode_hash?: string | null
           personal_auto_threshold?: number
           personal_suggest_threshold?: number
           prevent_exact_duplicates?: boolean
+          report_basis?: string
+          report_excluded_categories?: string[]
+          tax_reserve_percent?: number
           updated_at?: string
           wealth_target_amount?: number
           wealth_target_year?: number
@@ -193,12 +209,20 @@ export type Database = {
           id?: string
           last_health_check_at?: string | null
           last_health_check_summary?: Json | null
+          min_business_cash_buffer?: number
+          min_personal_cash_buffer?: number
+          monthly_business_expense_target?: number
+          monthly_personal_spend_limit?: number
+          monthly_savings_goal?: number
           owner_id?: string
           passcode_enabled?: boolean
           passcode_hash?: string | null
           personal_auto_threshold?: number
           personal_suggest_threshold?: number
           prevent_exact_duplicates?: boolean
+          report_basis?: string
+          report_excluded_categories?: string[]
+          tax_reserve_percent?: number
           updated_at?: string
           wealth_target_amount?: number
           wealth_target_year?: number
@@ -721,21 +745,25 @@ export type Database = {
           date: string | null
           description_normalized: string | null
           description_raw: string | null
+          direction: string | null
           duplicate_fingerprint: string | null
           duplicate_of_transaction_id: string | null
           duplicate_status: string
           economic_owner: string
           exclude_from_cash_spend_reporting: boolean
           exclude_from_expense_totals: boolean
+          expected_next_date: string | null
           final_category: string | null
           final_method: string | null
           final_notes: string | null
           id: string
+          is_internal_transfer: boolean
           is_non_expense_cash_movement: boolean
           is_reimbursable: boolean
           is_split_parent: boolean
           is_transfer: boolean
           linked_reimbursement_group_id: string | null
+          linked_transaction_id: string | null
           match_explanation: string | null
           match_source: string | null
           mode: string
@@ -748,6 +776,8 @@ export type Database = {
           predicted_notes: string | null
           receipt_attached: boolean
           receipt_required: boolean
+          recurrence_frequency: string | null
+          recurring_group_id: string | null
           reimbursable_to: string | null
           reimbursement_status: string
           review_status: string
@@ -772,21 +802,25 @@ export type Database = {
           date?: string | null
           description_normalized?: string | null
           description_raw?: string | null
+          direction?: string | null
           duplicate_fingerprint?: string | null
           duplicate_of_transaction_id?: string | null
           duplicate_status?: string
           economic_owner?: string
           exclude_from_cash_spend_reporting?: boolean
           exclude_from_expense_totals?: boolean
+          expected_next_date?: string | null
           final_category?: string | null
           final_method?: string | null
           final_notes?: string | null
           id?: string
+          is_internal_transfer?: boolean
           is_non_expense_cash_movement?: boolean
           is_reimbursable?: boolean
           is_split_parent?: boolean
           is_transfer?: boolean
           linked_reimbursement_group_id?: string | null
+          linked_transaction_id?: string | null
           match_explanation?: string | null
           match_source?: string | null
           mode: string
@@ -799,6 +833,8 @@ export type Database = {
           predicted_notes?: string | null
           receipt_attached?: boolean
           receipt_required?: boolean
+          recurrence_frequency?: string | null
+          recurring_group_id?: string | null
           reimbursable_to?: string | null
           reimbursement_status?: string
           review_status?: string
@@ -823,21 +859,25 @@ export type Database = {
           date?: string | null
           description_normalized?: string | null
           description_raw?: string | null
+          direction?: string | null
           duplicate_fingerprint?: string | null
           duplicate_of_transaction_id?: string | null
           duplicate_status?: string
           economic_owner?: string
           exclude_from_cash_spend_reporting?: boolean
           exclude_from_expense_totals?: boolean
+          expected_next_date?: string | null
           final_category?: string | null
           final_method?: string | null
           final_notes?: string | null
           id?: string
+          is_internal_transfer?: boolean
           is_non_expense_cash_movement?: boolean
           is_reimbursable?: boolean
           is_split_parent?: boolean
           is_transfer?: boolean
           linked_reimbursement_group_id?: string | null
+          linked_transaction_id?: string | null
           match_explanation?: string | null
           match_source?: string | null
           mode?: string
@@ -850,6 +890,8 @@ export type Database = {
           predicted_notes?: string | null
           receipt_attached?: boolean
           receipt_required?: boolean
+          recurrence_frequency?: string | null
+          recurring_group_id?: string | null
           reimbursable_to?: string | null
           reimbursement_status?: string
           review_status?: string
