@@ -126,7 +126,7 @@ export default function CloseMonth() {
         .maybeSingle();
       return data;
     },
-    enabled: !!user,
+    enabled: !!user && !!ownerId,
   });
 
   const totalMonthIncome = (monthIncome || []).reduce((s, i) => s + (i.amount || 0), 0);
