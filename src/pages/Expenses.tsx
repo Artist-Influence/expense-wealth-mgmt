@@ -149,8 +149,8 @@ export default function Expenses() {
   const categoryMode = mode === 'reimbursable_work' ? 'personal' : mode;
 
   useEffect(() => {
-    if (user) { loadTransactions(); loadCategories(); loadAllModeTransactions(); }
-  }, [user, mode]);
+    if (user && ownerId) { loadTransactions(); loadCategories(); loadAllModeTransactions(); }
+  }, [user, ownerId, mode]);
 
   // Apply incoming URL params (e.g. linked from Allocations review warning).
   // Supported: ?month=YYYY-MM, &scope=personal|business|reimbursable_work, &review=unreviewed|<status>
