@@ -105,9 +105,9 @@ export default function Tax() {
   const yearEnd = `${selectedYear}-12-31`;
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || !ownerId) return;
     loadAll();
-  }, [user, scope, selectedYear]);
+  }, [user, ownerId, scope, selectedYear]);
 
   useEffect(() => {
     if (typeof window !== 'undefined') localStorage.setItem('tax_scope', scope);
