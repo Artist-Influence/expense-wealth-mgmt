@@ -1528,9 +1528,9 @@ export default function Expenses() {
     for (const file of files) {
       try {
         const preview = await previewCsvFile(file);
-        previews.push({ file, preview, error: null, method: detectMethodFromFilename(file.name) });
+        previews.push({ file, preview, error: null, method: detectMethodFromFilename(file.name, paymentMethods) });
       } catch (err: any) {
-        previews.push({ file, preview: null, error: err.message || 'Failed to read file', method: detectMethodFromFilename(file.name) });
+        previews.push({ file, preview: null, error: err.message || 'Failed to read file', method: detectMethodFromFilename(file.name, paymentMethods) });
       }
     }
     setFilePreviews(previews);
