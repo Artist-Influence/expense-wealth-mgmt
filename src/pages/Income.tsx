@@ -85,7 +85,7 @@ export default function Income() {
   const [manualNotes, setManualNotes] = useState('');
 
   const fetchTransactions = useCallback(async () => {
-    if (!user) return;
+    if (!user || !ownerId) return;
     setLoading(true);
     let allData: IncomeTransaction[] = [];
     let from = 0;
