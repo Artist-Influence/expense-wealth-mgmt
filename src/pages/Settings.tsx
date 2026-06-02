@@ -97,6 +97,10 @@ interface AppSettingsData {
   ai_enabled: boolean; passcode_enabled: boolean;
   prevent_exact_duplicates: boolean; flag_possible_duplicates: boolean;
   exclude_transfers_from_totals: boolean;
+  min_personal_cash_buffer: number; min_business_cash_buffer: number;
+  tax_reserve_percent: number; monthly_savings_goal: number;
+  monthly_personal_spend_limit: number; monthly_business_expense_target: number;
+  report_basis: string;
 }
 
 interface Rule {
