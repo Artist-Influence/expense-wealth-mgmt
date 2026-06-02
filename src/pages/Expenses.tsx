@@ -205,7 +205,7 @@ export default function Expenses() {
   const [allModeRows, setAllModeRows] = useState<AllModeRow[]>([]);
 
   const loadAllModeTransactions = async () => {
-    if (!user) return;
+    if (!user || !ownerId) return;
     let from = 0;
     const pageSize = 1000;
     let all: AllModeRow[] = [];
