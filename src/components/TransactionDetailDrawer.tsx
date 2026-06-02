@@ -344,7 +344,7 @@ export function TransactionDetailDrawer({
               onChange={v => setEditValues(prev => ({ ...prev, method: v }))}
               className="mt-1 h-9 text-sm"
               placeholder="Select method"
-            />`
+            />
           </div>
           <div>
             <Label className="text-[11px] text-muted-foreground uppercase tracking-wider">Notes</Label>
