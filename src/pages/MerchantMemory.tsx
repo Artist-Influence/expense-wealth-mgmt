@@ -31,8 +31,8 @@ export default function MerchantMemory() {
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 
   useEffect(() => {
-    if (user) loadMerchants();
-  }, [user]);
+    if (user && ownerId) loadMerchants();
+  }, [user, ownerId]);
 
   const loadMerchants = async () => {
     const { data } = await supabase
