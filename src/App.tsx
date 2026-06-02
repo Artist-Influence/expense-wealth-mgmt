@@ -17,6 +17,7 @@ import Accountant from "./pages/Accountant";
 import Allocations from "./pages/Allocations";
 import CloseMonth from "./pages/CloseMonth";
 import NotFound from "./pages/NotFound";
+import Assistant from "./pages/Assistant";
 
 const queryClient = new QueryClient();
 
@@ -39,6 +40,8 @@ const App = () => (
           <Route path="/accountant" element={<AuthGuard><Accountant /></AuthGuard>} />
           <Route path="/allocations" element={<AuthGuard><Allocations /></AuthGuard>} />
           <Route path="/close-month" element={<AuthGuard><CloseMonth /></AuthGuard>} />
+          <Route path="/assistant" element={<AuthGuard><Assistant /></AuthGuard>} />
+          <Route path="/assistant/:threadId" element={<AuthGuard><Assistant /></AuthGuard>} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>
