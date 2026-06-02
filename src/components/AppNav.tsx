@@ -51,7 +51,7 @@ export function AppNav() {
 
   // Load last persisted health summary, then auto-run if >14h old
   useEffect(() => {
-    if (!user) return;
+    if (!user || !ownerId) return;
     let cancelled = false;
     (async () => {
       try {
