@@ -181,15 +181,22 @@ export async function getDataQuality(
 ) {
   const { start_date: start, end_date: end, scope } = params;
   // All rows in range (no status filter) for the quality picture.
-  let q = supabase
-    .from("transactions_uploaded")
-    .select("amount, review_status, final_category, predicted_category, is_transfer, is_internal_transfer, linked_transaction_id, is_split_parent")
-    .eq("owner_id", ownerId)
-    .eq("is_split_parent", false);
-  q = modeFilter(q, scope);
-  q = applyRange(q, start, end);
-  const { data, error } = await q.limit(20000);
-  if (error) return { error: error.message };
+  let rows: any[];
+  try {
+    rows = await fetchAll(() => {
+      let q = supabase
+        .from("transactions_uploaded")
+        .select("amount, review_status, final_category, predicted_category, is_transfer, is_internal_transfer, linked_transaction_id, is_split_parent")
+        .eq("owner_id", ownerId)
+        .eq("is_split_parent", false)
+        .order("date", { ascending: true });
+      q = modeFilter(q, scope);
+      q = applyRange(q, start, end);
+      return q;
+    });
+  } catch (e) {
+    return { error: String((e as Error).message) };
+  }
   const rows = data ?? [];
   const totalCount = rows.length;
   const totalValue = sumAbs(rows);
