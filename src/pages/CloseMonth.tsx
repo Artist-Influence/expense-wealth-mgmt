@@ -93,7 +93,7 @@ export default function CloseMonth() {
         .maybeSingle();
       return data;
     },
-    enabled: !!user,
+    enabled: !!user && !!ownerId,
   });
 
   // Income for month — earned-only, mode-scoped
