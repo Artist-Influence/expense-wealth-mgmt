@@ -143,8 +143,14 @@ export default function SettingsPage() {
   const [testInput, setTestInput] = useState('');
   const [testResult, setTestResult] = useState<string | null>(null);
 
+  // Payment methods state
+  const [methods, setMethods] = useState<PaymentMethod[]>([]);
+  const [newMethod, setNewMethod] = useState<{ name: string; mode: string; account_type: string; match_pattern: string }>({
+    name: '', mode: 'personal', account_type: 'credit_card', match_pattern: '',
+  });
+
   useEffect(() => {
-    if (user && ownerId) { loadCategories(); loadSettings(); loadRules(); }
+    if (user && ownerId) { loadCategories(); loadSettings(); loadRules(); loadMethods(); }
   }, [user, ownerId]);
 
   const loadCategories = async () => {
