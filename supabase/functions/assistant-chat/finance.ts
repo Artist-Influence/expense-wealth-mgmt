@@ -276,6 +276,31 @@ export async function getIncomeSummary(
 
   const dq = await getDataQuality(supabase, ownerId, { start_date: start, end_date: end, scope });
 
+  // How much income is excluded because it still needs review? (Important: 0 income
+  // with large unreviewed income is the #1 cause of misleading profit numbers.)
+  let unreviewedCount = 0;
+  let unreviewedTotal = 0;
+  try {
+    let uq = supabase
+      .from("income_transactions")
+      .select("amount", { count: "exact" })
+      .eq("owner_id", ownerId)
+      .eq("status", "needs_review");
+    if (scope === "business") uq = uq.eq("mode", "business");
+    if (scope === "personal") uq = uq.eq("mode", "personal");
+    if (start) uq = uq.gte("date", start);
+    if (end) uq = uq.lte("date", end);
+    const { data: uData, count } = await uq.limit(10000);
+    unreviewedCount = count ?? (uData ?? []).length;
+    unreviewedTotal = sumAbs(uData ?? []);
+  } catch { /* ignore */ }
+
+  const warnings = [...((dq as any).warnings ?? [])];
+  if (unreviewedCount > 0)
+    warnings.unshift(
+      `${unreviewedCount} income transactions ($${r2(unreviewedTotal)}) still need review and are EXCLUDED from these income totals — review them on the Income page for accurate figures.`,
+    );
+
   return {
     range: { start, end, scope: scope ?? "all" },
     gross_income: r2(gross),
@@ -285,6 +310,8 @@ export async function getIncomeSummary(
     loan_proceeds: r2(loans),
     owner_contributions: r2(contributions),
     excluded_inflows: r2(refunds + reimbursements + loans + contributions),
+    unreviewed_income_excluded: r2(unreviewedTotal),
+    unreviewed_income_count: unreviewedCount,
     income_by_source: Object.entries(bySource)
       .map(([source, amount]) => ({ source, amount: r2(amount) }))
       .sort((a, b) => b.amount - a.amount)
@@ -293,12 +320,13 @@ export async function getIncomeSummary(
       .map(([month, amount]) => ({ month, amount: r2(amount) }))
       .sort((a, b) => (a.month < b.month ? -1 : 1)),
     transaction_count: rows.length,
-    warnings: (dq as any).warnings ?? [],
+    warnings,
     _debug: {
       function: "getIncomeSummary",
       filters: { start, end, scope: scope ?? "all" },
       rows_included: rows.length,
-      note: "Operating income excludes reimbursements, refunds, loan proceeds and owner contributions.",
+      unreviewed_income_excluded: r2(unreviewedTotal),
+      note: "Only reviewed income counts. Operating income excludes reimbursements, refunds, loan proceeds and owner contributions.",
     },
   };
 }
