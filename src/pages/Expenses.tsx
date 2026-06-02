@@ -13,6 +13,8 @@ import { DuplicateResolverDialog, type DupClusterRow } from '@/components/Duplic
 import { previewCsvFile, parseCsvFileWithMapping, type ParsePreview, type ColumnMapping } from '@/lib/csv-parser';
 import { categorizeTransactions, categorizeWithAI, updateMerchantMemory, isDeductibleCategory } from '@/lib/categorization-engine';
 import { detectMethodFromFilename } from '@/lib/method-detector';
+import { usePaymentMethods, type PaymentMethod } from '@/hooks/usePaymentMethods';
+import { MethodSelect } from '@/components/MethodSelect';
 import { detectTransfer } from '@/lib/transfer-detector';
 import { routeTransaction } from '@/lib/transaction-router';
 import { classifyIncome } from '@/lib/income-classifier';
