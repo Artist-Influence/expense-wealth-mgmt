@@ -6,7 +6,7 @@ import { useQuery } from '@tanstack/react-query';
 import {
   Receipt, BarChart3, Brain, Settings, LogOut, Database,
   DollarSign, TrendingUp, Landmark, FileSpreadsheet, Target, CalendarCheck,
-  Activity,
+  Activity, Sparkle, MessageCircle,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
