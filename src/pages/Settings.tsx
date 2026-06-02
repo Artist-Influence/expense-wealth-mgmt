@@ -436,6 +436,107 @@ export default function SettingsPage() {
             <CategoryList cats={businessCats} mode="business" newVal={newCatBusiness} setNewVal={setNewCatBusiness} />
           </div>
 
+          {/* Payment Methods */}
+          <div className="glass-panel p-4">
+            <h3 className="text-sm font-medium text-foreground mb-1">Payment Methods</h3>
+            <p className="text-[11px] text-muted-foreground mb-3">
+              Register your credit cards and bank accounts. The filename keyword auto-tags uploaded CSVs to the right account.
+            </p>
+
+            <div className="space-y-1.5 mb-3">
+              {methods.length === 0 && (
+                <p className="text-xs text-muted-foreground italic py-2">No payment methods yet. Add your first card or account below.</p>
+              )}
+              {methods.map(m => (
+                <div key={m.id} className={`grid grid-cols-12 gap-2 items-center py-1.5 px-2 rounded hover:bg-secondary/20 ${m.is_active ? '' : 'opacity-50'}`}>
+                  <Input
+                    value={m.name}
+                    onChange={e => setMethods(prev => prev.map(x => x.id === m.id ? { ...x, name: e.target.value } : x))}
+                    onBlur={e => updateMethod(m.id, { name: e.target.value.trim() })}
+                    className="glass-input h-8 text-xs col-span-3"
+                  />
+                  <Select value={m.mode} onValueChange={v => updateMethod(m.id, { mode: v })}>
+                    <SelectTrigger className="glass-input h-8 text-xs col-span-2"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="personal">Personal</SelectItem>
+                      <SelectItem value="business">Business</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Select value={m.account_type} onValueChange={v => updateMethod(m.id, { account_type: v })}>
+                    <SelectTrigger className="glass-input h-8 text-xs col-span-3"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="credit_card">Credit Card</SelectItem>
+                      <SelectItem value="bank_account">Bank Account</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Input
+                    value={m.match_pattern || ''}
+                    placeholder="filename keyword"
+                    onChange={e => setMethods(prev => prev.map(x => x.id === m.id ? { ...x, match_pattern: e.target.value } : x))}
+                    onBlur={e => updateMethod(m.id, { match_pattern: e.target.value.trim() || null })}
+                    className="glass-input h-8 text-xs col-span-3"
+                  />
+                  <div className="col-span-1 flex items-center justify-end gap-1">
+                    <Switch checked={m.is_active} onCheckedChange={v => updateMethod(m.id, { is_active: v })} />
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button size="sm" variant="ghost" className="h-6 w-6 p-0">
+                          <Trash2 className="h-3 w-3 text-destructive/60" />
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>Delete payment method?</AlertDialogTitle>
+                          <AlertDialogDescription>"{m.name}" will be removed. Existing transactions using it won't be affected.</AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Cancel</AlertDialogCancel>
+                          <AlertDialogAction onClick={() => deleteMethod(m.id)}>Delete</AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="grid grid-cols-12 gap-2 items-center border-t border-border/40 pt-3">
+              <Input
+                placeholder="Name (e.g. Chase Sapphire)"
+                value={newMethod.name}
+                onChange={e => setNewMethod(v => ({ ...v, name: e.target.value }))}
+                onKeyDown={e => e.key === 'Enter' && addMethod()}
+                className="glass-input h-8 text-xs col-span-3"
+              />
+              <Select value={newMethod.mode} onValueChange={v => setNewMethod(s => ({ ...s, mode: v }))}>
+                <SelectTrigger className="glass-input h-8 text-xs col-span-2"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="personal">Personal</SelectItem>
+                  <SelectItem value="business">Business</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={newMethod.account_type} onValueChange={v => setNewMethod(s => ({ ...s, account_type: v }))}>
+                <SelectTrigger className="glass-input h-8 text-xs col-span-3"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="credit_card">Credit Card</SelectItem>
+                  <SelectItem value="bank_account">Bank Account</SelectItem>
+                </SelectContent>
+              </Select>
+              <Input
+                placeholder="filename keyword (optional)"
+                value={newMethod.match_pattern}
+                onChange={e => setNewMethod(v => ({ ...v, match_pattern: e.target.value }))}
+                onKeyDown={e => e.key === 'Enter' && addMethod()}
+                className="glass-input h-8 text-xs col-span-3"
+              />
+              <Button size="sm" className="h-8 col-span-1" onClick={addMethod}>
+                <Plus className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          </div>
+
+
+
           {/* Thresholds */}
           <div className="glass-panel p-4 space-y-4">
             <h3 className="text-sm font-medium text-foreground">Confidence Thresholds</h3>
