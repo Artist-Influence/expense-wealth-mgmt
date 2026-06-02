@@ -25,6 +25,7 @@ import {
   type ToolPart,
 } from '@/components/ai-elements/tool';
 import { Shimmer } from '@/components/ai-elements/shimmer';
+import { AnswerAudit } from '@/components/AnswerAudit';
 import assistantMark from '@/assets/assistant-mark.png';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
