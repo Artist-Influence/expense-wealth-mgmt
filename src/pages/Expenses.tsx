@@ -1566,6 +1566,10 @@ export default function Expenses() {
     setShowPreview(false); setFilePreviews([]); setPendingFiles([]);
   };
 
+  const handlePreviewMethodChange = (index: number, method: string) => {
+    setFilePreviews(prev => prev.map((fp, i) => (i === index ? { ...fp, method: method || null } : fp)));
+  };
+
   const getConfidenceClass = (c: number | null) => {
     if (c === null) return 'confidence-low';
     if (c >= 90) return 'confidence-high';
