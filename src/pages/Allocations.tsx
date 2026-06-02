@@ -72,7 +72,7 @@ export default function Allocations() {
 
   // Fetch expenses for month
   const { data: monthExpenses = 0 } = useQuery({
-    queryKey: ['alloc_expenses', selectedMonth, scope],
+    queryKey: ['alloc_expenses', selectedMonth, scope, ownerId],
     queryFn: async () => {
       const [y, m] = selectedMonth.split('-');
       const start = `${y}-${m}-01`;
@@ -89,7 +89,7 @@ export default function Allocations() {
         .eq('is_split_parent', false);
       return (data || []).reduce((s, r) => s + Math.abs(Number(r.amount || 0)), 0);
     },
-    enabled: !!user,
+    enabled: !!user && !!ownerId,
   });
 
   // Fetch unreviewed transaction count for data quality warning
