@@ -274,6 +274,68 @@ export type Database = {
         }
         Relationships: []
       }
+      chat_messages: {
+        Row: {
+          content: string
+          created_at: string
+          id: string
+          owner_id: string
+          parts: Json | null
+          role: string
+          thread_id: string
+        }
+        Insert: {
+          content?: string
+          created_at?: string
+          id?: string
+          owner_id: string
+          parts?: Json | null
+          role: string
+          thread_id: string
+        }
+        Update: {
+          content?: string
+          created_at?: string
+          id?: string
+          owner_id?: string
+          parts?: Json | null
+          role?: string
+          thread_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "chat_messages_thread_id_fkey"
+            columns: ["thread_id"]
+            isOneToOne: false
+            referencedRelation: "chat_threads"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      chat_threads: {
+        Row: {
+          created_at: string
+          id: string
+          owner_id: string
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          owner_id: string
+          title?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          owner_id?: string
+          title?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       income_transactions: {
         Row: {
           allocation_month: string | null
