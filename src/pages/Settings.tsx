@@ -14,6 +14,7 @@ import { Plus, Trash2, ChevronDown, Zap, Save, Wand2 } from 'lucide-react';
 import { previewCsvFile, parseCsvFileWithMapping, type ColumnMapping, type ParsePreview } from '@/lib/csv-parser';
 import { updateMerchantMemory } from '@/lib/categorization-engine';
 import { SeedMappingDialog } from '@/components/SeedMappingDialog';
+import type { PaymentMethod } from '@/hooks/usePaymentMethods';
 
 const STOP_WORDS = new Set(['THE', 'AND', 'INC', 'LLC', 'LTD', 'FOR', 'FROM', 'WITH', 'COM', 'WWW', 'HTTP', 'HTTPS', 'NET', 'ORG', 'CO', 'USA', 'TST', 'SQ', 'POS', 'DES', 'ACH', 'REF', 'TXN', 'PMT', 'CKS', 'INT', 'FEE', 'TAX', 'PRE', 'ATM', 'WEB', 'TEL', 'PPD', 'CCD']);
 
