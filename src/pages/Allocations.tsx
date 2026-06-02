@@ -51,7 +51,7 @@ export default function Allocations() {
   // Earned-income filter shared with Insights, CloseMonth, Tax, Accountant.
 
   const { data: monthIncome = 0 } = useQuery({
-    queryKey: ['alloc_income', selectedMonth, scope],
+    queryKey: ['alloc_income', selectedMonth, scope, ownerId],
     queryFn: async () => {
       const [y, m] = selectedMonth.split('-');
       const start = `${y}-${m}-01`;
@@ -67,7 +67,7 @@ export default function Allocations() {
         .filter(r => !(NON_EARNING_TYPES as readonly string[]).includes(r.income_type))
         .reduce((s, r) => s + Number(r.amount || 0), 0);
     },
-    enabled: !!user,
+    enabled: !!user && !!ownerId,
   });
 
   // Fetch expenses for month
