@@ -337,7 +337,14 @@ export function TransactionDetailDrawer({
           </div>
           <div>
             <Label className="text-[11px] text-muted-foreground uppercase tracking-wider">Method</Label>
-            <Input value={editValues.method} onChange={e => setEditValues(prev => ({ ...prev, method: e.target.value }))} className="mt-1 h-9 text-sm" placeholder="e.g. Chase Visa, PayPal" />
+            <MethodSelect
+              value={editValues.method}
+              methods={paymentMethods}
+              mode={editValues.transaction_mode === 'business' ? 'business' : 'personal'}
+              onChange={v => setEditValues(prev => ({ ...prev, method: v }))}
+              className="mt-1 h-9 text-sm"
+              placeholder="Select method"
+            />`
           </div>
           <div>
             <Label className="text-[11px] text-muted-foreground uppercase tracking-wider">Notes</Label>
