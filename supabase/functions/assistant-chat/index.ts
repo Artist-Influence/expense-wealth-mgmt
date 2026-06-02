@@ -196,9 +196,40 @@ Deno.serve(async (req) => {
 
     const scopeSchema = z.enum(["business", "personal", "all"]).optional()
       .describe("business = Artist Influence, personal = personal money, all = both");
+
+    const periodSchema = z
+      .enum(["this_year", "ytd", "this_month", "last_month", "last_year", "trailing_30", "trailing_90", "all"])
+      .optional()
+      .describe("Relative period — STRONGLY PREFERRED over start_date/end_date. The server resolves it to exact dates from the authoritative current date, so you can never pick the wrong year.");
+
     const dateParams = {
-      start_date: z.string().optional().describe("Inclusive start YYYY-MM-DD"),
-      end_date: z.string().optional().describe("Inclusive end YYYY-MM-DD"),
+      period: periodSchema,
+      start_date: z.string().optional().describe("Inclusive start YYYY-MM-DD. Only use if no period fits."),
+      end_date: z.string().optional().describe("Inclusive end YYYY-MM-DD. Only use if no period fits."),
+    };
+
+    // Resolve a relative period to concrete dates, overriding any model-supplied dates.
+    const resolvePeriod = (p: any) => {
+      const out: any = { ...p };
+      switch (p?.period) {
+        case "this_year":
+        case "ytd":
+          out.start_date = dateCtx.this_year_start; out.end_date = dateCtx.today; break;
+        case "this_month":
+          out.start_date = dateCtx.this_month_start; out.end_date = dateCtx.today; break;
+        case "last_month":
+          out.start_date = dateCtx.last_month_start; out.end_date = dateCtx.last_month_end; break;
+        case "last_year":
+          out.start_date = dateCtx.last_year_start; out.end_date = dateCtx.last_year_end; break;
+        case "trailing_30":
+          out.start_date = dateCtx.trailing_30_start; out.end_date = dateCtx.today; break;
+        case "trailing_90":
+          out.start_date = dateCtx.trailing_90_start; out.end_date = dateCtx.today; break;
+        case "all":
+          out.start_date = undefined; out.end_date = undefined; break;
+      }
+      delete out.period;
+      return out;
     };
 
     const tools = {
@@ -211,31 +242,31 @@ Deno.serve(async (req) => {
 
       income_summary: tool({
         description:
-          "Income for a date range/scope: gross_income, true_operating_income (excludes refunds/reimbursements/loans/contributions), plus breakdowns by source and month.",
+          "Income for a period/scope: gross_income, true_operating_income (excludes refunds/reimbursements/loans/contributions), plus breakdowns by source and month.",
         inputSchema: z.object({ ...dateParams, scope: scopeSchema }),
-        execute: async (p) => getIncomeSummary(supabase, ownerId, p as any),
+        execute: async (p) => getIncomeSummary(supabase, ownerId, resolvePeriod(p)),
       }),
 
       expense_summary: tool({
         description:
-          "Expenses for a date range/scope: total_expenses (TRUE spend, excludes transfers & CC payments), personal vs business, tax/debt/credit-card payments separated, plus breakdowns by category, vendor and month.",
+          "Expenses for a period/scope: total_expenses (TRUE spend, excludes transfers & CC payments), personal vs business, tax/debt/credit-card payments separated, plus breakdowns by category, vendor and month.",
         inputSchema: z.object({ ...dateParams, scope: scopeSchema }),
-        execute: async (p) => getExpenseSummary(supabase, ownerId, p as any),
+        execute: async (p) => getExpenseSummary(supabase, ownerId, resolvePeriod(p)),
       }),
 
       profit_and_loss: tool({
         description:
-          "Business P&L for a date range: gross_revenue, operating_expenses, net_operating_profit, margin, owner_draws_estimate, taxes, estimated_tax_reserve, net cash after draws, biggest categories and MoM change.",
+          "Business P&L for a period: gross_revenue, operating_expenses, net_operating_profit, margin, owner_draws_estimate, taxes, estimated_tax_reserve, net cash after draws, biggest categories and MoM change.",
         inputSchema: z.object({ ...dateParams }),
         execute: async (p) =>
-          getProfitAndLoss(supabase, ownerId, { ...(p as any), tax_reserve_percent: reservePct }),
+          getProfitAndLoss(supabase, ownerId, { ...resolvePeriod(p), tax_reserve_percent: reservePct }),
       }),
 
       cash_flow: tool({
         description:
-          "Cash flow for a date range/scope: cash in/out, operating vs transfers/debt/owner-draws, and starting/ending cash from balance snapshots. Use for 'why did my cash change'.",
+          "Cash flow for a period/scope: cash in/out, operating vs transfers/debt/owner-draws, and starting/ending cash from balance snapshots. Use for 'why did my cash change'.",
         inputSchema: z.object({ ...dateParams, scope: scopeSchema }),
-        execute: async (p) => getCashFlow(supabase, ownerId, p as any),
+        execute: async (p) => getCashFlow(supabase, ownerId, resolvePeriod(p)),
       }),
 
       net_worth: tool({
@@ -260,14 +291,14 @@ Deno.serve(async (req) => {
       category_drilldown: tool({
         description: "Deep dive on one category: total, count, average size, top merchants, MoM change.",
         inputSchema: z.object({ category: z.string(), ...dateParams, scope: scopeSchema }),
-        execute: async (p) => getCategoryDrilldown(supabase, ownerId, p as any),
+        execute: async (p) => getCategoryDrilldown(supabase, ownerId, resolvePeriod(p)),
       }),
 
       merchant_drilldown: tool({
         description:
           "Deep dive on one merchant/card name: total spend, count, categories used and recent transactions. Use for 'how much did I spend on <merchant or card>'.",
         inputSchema: z.object({ merchant: z.string(), ...dateParams, scope: scopeSchema }),
-        execute: async (p) => getMerchantDrilldown(supabase, ownerId, p as any),
+        execute: async (p) => getMerchantDrilldown(supabase, ownerId, resolvePeriod(p)),
       }),
 
       recurring: tool({
@@ -305,9 +336,9 @@ Deno.serve(async (req) => {
 
       data_quality: tool({
         description:
-          "Data-reliability check for a range/scope: uncategorized count & %, needs-review count, unmatched transfers and warnings. Call alongside financial answers when totals matter.",
+          "Data-reliability check for a period/scope: uncategorized count & %, needs-review count, unmatched transfers and warnings. Call alongside financial answers when totals matter.",
         inputSchema: z.object({ ...dateParams, scope: scopeSchema }),
-        execute: async (p) => getDataQuality(supabase, ownerId, p as any),
+        execute: async (p) => getDataQuality(supabase, ownerId, resolvePeriod(p)),
       }),
 
       query_tax: tool({
