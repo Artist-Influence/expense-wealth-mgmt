@@ -104,6 +104,7 @@ export function TransactionDetailDrawer({
   open,
   onClose,
   categories,
+  paymentMethods = [],
   onSave,
   onApprove,
   onToggleTransfer,
