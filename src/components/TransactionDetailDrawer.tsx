@@ -12,6 +12,8 @@ import {
   Check, X, ArrowLeftRight, AlertTriangle, Ban, FileText,
   Brain, History, BookOpen, Zap, Bot, User, Briefcase, Receipt, Scissors
 } from 'lucide-react';
+import { MethodSelect } from '@/components/MethodSelect';
+import type { PaymentMethod } from '@/hooks/usePaymentMethods';
 
 interface Transaction {
   id: string;
