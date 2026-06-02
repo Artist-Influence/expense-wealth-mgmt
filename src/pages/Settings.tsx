@@ -601,7 +601,52 @@ export default function SettingsPage() {
             </div>
           </div>
 
+          {/* Finance Preferences (used by the AI assistant for affordability, runway & tax) */}
+          <div className="glass-panel p-4 space-y-4">
+            <div>
+              <h3 className="text-sm font-medium text-foreground">Finance Preferences</h3>
+              <p className="text-[11px] text-muted-foreground">
+                Used by the AI assistant for affordability, runway, profit and tax-reserve answers.
+              </p>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {([
+                ['min_personal_cash_buffer', 'Minimum personal cash buffer ($)'],
+                ['min_business_cash_buffer', 'Minimum business cash buffer ($)'],
+                ['tax_reserve_percent', 'Tax reserve (% of net profit)'],
+                ['monthly_savings_goal', 'Monthly savings goal ($)'],
+                ['monthly_personal_spend_limit', 'Monthly personal spend limit ($)'],
+                ['monthly_business_expense_target', 'Monthly business expense target ($)'],
+              ] as const).map(([key, label]) => (
+                <div key={key} className="space-y-1.5">
+                  <label className="text-xs text-muted-foreground">{label}</label>
+                  <Input
+                    type="number"
+                    value={settings[key]}
+                    onChange={e =>
+                      setSettings(s => ({ ...s, [key]: Number(e.target.value) || 0 }))
+                    }
+                  />
+                </div>
+              ))}
+              <div className="space-y-1.5">
+                <label className="text-xs text-muted-foreground">Reporting basis</label>
+                <Select
+                  value={settings.report_basis}
+                  onValueChange={v => setSettings(s => ({ ...s, report_basis: v }))}
+                >
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="cash">Cash basis</SelectItem>
+                    <SelectItem value="accrual">Accrual basis</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </div>
+
           <Button size="sm" onClick={saveSettings}>Save Settings</Button>
+
 
           {/* Historical Seed Import */}
           <div className="glass-panel p-4">
