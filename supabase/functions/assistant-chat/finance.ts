@@ -466,7 +466,11 @@ export async function getProfitAndLoss(
     net_cash_after_owner_draws_and_reserve: netAfter,
     biggest_expense_categories: (exp as any).expenses_by_category?.slice(0, 8) ?? [],
     month_over_month_profit_change_pct: mom,
+    unreviewed_income_excluded: (inc as any).unreviewed_income_excluded ?? 0,
     warnings: [
+      ...(((inc as any).unreviewed_income_count ?? 0) > 0
+        ? [`Revenue is understated: ${(inc as any).unreviewed_income_count} income transactions ($${(inc as any).unreviewed_income_excluded}) are unreviewed and excluded — review income before trusting this profit figure.`]
+        : []),
       ...((exp as any).warnings ?? []),
       "Owner draws are estimated from business→outside internal transfers and may be imprecise.",
       "Profit excludes owner draws, transfers, credit-card payments, loan proceeds and owner contributions.",
