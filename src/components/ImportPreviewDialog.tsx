@@ -4,6 +4,8 @@ import { Badge } from '@/components/ui/badge';
 import { CheckCircle, AlertCircle, ArrowRight, FileText, ChevronDown, ChevronUp } from 'lucide-react';
 import { useState } from 'react';
 import type { ParsePreview } from '@/lib/csv-parser';
+import { MethodSelect } from '@/components/MethodSelect';
+import type { PaymentMethod } from '@/hooks/usePaymentMethods';
 
 export interface FilePreviewInfo {
   file: File;
@@ -17,6 +19,8 @@ interface ImportPreviewDialogProps {
   onConfirm: (validIndexes: number[]) => void;
   onCancel: () => void;
   filePreviews: FilePreviewInfo[];
+  paymentMethods?: PaymentMethod[];
+  onMethodChange?: (index: number, method: string) => void;
 }
 
 const FIELD_LABELS: Record<string, string> = {
