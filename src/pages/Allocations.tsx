@@ -94,7 +94,7 @@ export default function Allocations() {
 
   // Fetch unreviewed transaction count for data quality warning
   const { data: unreviewedCount = 0 } = useQuery({
-    queryKey: ['alloc_unreviewed', selectedMonth, scope],
+    queryKey: ['alloc_unreviewed', selectedMonth, scope, ownerId],
     queryFn: async () => {
       const [y, m] = selectedMonth.split('-');
       const start = `${y}-${m}-01`;
@@ -109,7 +109,7 @@ export default function Allocations() {
         .in('review_status', ['needs_review', 'suggested', 'ai_suggested']);
       return count || 0;
     },
-    enabled: !!user,
+    enabled: !!user && !!ownerId,
   });
 
   // Fetch tax profile for reserve calc
