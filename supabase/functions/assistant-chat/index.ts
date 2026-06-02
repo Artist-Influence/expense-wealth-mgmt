@@ -295,6 +295,7 @@ Deno.serve(async (req) => {
     });
 
     return result.toUIMessageStreamResponse({
+      headers: corsHeaders,
       originalMessages: messages,
       onFinish: async ({ responseMessage }) => {
         try {
