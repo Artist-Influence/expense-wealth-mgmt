@@ -2105,7 +2105,7 @@ export default function Expenses() {
                             {tx.final_method || tx.predicted_method || tx.source_account_name || '—'}
                           </span>
                         ) : (
-                          <InlineMethodCell tx={tx} onCommit={v => inlineUpdate(tx, 'final_method', v)} />
+                          <InlineMethodCell tx={tx} methods={paymentMethods} onCommit={v => inlineUpdate(tx, 'final_method', v)} />
                         )}
                       </td>
                       <td className="px-1 py-0.5" onClick={e => e.stopPropagation()}>
