@@ -85,22 +85,43 @@ function pctChange(curr: number, prev: number): number | null {
 // Loaders
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Fetch ALL rows for a query builder, paging past PostgREST's 1000-row cap.
+ * `build()` must return a fresh query builder each call so .range() applies cleanly.
+ */
+async function fetchAll(build: () => any): Promise<any[]> {
+  const PAGE = 1000;
+  const out: any[] = [];
+  let from = 0;
+  // Hard ceiling to avoid runaway loops on bad inputs.
+  for (let guard = 0; guard < 50; guard++) {
+    const { data, error } = await build().range(from, from + PAGE - 1);
+    if (error) throw new Error(error.message);
+    const rows = data ?? [];
+    out.push(...rows);
+    if (rows.length < PAGE) break;
+    from += PAGE;
+  }
+  return out;
+}
+
 async function loadCountedTxns(
   supabase: any,
   ownerId: string,
   opts: { start?: string; end?: string; scope?: Scope } = {},
 ): Promise<any[]> {
-  let q = supabase
-    .from("transactions_uploaded")
-    .select(TXN_FIELDS)
-    .eq("owner_id", ownerId)
-    .eq("is_split_parent", false)
-    .in("review_status", COUNTED_STATUSES);
-  q = modeFilter(q, opts.scope);
-  q = applyRange(q, opts.start, opts.end);
-  const { data, error } = await q.limit(10000);
-  if (error) throw new Error(error.message);
-  return data ?? [];
+  return fetchAll(() => {
+    let q = supabase
+      .from("transactions_uploaded")
+      .select(TXN_FIELDS)
+      .eq("owner_id", ownerId)
+      .eq("is_split_parent", false)
+      .in("review_status", COUNTED_STATUSES)
+      .order("date", { ascending: true });
+    q = modeFilter(q, opts.scope);
+    q = applyRange(q, opts.start, opts.end);
+    return q;
+  });
 }
 
 async function loadIncome(
@@ -108,17 +129,18 @@ async function loadIncome(
   ownerId: string,
   opts: { start?: string; end?: string; scope?: Scope } = {},
 ): Promise<any[]> {
-  let q = supabase
-    .from("income_transactions")
-    .select("date, amount, mode, income_type, taxable_status, status, description_raw, source_account_name")
-    .eq("owner_id", ownerId)
-    .neq("status", "needs_review");
-  if (opts.scope === "business") q = q.eq("mode", "business");
-  if (opts.scope === "personal") q = q.eq("mode", "personal");
-  q = applyRange(q, opts.start, opts.end);
-  const { data, error } = await q.limit(10000);
-  if (error) throw new Error(error.message);
-  return data ?? [];
+  return fetchAll(() => {
+    let q = supabase
+      .from("income_transactions")
+      .select("date, amount, mode, income_type, taxable_status, status, description_raw, source_account_name")
+      .eq("owner_id", ownerId)
+      .neq("status", "needs_review")
+      .order("date", { ascending: true });
+    if (opts.scope === "business") q = q.eq("mode", "business");
+    if (opts.scope === "personal") q = q.eq("mode", "personal");
+    q = applyRange(q, opts.start, opts.end);
+    return q;
+  });
 }
 
 /** Total cash across all accounts as of a date (latest snapshot per account ≤ date). */
