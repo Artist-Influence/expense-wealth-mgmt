@@ -114,9 +114,9 @@ export default function Accountant() {
   };
 
   const { data: expenses } = useQuery({
-    queryKey: ['accountant-expenses', user?.id, dateRange],
+    queryKey: ['accountant-expenses', user?.id, ownerId, dateRange],
     queryFn: async () => {
-      if (!user) return [];
+      if (!user || !ownerId) return [];
       const { data } = await supabase
         .from('transactions_uploaded')
         .select('*')
@@ -126,13 +126,13 @@ export default function Accountant() {
         .order('date');
       return data || [];
     },
-    enabled: !!user,
+    enabled: !!user && !!ownerId,
   });
 
   const { data: income } = useQuery({
-    queryKey: ['accountant-income', user?.id, dateRange],
+    queryKey: ['accountant-income', user?.id, ownerId, dateRange],
     queryFn: async () => {
-      if (!user) return [];
+      if (!user || !ownerId) return [];
       const { data } = await supabase
         .from('income_transactions')
         .select('*')
@@ -142,7 +142,7 @@ export default function Accountant() {
         .order('date');
       return data || [];
     },
-    enabled: !!user,
+    enabled: !!user && !!ownerId,
   });
 
 

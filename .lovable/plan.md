@@ -1,29 +1,27 @@
-## Goal
-Render a dot on the wealth chart at every actual snapshot entry (not just month buckets), with larger dots on the Total line and smaller dots on each per-account line.
+## Problem
 
-## Changes — `src/components/CombinedWealthChart.tsx`
+The Income page fails to load with the error `invalid input syntax for type uuid: "null"`. The same error shows up for several other backend calls (app_settings, category_options, transactions_uploaded, income_transactions).
 
-1. **Replace month-bucketed x-axis with snapshot-date x-axis**
-   - Build the `series` from the union of every `snapshots[].as_of_date` (deduped, sorted) instead of synthesized month-firsts.
-   - Keep clamping to `startDate` (default Jan 2026) so pre-2026 stray snapshots don't drag the axis back.
-   - For each date row, fill every account's value using the existing "most recent snapshot at-or-before this date" carry-forward, so lines stay continuous even on dates where only one account had an entry.
-   - Keep the "Today" anchor (uses `current_balance`) appended only if today is after the last snapshot date.
+### Root cause
 
-2. **Dot sizing**
-   - Total line: `dot={{ r: 3.5 }}`, `activeDot={{ r: 5 }}` (slightly bigger than today).
-   - Per-account lines: `dot={{ r: 2 }}`, `activeDot={{ r: 3.5 }}` (smaller).
-   - Hidden accounts: `dot={false}` (unchanged).
+`useAuth()` exposes `ownerId`, which is resolved **asynchronously** and is `null` for a brief moment after login. In `src/pages/Income.tsx`, the data fetch:
 
-3. **X-axis label formatting**
-   - Since ticks are now arbitrary dates, format as `MMM D` (e.g. `Jan 26`) using `parseLocalDate`. For the "Today" row keep the label `Today`.
-   - Add `interval="preserveStartEnd"` and `minTickGap={24}` so dense entry days don't overlap labels.
+- only guards `if (!user) return;` — so it runs while `ownerId` is still `null`, sending `owner_id=eq.null` to the database (invalid UUID), and
+- has a dependency array of `[user]` only — so it never re-runs once `ownerId` finishes resolving.
 
-4. **Tooltip**
-   - Update label formatter to show the full `MMM D, YYYY` for the hovered date (or `Today`).
+Result: the query fires too early with `null` and never recovers, so income never loads.
 
-No backend, query, or other-file changes.
+## Fix
+
+1. **`src/pages/Income.tsx`**
+   - Change the guard in `fetchTransactions` to also wait for `ownerId`: `if (!user || !ownerId) return;`
+   - Add `ownerId` to the `useCallback` dependency array so the fetch re-runs as soon as `ownerId` resolves.
+
+2. **Audit the same pattern app-wide** to ensure this doesn't happen again. Search for queries that use `ownerId` / `effectiveOwnerId` but omit it from their guard or dependency array (the network log shows the same `owner_id=eq.null` error coming from app_settings, category_options, and transactions_uploaded as well). For each affected fetch/`useQuery`:
+   - Guard so the query is disabled until `ownerId` is truthy (`enabled: !!ownerId` for react-query, or an early `return` for manual fetches).
+   - Include `ownerId` in the dependency array / query key so it refetches once resolved.
 
 ## Validation
-- Add a snapshot mid-month → a new dot appears on that exact date on both the total and that account's line.
-- Multiple snapshots in one month → multiple dots, not a single monthly average.
-- Toggling an account off → its dots disappear and the Total line recomputes (already handled).
+
+- Reload the app while logged in as owner → Income page loads transactions with no `uuid: "null"` errors in the console/network.
+- Confirm the other previously-failing calls (categories, expenses, app_settings) no longer return 400s.

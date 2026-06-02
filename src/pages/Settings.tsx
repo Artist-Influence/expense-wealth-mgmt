@@ -143,8 +143,8 @@ export default function SettingsPage() {
   const [testResult, setTestResult] = useState<string | null>(null);
 
   useEffect(() => {
-    if (user) { loadCategories(); loadSettings(); loadRules(); }
-  }, [user]);
+    if (user && ownerId) { loadCategories(); loadSettings(); loadRules(); }
+  }, [user, ownerId]);
 
   const loadCategories = async () => {
     const { data } = await supabase.from('category_options').select('*').eq('owner_id', ownerId!).order('sort_order');

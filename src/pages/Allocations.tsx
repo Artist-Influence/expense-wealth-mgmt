@@ -51,7 +51,7 @@ export default function Allocations() {
   // Earned-income filter shared with Insights, CloseMonth, Tax, Accountant.
 
   const { data: monthIncome = 0 } = useQuery({
-    queryKey: ['alloc_income', selectedMonth, scope],
+    queryKey: ['alloc_income', selectedMonth, scope, ownerId],
     queryFn: async () => {
       const [y, m] = selectedMonth.split('-');
       const start = `${y}-${m}-01`;
@@ -67,12 +67,12 @@ export default function Allocations() {
         .filter(r => !(NON_EARNING_TYPES as readonly string[]).includes(r.income_type))
         .reduce((s, r) => s + Number(r.amount || 0), 0);
     },
-    enabled: !!user,
+    enabled: !!user && !!ownerId,
   });
 
   // Fetch expenses for month
   const { data: monthExpenses = 0 } = useQuery({
-    queryKey: ['alloc_expenses', selectedMonth, scope],
+    queryKey: ['alloc_expenses', selectedMonth, scope, ownerId],
     queryFn: async () => {
       const [y, m] = selectedMonth.split('-');
       const start = `${y}-${m}-01`;
@@ -89,12 +89,12 @@ export default function Allocations() {
         .eq('is_split_parent', false);
       return (data || []).reduce((s, r) => s + Math.abs(Number(r.amount || 0)), 0);
     },
-    enabled: !!user,
+    enabled: !!user && !!ownerId,
   });
 
   // Fetch unreviewed transaction count for data quality warning
   const { data: unreviewedCount = 0 } = useQuery({
-    queryKey: ['alloc_unreviewed', selectedMonth, scope],
+    queryKey: ['alloc_unreviewed', selectedMonth, scope, ownerId],
     queryFn: async () => {
       const [y, m] = selectedMonth.split('-');
       const start = `${y}-${m}-01`;
@@ -109,7 +109,7 @@ export default function Allocations() {
         .in('review_status', ['needs_review', 'suggested', 'ai_suggested']);
       return count || 0;
     },
-    enabled: !!user,
+    enabled: !!user && !!ownerId,
   });
 
   // Fetch tax profile for reserve calc

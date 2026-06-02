@@ -77,7 +77,7 @@ export default function CloseMonth() {
         .lte('date', dateRange.end);
       return data || [];
     },
-    enabled: !!user,
+    enabled: !!user && !!ownerId,
   });
 
 
@@ -93,7 +93,7 @@ export default function CloseMonth() {
         .maybeSingle();
       return data;
     },
-    enabled: !!user,
+    enabled: !!user && !!ownerId,
   });
 
   // Income for month — earned-only, mode-scoped
@@ -110,7 +110,7 @@ export default function CloseMonth() {
         .lte('date', dateRange.end);
       return (data || []).filter(r => !(NON_EARNING_TYPES as readonly string[]).includes(r.income_type));
     },
-    enabled: !!user,
+    enabled: !!user && !!ownerId,
   });
 
   // Allocation plan for month
@@ -126,7 +126,7 @@ export default function CloseMonth() {
         .maybeSingle();
       return data;
     },
-    enabled: !!user,
+    enabled: !!user && !!ownerId,
   });
 
   const totalMonthIncome = (monthIncome || []).reduce((s, i) => s + (i.amount || 0), 0);

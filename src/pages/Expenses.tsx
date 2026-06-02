@@ -149,8 +149,8 @@ export default function Expenses() {
   const categoryMode = mode === 'reimbursable_work' ? 'personal' : mode;
 
   useEffect(() => {
-    if (user) { loadTransactions(); loadCategories(); loadAllModeTransactions(); }
-  }, [user, mode]);
+    if (user && ownerId) { loadTransactions(); loadCategories(); loadAllModeTransactions(); }
+  }, [user, ownerId, mode]);
 
   // Apply incoming URL params (e.g. linked from Allocations review warning).
   // Supported: ?month=YYYY-MM, &scope=personal|business|reimbursable_work, &review=unreviewed|<status>
@@ -205,7 +205,7 @@ export default function Expenses() {
   const [allModeRows, setAllModeRows] = useState<AllModeRow[]>([]);
 
   const loadAllModeTransactions = async () => {
-    if (!user) return;
+    if (!user || !ownerId) return;
     let from = 0;
     const pageSize = 1000;
     let all: AllModeRow[] = [];
@@ -225,6 +225,7 @@ export default function Expenses() {
   };
 
   const loadCategories = async () => {
+    if (!ownerId) return;
     const { data } = await supabase
       .from('category_options')
       .select('category_name')
@@ -236,6 +237,7 @@ export default function Expenses() {
   };
 
   const loadTransactions = async () => {
+    if (!ownerId) return;
     setLoading(true);
     let from = 0;
     const pageSize = 1000;

@@ -51,7 +51,7 @@ export function AppNav() {
 
   // Load last persisted health summary, then auto-run if >14h old
   useEffect(() => {
-    if (!user) return;
+    if (!user || !ownerId) return;
     let cancelled = false;
     (async () => {
       try {
@@ -79,7 +79,7 @@ export function AppNav() {
       } catch {/* silent */}
     })();
     return () => { cancelled = true; };
-  }, [user?.id]);
+  }, [user?.id, ownerId]);
 
   const totalIssues = healthSummary?.totalIssues ?? 0;
   const healthTone = totalIssues === 0
