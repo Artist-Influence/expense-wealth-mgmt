@@ -91,7 +91,8 @@ const MODE_CONFIG: Record<TransactionMode, { label: string; color: string; activ
 };
 
 export default function Expenses() {
-  const { user, isInvestor, isAccountant, ownerId } = useAuth();
+  const { user, isInvestor, isAccountant, isOwner, ownerId } = useAuth();
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
   const { methods: paymentMethods } = usePaymentMethods();
   const [mode, setMode] = useState<TransactionMode>(isInvestor ? 'business' : 'personal');
   const [transactions, setTransactions] = useState<Transaction[]>([]);
