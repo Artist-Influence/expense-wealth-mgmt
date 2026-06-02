@@ -181,7 +181,16 @@ Deno.serve(async (req) => {
       return q;
     };
 
+    const dateCtx = getDateContext();
+
     const tools = {
+      get_today: tool({
+        description:
+          "Returns the authoritative current date (owner's timezone) and pre-computed date ranges for this year/YTD, this month, last month, and last year. Call this whenever a question involves a relative period before querying data.",
+        inputSchema: z.object({}),
+        execute: async () => dateCtx,
+      }),
+
       query_expenses: tool({
         description:
           "Total and category breakdown of the owner's expenses for an optional date range, mode, and category. Returns counted (reviewed) spend only.",
