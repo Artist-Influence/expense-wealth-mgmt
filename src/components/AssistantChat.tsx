@@ -166,6 +166,7 @@ export function AssistantChat({ threadId, ownerId, initialMessages, canSend, onF
                   }
                   return null;
                 })}
+                {message.role === 'assistant' && <AnswerAudit message={message} />}
               </MessageContent>
             </Message>
           ))}
