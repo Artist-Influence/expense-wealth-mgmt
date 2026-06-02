@@ -79,7 +79,7 @@ export function AppNav() {
       } catch {/* silent */}
     })();
     return () => { cancelled = true; };
-  }, [user?.id]);
+  }, [user?.id, ownerId]);
 
   const totalIssues = healthSummary?.totalIssues ?? 0;
   const healthTone = totalIssues === 0
