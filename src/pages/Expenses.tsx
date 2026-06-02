@@ -225,6 +225,7 @@ export default function Expenses() {
   };
 
   const loadCategories = async () => {
+    if (!ownerId) return;
     const { data } = await supabase
       .from('category_options')
       .select('category_name')
@@ -236,6 +237,7 @@ export default function Expenses() {
   };
 
   const loadTransactions = async () => {
+    if (!ownerId) return;
     setLoading(true);
     let from = 0;
     const pageSize = 1000;
