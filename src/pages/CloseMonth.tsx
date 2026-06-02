@@ -77,7 +77,7 @@ export default function CloseMonth() {
         .lte('date', dateRange.end);
       return data || [];
     },
-    enabled: !!user,
+    enabled: !!user && !!ownerId,
   });
 
 
