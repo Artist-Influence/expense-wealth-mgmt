@@ -110,7 +110,7 @@ export default function CloseMonth() {
         .lte('date', dateRange.end);
       return (data || []).filter(r => !(NON_EARNING_TYPES as readonly string[]).includes(r.income_type));
     },
-    enabled: !!user,
+    enabled: !!user && !!ownerId,
   });
 
   // Allocation plan for month
