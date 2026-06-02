@@ -114,8 +114,8 @@ export default function Reimbursements() {
   const [groupTxs, setGroupTxs] = useState<ReimbursableTransaction[]>([]);
 
   useEffect(() => {
-    if (user) { loadData(); loadCategories(); }
-  }, [user]);
+    if (user && ownerId) { loadData(); loadCategories(); }
+  }, [user, ownerId]);
 
   const loadCategories = async () => {
     const { data } = await supabase
