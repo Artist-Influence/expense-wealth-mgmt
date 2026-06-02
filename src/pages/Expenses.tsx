@@ -13,6 +13,8 @@ import { DuplicateResolverDialog, type DupClusterRow } from '@/components/Duplic
 import { previewCsvFile, parseCsvFileWithMapping, type ParsePreview, type ColumnMapping } from '@/lib/csv-parser';
 import { categorizeTransactions, categorizeWithAI, updateMerchantMemory, isDeductibleCategory } from '@/lib/categorization-engine';
 import { detectMethodFromFilename } from '@/lib/method-detector';
+import { usePaymentMethods, type PaymentMethod } from '@/hooks/usePaymentMethods';
+import { MethodSelect } from '@/components/MethodSelect';
 import { detectTransfer } from '@/lib/transfer-detector';
 import { routeTransaction } from '@/lib/transaction-router';
 import { classifyIncome } from '@/lib/income-classifier';
@@ -90,6 +92,7 @@ const MODE_CONFIG: Record<TransactionMode, { label: string; color: string; activ
 
 export default function Expenses() {
   const { user, isInvestor, isAccountant, ownerId } = useAuth();
+  const { methods: paymentMethods } = usePaymentMethods();
   const [mode, setMode] = useState<TransactionMode>(isInvestor ? 'business' : 'personal');
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1525,9 +1528,9 @@ export default function Expenses() {
     for (const file of files) {
       try {
         const preview = await previewCsvFile(file);
-        previews.push({ file, preview, error: null, method: detectMethodFromFilename(file.name) });
+        previews.push({ file, preview, error: null, method: detectMethodFromFilename(file.name, paymentMethods) });
       } catch (err: any) {
-        previews.push({ file, preview: null, error: err.message || 'Failed to read file', method: detectMethodFromFilename(file.name) });
+        previews.push({ file, preview: null, error: err.message || 'Failed to read file', method: detectMethodFromFilename(file.name, paymentMethods) });
       }
     }
     setFilePreviews(previews);
@@ -1561,6 +1564,10 @@ export default function Expenses() {
 
   const handlePreviewCancel = () => {
     setShowPreview(false); setFilePreviews([]); setPendingFiles([]);
+  };
+
+  const handlePreviewMethodChange = (index: number, method: string) => {
+    setFilePreviews(prev => prev.map((fp, i) => (i === index ? { ...fp, method: method || null } : fp)));
   };
 
   const getConfidenceClass = (c: number | null) => {
@@ -2098,7 +2105,7 @@ export default function Expenses() {
                             {tx.final_method || tx.predicted_method || tx.source_account_name || '—'}
                           </span>
                         ) : (
-                          <InlineMethodCell tx={tx} onCommit={v => inlineUpdate(tx, 'final_method', v)} />
+                          <InlineMethodCell tx={tx} methods={paymentMethods} onCommit={v => inlineUpdate(tx, 'final_method', v)} />
                         )}
                       </td>
                       <td className="px-1 py-0.5" onClick={e => e.stopPropagation()}>
@@ -2219,6 +2226,7 @@ export default function Expenses() {
         open={!!detailTx}
         onClose={() => setDetailTx(null)}
         categories={categories}
+        paymentMethods={paymentMethods}
         onSave={handleDrawerSave}
         onApprove={approveRow}
         onToggleTransfer={toggleTransfer}
@@ -2271,6 +2279,8 @@ export default function Expenses() {
         onConfirm={handlePreviewConfirm}
         onCancel={handlePreviewCancel}
         filePreviews={filePreviews}
+        paymentMethods={paymentMethods}
+        onMethodChange={handlePreviewMethodChange}
       />
 
       {/* Duplicate Resolver Dialog */}
@@ -2320,30 +2330,27 @@ function getModeDefaults(mode: TransactionMode) {
   }
 }
 
-// Inline method cell: free-text input that commits on blur or Enter, cancels on Esc.
-function InlineMethodCell({ tx, onCommit }: { tx: Transaction; onCommit: (value: string) => void }) {
+// Inline method cell: dropdown of saved payment methods with a custom escape hatch.
+function InlineMethodCell({ tx, methods, onCommit }: { tx: Transaction; methods: PaymentMethod[]; onCommit: (value: string) => void }) {
   const initial = tx.final_method || tx.predicted_method || '';
-  const [value, setValue] = useState(initial);
-  useEffect(() => { setValue(tx.final_method || tx.predicted_method || ''); }, [tx.id, tx.final_method, tx.predicted_method]);
 
-  const commit = () => {
-    const trimmed = value.trim();
+  const commit = (next: string) => {
+    const trimmed = next.trim();
     if (trimmed === (initial || '').trim()) return;
     onCommit(trimmed);
   };
 
+  const txMode = tx.mode === 'business' ? 'business' : 'personal';
+
   return (
-    <Input
-      value={value}
-      onChange={e => setValue(e.target.value)}
-      onBlur={commit}
-      onKeyDown={e => {
-        if (e.key === 'Enter') { e.preventDefault(); (e.target as HTMLInputElement).blur(); }
-        else if (e.key === 'Escape') { setValue(initial); (e.target as HTMLInputElement).blur(); }
-      }}
+    <MethodSelect
+      value={initial}
+      methods={methods}
+      mode={txMode}
+      onChange={commit}
       placeholder={tx.source_account_name || '—'}
-      title={tx.source_account_name ? `Source account from upload: ${tx.source_account_name}` : undefined}
-      className="h-6 px-1.5 text-xs border-transparent bg-transparent hover:bg-secondary/40 focus:bg-secondary/60 focus:border-border text-muted-foreground placeholder:text-muted-foreground/50"
+      className="h-6 px-1.5 text-xs border-transparent bg-transparent hover:bg-secondary/40 text-muted-foreground"
     />
   );
 }
+

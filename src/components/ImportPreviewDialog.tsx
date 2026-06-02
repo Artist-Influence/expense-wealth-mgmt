@@ -4,6 +4,8 @@ import { Badge } from '@/components/ui/badge';
 import { CheckCircle, AlertCircle, ArrowRight, FileText, ChevronDown, ChevronUp } from 'lucide-react';
 import { useState } from 'react';
 import type { ParsePreview } from '@/lib/csv-parser';
+import { MethodSelect } from '@/components/MethodSelect';
+import type { PaymentMethod } from '@/hooks/usePaymentMethods';
 
 export interface FilePreviewInfo {
   file: File;
@@ -17,6 +19,8 @@ interface ImportPreviewDialogProps {
   onConfirm: (validIndexes: number[]) => void;
   onCancel: () => void;
   filePreviews: FilePreviewInfo[];
+  paymentMethods?: PaymentMethod[];
+  onMethodChange?: (index: number, method: string) => void;
 }
 
 const FIELD_LABELS: Record<string, string> = {
@@ -28,7 +32,7 @@ const FIELD_LABELS: Record<string, string> = {
   notes: 'Notes',
 };
 
-export function ImportPreviewDialog({ open, onConfirm, onCancel, filePreviews }: ImportPreviewDialogProps) {
+export function ImportPreviewDialog({ open, onConfirm, onCancel, filePreviews, paymentMethods = [], onMethodChange }: ImportPreviewDialogProps) {
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
 
   if (filePreviews.length === 0) return null;
@@ -95,6 +99,18 @@ export function ImportPreviewDialog({ open, onConfirm, onCancel, filePreviews }:
                 {/* Expanded: column mappings */}
                 {isExpanded && fp.preview && (
                   <div className="mt-3 space-y-3">
+                    {onMethodChange && (
+                      <div>
+                        <h4 className="text-[10px] font-medium text-muted-foreground mb-1.5">Payment Method</h4>
+                        <MethodSelect
+                          value={fp.method || ''}
+                          methods={paymentMethods}
+                          onChange={v => onMethodChange(idx, v)}
+                          className="h-8 text-xs"
+                          placeholder="Auto-detect / select"
+                        />
+                      </div>
+                    )}
                     <div>
                       <h4 className="text-[10px] font-medium text-muted-foreground mb-1.5">Column Mappings</h4>
                       <div className="space-y-1">

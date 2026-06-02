@@ -14,6 +14,7 @@ import { Plus, Trash2, ChevronDown, Zap, Save, Wand2 } from 'lucide-react';
 import { previewCsvFile, parseCsvFileWithMapping, type ColumnMapping, type ParsePreview } from '@/lib/csv-parser';
 import { updateMerchantMemory } from '@/lib/categorization-engine';
 import { SeedMappingDialog } from '@/components/SeedMappingDialog';
+import type { PaymentMethod } from '@/hooks/usePaymentMethods';
 
 const STOP_WORDS = new Set(['THE', 'AND', 'INC', 'LLC', 'LTD', 'FOR', 'FROM', 'WITH', 'COM', 'WWW', 'HTTP', 'HTTPS', 'NET', 'ORG', 'CO', 'USA', 'TST', 'SQ', 'POS', 'DES', 'ACH', 'REF', 'TXN', 'PMT', 'CKS', 'INT', 'FEE', 'TAX', 'PRE', 'ATM', 'WEB', 'TEL', 'PPD', 'CCD']);
 
@@ -142,8 +143,14 @@ export default function SettingsPage() {
   const [testInput, setTestInput] = useState('');
   const [testResult, setTestResult] = useState<string | null>(null);
 
+  // Payment methods state
+  const [methods, setMethods] = useState<PaymentMethod[]>([]);
+  const [newMethod, setNewMethod] = useState<{ name: string; mode: string; account_type: string; match_pattern: string }>({
+    name: '', mode: 'personal', account_type: 'credit_card', match_pattern: '',
+  });
+
   useEffect(() => {
-    if (user && ownerId) { loadCategories(); loadSettings(); loadRules(); }
+    if (user && ownerId) { loadCategories(); loadSettings(); loadRules(); loadMethods(); }
   }, [user, ownerId]);
 
   const loadCategories = async () => {
@@ -172,6 +179,40 @@ export default function SettingsPage() {
   const loadRules = async () => {
     const { data } = await supabase.from('categorization_rules').select('*').eq('owner_id', ownerId!).order('priority', { ascending: true });
     setRules((data || []) as Rule[]);
+  };
+
+  const loadMethods = async () => {
+    const { data } = await supabase.from('payment_methods').select('*').eq('owner_id', ownerId!).order('sort_order');
+    setMethods((data || []) as PaymentMethod[]);
+  };
+
+  const addMethod = async () => {
+    const name = newMethod.name.trim();
+    if (!name) { toast.error('Method name is required'); return; }
+    const duplicate = methods.find(m => m.name.toLowerCase() === name.toLowerCase());
+    if (duplicate) { toast.error(`Method "${name}" already exists`); return; }
+    await supabase.from('payment_methods').insert({
+      name,
+      mode: newMethod.mode,
+      account_type: newMethod.account_type,
+      match_pattern: newMethod.match_pattern.trim() || null,
+      sort_order: methods.length,
+      owner_id: user!.id,
+    });
+    setNewMethod({ name: '', mode: 'personal', account_type: 'credit_card', match_pattern: '' });
+    await loadMethods();
+    toast.success(`Method "${name}" added`);
+  };
+
+  const updateMethod = async (id: string, patch: Partial<PaymentMethod>) => {
+    await supabase.from('payment_methods').update(patch).eq('id', id);
+    await loadMethods();
+  };
+
+  const deleteMethod = async (id: string) => {
+    await supabase.from('payment_methods').delete().eq('id', id);
+    await loadMethods();
+    toast.success('Method deleted');
   };
 
   const addCategory = async (mode: 'personal' | 'business', name: string) => {
@@ -394,6 +435,107 @@ export default function SettingsPage() {
             <CategoryList cats={personalCats} mode="personal" newVal={newCatPersonal} setNewVal={setNewCatPersonal} />
             <CategoryList cats={businessCats} mode="business" newVal={newCatBusiness} setNewVal={setNewCatBusiness} />
           </div>
+
+          {/* Payment Methods */}
+          <div className="glass-panel p-4">
+            <h3 className="text-sm font-medium text-foreground mb-1">Payment Methods</h3>
+            <p className="text-[11px] text-muted-foreground mb-3">
+              Register your credit cards and bank accounts. The filename keyword auto-tags uploaded CSVs to the right account.
+            </p>
+
+            <div className="space-y-1.5 mb-3">
+              {methods.length === 0 && (
+                <p className="text-xs text-muted-foreground italic py-2">No payment methods yet. Add your first card or account below.</p>
+              )}
+              {methods.map(m => (
+                <div key={m.id} className={`grid grid-cols-12 gap-2 items-center py-1.5 px-2 rounded hover:bg-secondary/20 ${m.is_active ? '' : 'opacity-50'}`}>
+                  <Input
+                    value={m.name}
+                    onChange={e => setMethods(prev => prev.map(x => x.id === m.id ? { ...x, name: e.target.value } : x))}
+                    onBlur={e => updateMethod(m.id, { name: e.target.value.trim() })}
+                    className="glass-input h-8 text-xs col-span-3"
+                  />
+                  <Select value={m.mode} onValueChange={v => updateMethod(m.id, { mode: v })}>
+                    <SelectTrigger className="glass-input h-8 text-xs col-span-2"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="personal">Personal</SelectItem>
+                      <SelectItem value="business">Business</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Select value={m.account_type} onValueChange={v => updateMethod(m.id, { account_type: v })}>
+                    <SelectTrigger className="glass-input h-8 text-xs col-span-3"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="credit_card">Credit Card</SelectItem>
+                      <SelectItem value="bank_account">Bank Account</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Input
+                    value={m.match_pattern || ''}
+                    placeholder="filename keyword"
+                    onChange={e => setMethods(prev => prev.map(x => x.id === m.id ? { ...x, match_pattern: e.target.value } : x))}
+                    onBlur={e => updateMethod(m.id, { match_pattern: e.target.value.trim() || null })}
+                    className="glass-input h-8 text-xs col-span-3"
+                  />
+                  <div className="col-span-1 flex items-center justify-end gap-1">
+                    <Switch checked={m.is_active} onCheckedChange={v => updateMethod(m.id, { is_active: v })} />
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button size="sm" variant="ghost" className="h-6 w-6 p-0">
+                          <Trash2 className="h-3 w-3 text-destructive/60" />
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>Delete payment method?</AlertDialogTitle>
+                          <AlertDialogDescription>"{m.name}" will be removed. Existing transactions using it won't be affected.</AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Cancel</AlertDialogCancel>
+                          <AlertDialogAction onClick={() => deleteMethod(m.id)}>Delete</AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="grid grid-cols-12 gap-2 items-center border-t border-border/40 pt-3">
+              <Input
+                placeholder="Name (e.g. Chase Sapphire)"
+                value={newMethod.name}
+                onChange={e => setNewMethod(v => ({ ...v, name: e.target.value }))}
+                onKeyDown={e => e.key === 'Enter' && addMethod()}
+                className="glass-input h-8 text-xs col-span-3"
+              />
+              <Select value={newMethod.mode} onValueChange={v => setNewMethod(s => ({ ...s, mode: v }))}>
+                <SelectTrigger className="glass-input h-8 text-xs col-span-2"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="personal">Personal</SelectItem>
+                  <SelectItem value="business">Business</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={newMethod.account_type} onValueChange={v => setNewMethod(s => ({ ...s, account_type: v }))}>
+                <SelectTrigger className="glass-input h-8 text-xs col-span-3"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="credit_card">Credit Card</SelectItem>
+                  <SelectItem value="bank_account">Bank Account</SelectItem>
+                </SelectContent>
+              </Select>
+              <Input
+                placeholder="filename keyword (optional)"
+                value={newMethod.match_pattern}
+                onChange={e => setNewMethod(v => ({ ...v, match_pattern: e.target.value }))}
+                onKeyDown={e => e.key === 'Enter' && addMethod()}
+                className="glass-input h-8 text-xs col-span-3"
+              />
+              <Button size="sm" className="h-8 col-span-1" onClick={addMethod}>
+                <Plus className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          </div>
+
+
 
           {/* Thresholds */}
           <div className="glass-panel p-4 space-y-4">

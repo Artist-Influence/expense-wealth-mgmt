@@ -475,6 +475,45 @@ export type Database = {
         }
         Relationships: []
       }
+      payment_methods: {
+        Row: {
+          account_type: string
+          created_at: string
+          id: string
+          is_active: boolean
+          match_pattern: string | null
+          mode: string
+          name: string
+          owner_id: string
+          sort_order: number
+          updated_at: string
+        }
+        Insert: {
+          account_type?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          match_pattern?: string | null
+          mode?: string
+          name: string
+          owner_id: string
+          sort_order?: number
+          updated_at?: string
+        }
+        Update: {
+          account_type?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          match_pattern?: string | null
+          mode?: string
+          name?: string
+          owner_id?: string
+          sort_order?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           created_at: string
