@@ -501,7 +501,7 @@ export default function Wealth() {
 
   // App settings — holds portfolio-wide end-of-year wealth target.
   const { data: appSettings } = useQuery({
-    queryKey: ['app_settings', user?.id],
+    queryKey: ['app_settings', user?.id, ownerId],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('app_settings')
@@ -511,7 +511,7 @@ export default function Wealth() {
       if (error) throw error;
       return data;
     },
-    enabled: !!user,
+    enabled: !!user && !!ownerId,
   });
 
   const saveTarget = useMutation({
