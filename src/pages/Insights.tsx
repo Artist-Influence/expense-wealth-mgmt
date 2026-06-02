@@ -148,7 +148,7 @@ export default function Insights() {
 
   // Auto-pick the mode that actually has data on first load
   useEffect(() => {
-    if (!user || modeAutoSet) return;
+    if (!user || !ownerId || modeAutoSet) return;
     (async () => {
       const [{ count: pCount }, { count: bCount }] = await Promise.all([
         supabase.from('transactions_uploaded').select('id', { count: 'exact', head: true }).eq('owner_id', ownerId!).eq('mode', 'personal'),
@@ -159,11 +159,11 @@ export default function Insights() {
       if (businessN > personalN) setMode('business');
       setModeAutoSet(true);
     })();
-  }, [user, modeAutoSet]);
+  }, [user, ownerId, modeAutoSet]);
 
   useEffect(() => {
-    if (user) loadData();
-  }, [user, mode]);
+    if (user && ownerId) loadData();
+  }, [user, ownerId, mode]);
 
   const loadData = async () => {
     setLoading(true);
