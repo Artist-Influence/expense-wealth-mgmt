@@ -32,7 +32,7 @@ const FIELD_LABELS: Record<string, string> = {
   notes: 'Notes',
 };
 
-export function ImportPreviewDialog({ open, onConfirm, onCancel, filePreviews }: ImportPreviewDialogProps) {
+export function ImportPreviewDialog({ open, onConfirm, onCancel, filePreviews, paymentMethods = [], onMethodChange }: ImportPreviewDialogProps) {
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
 
   if (filePreviews.length === 0) return null;
