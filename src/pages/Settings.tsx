@@ -180,6 +180,13 @@ export default function SettingsPage() {
         prevent_exact_duplicates: data.prevent_exact_duplicates ?? true,
         flag_possible_duplicates: data.flag_possible_duplicates ?? true,
         exclude_transfers_from_totals: data.exclude_transfers_from_totals ?? true,
+        min_personal_cash_buffer: Number(data.min_personal_cash_buffer ?? 5000),
+        min_business_cash_buffer: Number(data.min_business_cash_buffer ?? 10000),
+        tax_reserve_percent: Number(data.tax_reserve_percent ?? 30),
+        monthly_savings_goal: Number(data.monthly_savings_goal ?? 0),
+        monthly_personal_spend_limit: Number(data.monthly_personal_spend_limit ?? 0),
+        monthly_business_expense_target: Number(data.monthly_business_expense_target ?? 0),
+        report_basis: data.report_basis ?? 'cash',
       });
     }
   };
