@@ -197,7 +197,6 @@ export async function getDataQuality(
   } catch (e) {
     return { error: String((e as Error).message) };
   }
-  const rows = data ?? [];
   const totalCount = rows.length;
   const totalValue = sumAbs(rows);
   const uncategorized = rows.filter(
