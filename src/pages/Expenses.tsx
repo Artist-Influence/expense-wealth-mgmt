@@ -2330,30 +2330,27 @@ function getModeDefaults(mode: TransactionMode) {
   }
 }
 
-// Inline method cell: free-text input that commits on blur or Enter, cancels on Esc.
-function InlineMethodCell({ tx, onCommit }: { tx: Transaction; onCommit: (value: string) => void }) {
+// Inline method cell: dropdown of saved payment methods with a custom escape hatch.
+function InlineMethodCell({ tx, methods, onCommit }: { tx: Transaction; methods: PaymentMethod[]; onCommit: (value: string) => void }) {
   const initial = tx.final_method || tx.predicted_method || '';
-  const [value, setValue] = useState(initial);
-  useEffect(() => { setValue(tx.final_method || tx.predicted_method || ''); }, [tx.id, tx.final_method, tx.predicted_method]);
 
-  const commit = () => {
-    const trimmed = value.trim();
+  const commit = (next: string) => {
+    const trimmed = next.trim();
     if (trimmed === (initial || '').trim()) return;
     onCommit(trimmed);
   };
 
+  const txMode = tx.mode === 'business' ? 'business' : 'personal';
+
   return (
-    <Input
-      value={value}
-      onChange={e => setValue(e.target.value)}
-      onBlur={commit}
-      onKeyDown={e => {
-        if (e.key === 'Enter') { e.preventDefault(); (e.target as HTMLInputElement).blur(); }
-        else if (e.key === 'Escape') { setValue(initial); (e.target as HTMLInputElement).blur(); }
-      }}
+    <MethodSelect
+      value={initial}
+      methods={methods}
+      mode={txMode}
+      onChange={commit}
       placeholder={tx.source_account_name || '—'}
-      title={tx.source_account_name ? `Source account from upload: ${tx.source_account_name}` : undefined}
-      className="h-6 px-1.5 text-xs border-transparent bg-transparent hover:bg-secondary/40 focus:bg-secondary/60 focus:border-border text-muted-foreground placeholder:text-muted-foreground/50"
+      className="h-6 px-1.5 text-xs border-transparent bg-transparent hover:bg-secondary/40 text-muted-foreground"
     />
   );
 }
+
