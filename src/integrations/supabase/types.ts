@@ -232,6 +232,39 @@ export type Database = {
         }
         Relationships: []
       }
+      audit_logs: {
+        Row: {
+          actor_id: string | null
+          created_at: string
+          entity: string | null
+          entity_id: string | null
+          event_type: string
+          id: string
+          owner_id: string
+          summary: Json | null
+        }
+        Insert: {
+          actor_id?: string | null
+          created_at?: string
+          entity?: string | null
+          entity_id?: string | null
+          event_type: string
+          id?: string
+          owner_id: string
+          summary?: Json | null
+        }
+        Update: {
+          actor_id?: string | null
+          created_at?: string
+          entity?: string | null
+          entity_id?: string | null
+          event_type?: string
+          id?: string
+          owner_id?: string
+          summary?: Json | null
+        }
+        Relationships: []
+      }
       categorization_rules: {
         Row: {
           category_output: string | null
@@ -1086,6 +1119,16 @@ export type Database = {
           _user_id: string
         }
         Returns: boolean
+      }
+      log_event: {
+        Args: {
+          _entity?: string
+          _entity_id?: string
+          _event_type: string
+          _owner: string
+          _summary?: Json
+        }
+        Returns: undefined
       }
     }
     Enums: {
