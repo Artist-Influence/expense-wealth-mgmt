@@ -1147,6 +1147,9 @@ export default function Insights() {
                   <div className="px-4 py-3 border-b border-border/40 flex items-center gap-2">
                     <RefreshCw className="h-3.5 w-3.5 text-primary" />
                     <h3 className="text-sm font-medium text-foreground">Recurring Charges</h3>
+                    <Link to="/subscriptions" className="ml-auto text-[11px] text-primary hover:underline inline-flex items-center gap-1">
+                      Manage subscriptions →
+                    </Link>
                   </div>
                   <div className="overflow-x-auto scrollbar-thin">
                     <table className="w-full text-xs">
