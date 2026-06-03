@@ -334,7 +334,13 @@ export default function Expenses() {
       const exact = findExactClusters(sameModeRows);
       const exactIds = new Set<string>();
       for (const c of exact) for (const id of c.rowIds) exactIds.add(id);
-      const near = findNearClusters(sameModeRows, exactIds, 7);
+      // Rows already tagged as recurring (subscriptions/transit/etc.) are legitimate
+      // repeat charges, not duplicates — keep them out of near-duplicate clustering.
+      const recurringIds = new Set(
+        activeRows.filter(r => r.recurring_group_id).map(r => r.id)
+      );
+      const nearExclude = new Set<string>([...exactIds, ...recurringIds]);
+      const near = findNearClusters(sameModeRows, nearExclude, 1);
 
       // Cross-mode pairs: same date + amount + matching merchant key, different mode.
       const crossPairs: { rowIds: string[] }[] = [];
