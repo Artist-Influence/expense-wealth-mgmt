@@ -1677,7 +1677,7 @@ export default function Expenses() {
                             to="/settings"
                             className="inline-flex items-center gap-1 mt-1.5 text-[11px] font-medium text-primary hover:underline"
                           >
-                            Go to Settings <ArrowLeftRight className="h-3 w-3" />
+                            Go to Settings <ArrowRight className="h-3 w-3" />
                           </Link>
                         </div>
                       </div>
