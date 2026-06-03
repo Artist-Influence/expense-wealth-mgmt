@@ -390,7 +390,10 @@ export default function Wealth() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm);
-  const [scope, setScope] = useState<ModeScope>(() => readPersistedScope('wealth_scope', 'all'));
+  const { profile } = useUsageProfile();
+  const [persistedScope, setPersistedScope] = useState<ModeScope>(() => readPersistedScope('wealth_scope', 'all'));
+  const scope: ModeScope = profile === 'both' ? persistedScope : profile;
+  const setScope = setPersistedScope;
   const [targetDialogOpen, setTargetDialogOpen] = useState(false);
   const [bulkUpdateOpen, setBulkUpdateOpen] = useState(false);
   const { data: accounts = [], isLoading } = useQuery({
