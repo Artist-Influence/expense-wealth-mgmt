@@ -18,6 +18,7 @@ import Allocations from "./pages/Allocations";
 import CloseMonth from "./pages/CloseMonth";
 import NotFound from "./pages/NotFound";
 import Assistant from "./pages/Assistant";
+import Subscriptions from "./pages/Subscriptions";
 
 const queryClient = new QueryClient();
 
