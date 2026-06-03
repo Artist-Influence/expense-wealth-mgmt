@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
+import { useUsageProfile } from '@/hooks/useUsageProfile';
 import { supabase } from '@/integrations/supabase/client';
 import { AppNav } from '@/components/AppNav';
 import { CsvUploader } from '@/components/CsvUploader';
@@ -94,6 +95,17 @@ const MODE_CONFIG: Record<TransactionMode, { label: string; color: string; activ
 
 export default function Expenses() {
   const { user, isInvestor, isAccountant, isOwner, ownerId } = useAuth();
+  const { profile } = useUsageProfile();
+  const lockedMode: 'personal' | 'business' | null =
+    profile === 'personal' ? 'personal' : profile === 'business' ? 'business' : null;
+  // Which mode tabs to show based on usage profile
+  const visibleModes: TransactionMode[] =
+    profile === 'personal' ? ['personal', 'reimbursable_work']
+    : profile === 'business' ? ['business']
+    : ['personal', 'business', 'reimbursable_work'];
+  // Which summary cards to show
+  const showPersonalCards = !isInvestor && profile !== 'business';
+  const showBusinessCards = profile !== 'personal';
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const { methods: paymentMethods } = usePaymentMethods();
   const setup = useSetupStatus();
@@ -213,6 +225,12 @@ export default function Expenses() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Lock the active mode tab to the usage profile when it isn't "both"
+  useEffect(() => {
+    if (lockedMode) setMode((m) => (visibleModes.includes(m) ? m : lockedMode));
+  }, [lockedMode]); // eslint-disable-line react-hooks/exhaustive-deps
+
 
   // All-mode transaction snapshot — needed because `loadTransactions` is
   // already scoped to the active mode tab, but the summary strip compares
@@ -1638,7 +1656,7 @@ export default function Expenses() {
           {/* 3-Way Mode Toggle — hidden for investors */}
           {!isInvestor && (
             <div className="flex rounded-lg border border-border/40 overflow-hidden">
-              {(Object.entries(MODE_CONFIG) as [TransactionMode, typeof MODE_CONFIG[TransactionMode]][]).map(([key, cfg]) => (
+              {(Object.entries(MODE_CONFIG) as [TransactionMode, typeof MODE_CONFIG[TransactionMode]][]).filter(([key]) => visibleModes.includes(key)).map(([key, cfg]) => (
                 <button
                   key={key}
                   onClick={() => setMode(key)}
@@ -1922,17 +1940,17 @@ export default function Expenses() {
               <Button size="sm" variant="outline" onClick={bulkMarkTransfer} className="h-8 gap-1 text-xs">
                 <ArrowLeftRight className="h-3 w-3" /> Transfer
               </Button>
-              {mode !== 'personal' && (
+              {mode !== 'personal' && visibleModes.includes('personal') && (
                 <Button size="sm" variant="outline" onClick={() => bulkSwitchMode('personal')} className="h-8 gap-1 text-xs">
                   <User className="h-3 w-3" /> → Personal
                 </Button>
               )}
-              {mode !== 'business' && (
+              {mode !== 'business' && visibleModes.includes('business') && (
                 <Button size="sm" variant="outline" onClick={() => bulkSwitchMode('business')} className="h-8 gap-1 text-xs text-primary border-primary/30">
                   <Briefcase className="h-3 w-3" /> → Business
                 </Button>
               )}
-              {mode !== 'reimbursable_work' && (
+              {mode !== 'reimbursable_work' && visibleModes.includes('reimbursable_work') && (
                 <Button size="sm" variant="outline" onClick={() => bulkSwitchMode('reimbursable_work')} className="h-8 gap-1 text-xs text-warning border-warning/30">
                   <Receipt className="h-3 w-3" /> → Reimburse
                 </Button>
@@ -1961,30 +1979,39 @@ export default function Expenses() {
             )}
           </p>
         </div>
-        <div className={`grid ${isInvestor ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-2 md:grid-cols-5'} gap-2 mb-2`}>
-          {!isInvestor && (
+        <div className={`grid grid-cols-2 gap-2 mb-2 ${
+          isInvestor ? 'md:grid-cols-2'
+          : showPersonalCards && showBusinessCards ? 'md:grid-cols-5'
+          : showPersonalCards ? 'md:grid-cols-3'
+          : 'md:grid-cols-2'
+        }`}>
+          {showPersonalCards && (
             <div className="glass-panel-sm p-2.5">
               <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Personal Cash Out</p>
               <p className="text-sm font-mono font-semibold text-foreground mt-0.5">{fmtMoney(crossModeTotals.personalCashOut)}</p>
             </div>
           )}
-          <div className="glass-panel-sm p-2.5">
-            <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Business Cash Out</p>
-            <p className="text-sm font-mono font-semibold text-primary mt-0.5">{fmtMoney(crossModeTotals.businessCashOut)}</p>
-          </div>
-          {!isInvestor && (
+          {showBusinessCards && (
+            <div className="glass-panel-sm p-2.5">
+              <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Business Cash Out</p>
+              <p className="text-sm font-mono font-semibold text-primary mt-0.5">{fmtMoney(crossModeTotals.businessCashOut)}</p>
+            </div>
+          )}
+          {showPersonalCards && (
             <div className="glass-panel-sm p-2.5">
               <p className="text-[10px] text-muted-foreground uppercase tracking-wider">True Personal</p>
               <p className="text-sm font-mono font-semibold text-foreground mt-0.5">{fmtMoney(crossModeTotals.truePersonal)}</p>
               <p className="text-[9px] text-muted-foreground">Excludes reimbursable</p>
             </div>
           )}
-          <div className="glass-panel-sm p-2.5">
-            <p className="text-[10px] text-muted-foreground uppercase tracking-wider">True Business</p>
-            <p className="text-sm font-mono font-semibold text-primary mt-0.5">{fmtMoney(crossModeTotals.trueBusiness)}</p>
-            <p className="text-[9px] text-muted-foreground">Real business spend</p>
-          </div>
-          {!isInvestor && (
+          {showBusinessCards && (
+            <div className="glass-panel-sm p-2.5">
+              <p className="text-[10px] text-muted-foreground uppercase tracking-wider">True Business</p>
+              <p className="text-sm font-mono font-semibold text-primary mt-0.5">{fmtMoney(crossModeTotals.trueBusiness)}</p>
+              <p className="text-[9px] text-muted-foreground">Real business spend</p>
+            </div>
+          )}
+          {showPersonalCards && (
             <div className="glass-panel-sm p-2.5">
               <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Pending Reimbursable</p>
               <p className="text-sm font-mono font-semibold text-warning mt-0.5">{fmtMoney(crossModeTotals.pendingReimbursable)}</p>

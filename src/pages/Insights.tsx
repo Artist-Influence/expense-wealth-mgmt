@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '@/hooks/useAuth';
+import { useUsageProfile } from '@/hooks/useUsageProfile';
 import { supabase } from '@/integrations/supabase/client';
 import { AppNav } from '@/components/AppNav';
 import {
@@ -123,6 +124,9 @@ const readReviewMode = (): ReviewMode => {
 
 export default function Insights() {
   const { user, isInvestor, isAccountant, ownerId } = useAuth();
+  const { profile } = useUsageProfile();
+  const lockedMode: 'personal' | 'business' | null =
+    profile === 'personal' ? 'personal' : profile === 'business' ? 'business' : null;
   const [mode, setMode] = useState<'personal' | 'business'>(isInvestor ? 'business' : 'personal');
   const [modeAutoSet, setModeAutoSet] = useState(isInvestor ? true : false);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -146,9 +150,14 @@ export default function Insights() {
   const [dateLabel, setDateLabel] = useState<string>('Year to Date');
   const [hiddenTrendCats, setHiddenTrendCats] = useState<Set<string>>(new Set());
 
+  // Lock mode to the usage profile when it isn't "both"
+  useEffect(() => {
+    if (lockedMode) setMode(lockedMode);
+  }, [lockedMode]);
+
   // Auto-pick the mode that actually has data on first load
   useEffect(() => {
-    if (!user || !ownerId || modeAutoSet) return;
+    if (!user || !ownerId || modeAutoSet || lockedMode) return;
     (async () => {
       const [{ count: pCount }, { count: bCount }] = await Promise.all([
         supabase.from('transactions_uploaded').select('id', { count: 'exact', head: true }).eq('owner_id', ownerId!).eq('mode', 'personal'),
@@ -159,7 +168,7 @@ export default function Insights() {
       if (businessN > personalN) setMode('business');
       setModeAutoSet(true);
     })();
-  }, [user, ownerId, modeAutoSet]);
+  }, [user, ownerId, modeAutoSet, lockedMode]);
 
   useEffect(() => {
     if (user && ownerId) loadData();
@@ -928,7 +937,7 @@ export default function Insights() {
               </button>
             )}
 
-            {!isInvestor && (
+            {!isInvestor && !lockedMode && (
               <div className="flex rounded-lg border border-border/40 overflow-hidden">
                 <button onClick={() => setMode('personal')} className={`px-3 py-1.5 text-xs font-medium transition-colors ${mode === 'personal' ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground'}`}>
                   Personal

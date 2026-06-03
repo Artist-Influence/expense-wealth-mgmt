@@ -103,6 +103,7 @@ interface AppSettingsData {
   tax_reserve_percent: number; monthly_savings_goal: number;
   monthly_personal_spend_limit: number; monthly_business_expense_target: number;
   report_basis: string;
+  usage_profile: 'personal' | 'business' | 'both';
 }
 
 interface Rule {
@@ -168,6 +169,7 @@ export default function SettingsPage() {
     tax_reserve_percent: 30, monthly_savings_goal: 0,
     monthly_personal_spend_limit: 0, monthly_business_expense_target: 0,
     report_basis: 'cash',
+    usage_profile: 'both',
   });
   const [seedingPersonal, setSeedingPersonal] = useState(false);
   const [seedingBusiness, setSeedingBusiness] = useState(false);
@@ -225,6 +227,7 @@ export default function SettingsPage() {
         monthly_personal_spend_limit: Number(data.monthly_personal_spend_limit ?? 0),
         monthly_business_expense_target: Number(data.monthly_business_expense_target ?? 0),
         report_basis: data.report_basis ?? 'cash',
+        usage_profile: (['personal', 'business', 'both'].includes((data as any).usage_profile) ? (data as any).usage_profile : 'both'),
       });
     }
   };
@@ -687,7 +690,30 @@ export default function SettingsPage() {
             </div>
           </div>
 
-          {/* Finance Preferences (used by the AI assistant for affordability, runway & tax) */}
+          {/* Usage profile — controls how much of the app is shown */}
+          <div className="glass-panel p-4 space-y-4">
+            <div>
+              <h3 className="text-sm font-medium text-foreground">Usage profile</h3>
+              <p className="text-[11px] text-muted-foreground">
+                Choose how you use the app. Personal or Business hides the parts you don't need; Both shows everything.
+              </p>
+            </div>
+            <div className="max-w-xs space-y-1.5">
+              <label className="text-xs text-muted-foreground">I use this for</label>
+              <Select
+                value={settings.usage_profile}
+                onValueChange={v => setSettings(s => ({ ...s, usage_profile: v as AppSettingsData['usage_profile'] }))}
+              >
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="personal">Personal only</SelectItem>
+                  <SelectItem value="business">Business only</SelectItem>
+                  <SelectItem value="both">Both</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
           <div className="glass-panel p-4 space-y-4">
             <div>
               <h3 className="text-sm font-medium text-foreground">Finance Preferences</h3>

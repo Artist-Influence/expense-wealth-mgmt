@@ -19,6 +19,7 @@ import {
   Plus, FolderOpen, ChevronDown
 } from 'lucide-react';
 import { ModeScopeToggle, readPersistedScope, type ModeScope } from '@/components/ModeScopeToggle';
+import { useUsageProfile } from '@/hooks/useUsageProfile';
 
 interface ReimbursableTransaction {
   id: string;
@@ -97,7 +98,10 @@ export default function Reimbursements() {
   const [groups, setGroups] = useState<ReimbursementGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<TabFilter>('pending');
-  const [scope, setScope] = useState<ModeScope>(() => readPersistedScope('reimbursements_scope', 'all'));
+  const { profile } = useUsageProfile();
+  const [persistedScope, setPersistedScope] = useState<ModeScope>(() => readPersistedScope('reimbursements_scope', 'all'));
+  const scope: ModeScope = profile === 'both' ? persistedScope : profile;
+  const setScope = setPersistedScope;
   const [search, setSearch] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [detailTx, setDetailTx] = useState<ReimbursableTransaction | null>(null);
@@ -380,7 +384,9 @@ export default function Reimbursements() {
             <p className="text-sm text-muted-foreground mt-1">Track expenses you fronted — get your money back.</p>
           </div>
           <div className="flex items-center gap-2">
-            <ModeScopeToggle value={scope} onChange={setScope} storageKey="reimbursements_scope" />
+            {profile === 'both' && (
+              <ModeScopeToggle value={scope} onChange={setScope} storageKey="reimbursements_scope" />
+            )}
             <Button variant="outline" size="sm" onClick={exportCsv} className="gap-1.5">
               <Download className="h-3.5 w-3.5" /> Export
             </Button>

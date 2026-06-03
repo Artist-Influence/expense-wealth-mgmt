@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAuth } from '@/hooks/useAuth';
+import { useUsageProfile } from '@/hooks/useUsageProfile';
 import { supabase } from '@/integrations/supabase/client';
 import { AppNav } from '@/components/AppNav';
 import { CsvUploader } from '@/components/CsvUploader';
@@ -60,12 +61,21 @@ const INCOME_TYPE_BADGE: Record<string, { class: string }> = {
 
 export default function Income() {
   const { user, isInvestor, isAccountant, ownerId } = useAuth();
+  const { profile } = useUsageProfile();
+  const lockedMode: 'personal' | 'business' | null =
+    profile === 'personal' ? 'personal' : profile === 'business' ? 'business' : null;
   const [transactions, setTransactions] = useState<IncomeTransaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [filterMode, setFilterMode] = useState<'all' | 'personal' | 'business'>(isInvestor ? 'business' : 'all');
+
+  // Lock the view to the usage profile when it isn't "both"
+  useEffect(() => {
+    if (lockedMode) setFilterMode(lockedMode);
+  }, [lockedMode]);
+
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showManualEntry, setShowManualEntry] = useState(false);
   const [showUploader, setShowUploader] = useState(false);
@@ -476,8 +486,8 @@ export default function Income() {
           </div>
         </div>
 
-        {/* Mode toggle — hidden for investors */}
-        {!isInvestor && (
+        {/* Mode toggle — hidden for investors and locked usage profiles */}
+        {!isInvestor && !lockedMode && (
           <div className="flex items-center gap-2">
             <span className="text-xs text-muted-foreground uppercase tracking-wide">View:</span>
             <div className="inline-flex rounded-md border border-border bg-card p-0.5">

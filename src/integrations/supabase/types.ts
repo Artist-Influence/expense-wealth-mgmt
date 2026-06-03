@@ -169,6 +169,7 @@ export type Database = {
           report_excluded_categories: string[]
           tax_reserve_percent: number
           updated_at: string
+          usage_profile: string
           wealth_target_amount: number
           wealth_target_year: number
         }
@@ -198,6 +199,7 @@ export type Database = {
           report_excluded_categories?: string[]
           tax_reserve_percent?: number
           updated_at?: string
+          usage_profile?: string
           wealth_target_amount?: number
           wealth_target_year?: number
         }
@@ -227,6 +229,7 @@ export type Database = {
           report_excluded_categories?: string[]
           tax_reserve_percent?: number
           updated_at?: string
+          usage_profile?: string
           wealth_target_amount?: number
           wealth_target_year?: number
         }

@@ -12,6 +12,10 @@ import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { HealthCheckPanel } from './HealthCheckPanel';
 import { runHealthCheck, shouldAutoRun, type HealthCheckSummary } from '@/lib/health-check';
+import { useUsageProfile } from '@/hooks/useUsageProfile';
+
+/** Pages that only make sense for business usage; hidden in personal-only mode. */
+const BUSINESS_ONLY_NAV = ['/accountant'];
 
 const INVESTOR_NAV = ['/', '/income', '/insights'];
 
@@ -32,6 +36,7 @@ const navItems = [
 export function AppNav() {
   const location = useLocation();
   const { user, signOut, isInvestor, isAccountant, ownerId } = useAuth();
+  const { profile } = useUsageProfile();
   const [healthOpen, setHealthOpen] = useState(false);
   const [healthSummary, setHealthSummary] = useState<HealthCheckSummary | null>(null);
 
@@ -98,7 +103,10 @@ export function AppNav() {
             <span className="font-semibold text-foreground text-xs">Expense Memory</span>
           </Link>
           
-          {navItems.filter(({ to }) => !isInvestor || INVESTOR_NAV.includes(to)).map(({ to, label, icon: Icon, active, showBadge }) => {
+          {navItems
+            .filter(({ to }) => !isInvestor || INVESTOR_NAV.includes(to))
+            .filter(({ to }) => isInvestor || isAccountant || profile !== 'personal' || !BUSINESS_ONLY_NAV.includes(to))
+            .map(({ to, label, icon: Icon, active, showBadge }) => {
             const isActive = to === '/' ? location.pathname === '/' : location.pathname.startsWith(to);
             
             if (!active) {

@@ -12,12 +12,16 @@ import { Button } from '@/components/ui/button';
 import {
   Sparkles, Upload, CheckCheck, DollarSign, TrendingUp,
   MessageCircle, Settings as SettingsIcon, ArrowRight, ArrowLeft,
+  User, Briefcase, Layers, Check,
 } from 'lucide-react';
+import type { UsageProfile } from '@/hooks/useUsageProfile';
 
 interface OnboardingStep {
   icon: React.ComponentType<{ className?: string }>;
   title: string;
   body: React.ReactNode;
+  /** Special step keys render custom interactive content instead of `body`. */
+  key?: string;
 }
 
 const STEPS: OnboardingStep[] = [
@@ -29,6 +33,16 @@ const STEPS: OnboardingStep[] = [
         This tool turns your raw bank and credit-card statements into a clear picture of your
         money — categorized expenses, tracked income, and a plan for what to do with what's left.
         This quick walkthrough shows the main workflow. It takes about a minute.
+      </>
+    ),
+  },
+  {
+    icon: Layers,
+    key: 'usage',
+    title: 'How will you use this?',
+    body: (
+      <>
+        Pick how you'll use the app so we can keep it focused. You can change this anytime in Settings.
       </>
     ),
   },
@@ -110,17 +124,23 @@ export function OnboardingWizard({ open, onClose, persistOnComplete = true }: On
   const { ownerId } = useAuth();
   const [step, setStep] = useState(0);
   const [saving, setSaving] = useState(false);
+  const [usageProfile, setUsageProfile] = useState<UsageProfile | null>(null);
 
   const isLast = step === STEPS.length - 1;
   const current = STEPS[step];
   const Icon = current.icon;
+  const isUsageStep = current.key === 'usage';
+  const nextDisabled = isUsageStep && !usageProfile;
 
   const markComplete = async () => {
     if (!persistOnComplete || !ownerId) return;
     try {
       await supabase
         .from('app_settings')
-        .update({ onboarding_completed: true })
+        .update({
+          onboarding_completed: true,
+          ...(usageProfile ? { usage_profile: usageProfile } : {}),
+        })
         .eq('owner_id', ownerId);
     } catch {
       /* non-blocking */
@@ -156,6 +176,41 @@ export function OnboardingWizard({ open, onClose, persistOnComplete = true }: On
             {current.body}
           </DialogDescription>
         </DialogHeader>
+
+        {isUsageStep && (
+          <div className="grid gap-2 py-1">
+            {([
+              { value: 'personal' as const, icon: User, label: 'Personal', desc: 'Track your own spending, income, and savings.' },
+              { value: 'business' as const, icon: Briefcase, label: 'Business', desc: 'Track business expenses, income, and reporting.' },
+              { value: 'both' as const, icon: Layers, label: 'Both', desc: 'Manage personal and business side by side.' },
+            ]).map((opt) => {
+              const OptIcon = opt.icon;
+              const selected = usageProfile === opt.value;
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setUsageProfile(opt.value)}
+                  className={`flex items-center gap-3 rounded-xl border p-3 text-left transition-all ${
+                    selected
+                      ? 'border-primary/50 bg-primary/10'
+                      : 'border-border/50 bg-secondary/30 hover:bg-secondary/50'
+                  }`}
+                >
+                  <div className={`flex h-9 w-9 items-center justify-center rounded-lg shrink-0 ${selected ? 'bg-primary/20' : 'bg-secondary/60'}`}>
+                    <OptIcon className={`h-4 w-4 ${selected ? 'text-primary' : 'text-muted-foreground'}`} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-medium text-foreground">{opt.label}</div>
+                    <div className="text-xs text-muted-foreground">{opt.desc}</div>
+                  </div>
+                  {selected && <Check className="h-4 w-4 text-primary shrink-0" />}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
 
         {/* Progress dots */}
         <div className="flex items-center justify-center gap-1.5 py-2">
@@ -199,7 +254,7 @@ export function OnboardingWizard({ open, onClose, persistOnComplete = true }: On
                 <ArrowRight className="h-3.5 w-3.5" />
               </Button>
             ) : (
-              <Button size="sm" onClick={() => setStep((s) => s + 1)} className="gap-1.5">
+              <Button size="sm" onClick={() => setStep((s) => s + 1)} disabled={nextDisabled} className="gap-1.5">
                 Next
                 <ArrowRight className="h-3.5 w-3.5" />
               </Button>

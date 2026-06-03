@@ -18,6 +18,7 @@ import { cn } from '@/lib/utils';
 import { useState } from 'react';
 import { toast } from 'sonner';
 import { ModeScopeToggle, readPersistedScope, type ModeScope } from '@/components/ModeScopeToggle';
+import { useUsageProfile } from '@/hooks/useUsageProfile';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { CombinedWealthChart, type Snapshot } from '@/components/CombinedWealthChart';
@@ -390,7 +391,10 @@ export default function Wealth() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm);
-  const [scope, setScope] = useState<ModeScope>(() => readPersistedScope('wealth_scope', 'all'));
+  const { profile } = useUsageProfile();
+  const [persistedScope, setPersistedScope] = useState<ModeScope>(() => readPersistedScope('wealth_scope', 'all'));
+  const scope: ModeScope = profile === 'both' ? persistedScope : profile;
+  const setScope = setPersistedScope;
   const [targetDialogOpen, setTargetDialogOpen] = useState(false);
   const [bulkUpdateOpen, setBulkUpdateOpen] = useState(false);
   const { data: accounts = [], isLoading } = useQuery({
@@ -808,7 +812,9 @@ export default function Wealth() {
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-3 flex-wrap">
             <h1 className="text-xl font-semibold text-foreground">Wealth</h1>
-            <ModeScopeToggle value={scope} onChange={setScope} storageKey="wealth_scope" />
+            {profile === 'both' && (
+              <ModeScopeToggle value={scope} onChange={setScope} storageKey="wealth_scope" />
+            )}
             <span className="text-[10px] text-muted-foreground">
               Showing: <span className="text-foreground/80 font-medium">{scope === 'all' ? 'All' : scope === 'business' ? 'Business' : 'Personal'}</span>
             </span>
