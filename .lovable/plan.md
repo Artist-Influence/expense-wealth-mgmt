@@ -1,59 +1,44 @@
-# Finish security hardening: soft-delete coverage + AI abuse guard
+## Goal
 
-Two pieces of residual work from the earlier hardening pass.
+Let your friends create their own accounts using a shared invite code (`JARED123`), give a display name, and start using the platform immediately — without opening the door to the public.
 
-## Part 1 — Complete soft-delete (`deleted_at`) filtering (primary)
+## Security approach (why this design)
 
-Several pages and helpers still read soft-deletable financial tables **without** excluding rows where `deleted_at IS NOT NULL`. That means a "deleted" transaction/income/plan can still leak into totals, tax estimates, allocations, reimbursements, and the health check — a correctness and data-integrity issue.
+Platform-level signups stay **disabled**. If we simply turned Supabase signups on, anyone could register by calling the API directly and skip the invite code. Instead, a server-side function holds the only key to account creation: it checks the invite code first, then creates the account. The code is validated on the server, never trusted from the browser.
 
-Add `.is('deleted_at', null)` to every **read** query on these soft-deletable tables: `transactions_uploaded`, `income_transactions`, `allocation_plans`, `allocation_line_items`, `reimbursement_groups`, `investment_accounts`, `account_balance_snapshots`. (Writes/updates/inserts are untouched.)
+## What gets built
 
-Files and queries to update:
+### 1. Invite codes table
+A new `invite_codes` table holding the code, an active flag, and an optional label. Seeded with one row: `JARED123` (active, reusable by everyone, no usage cap — per your choice). The table is locked down (no public/browser access); only the signup function can read it.
 
-```text
-src/pages/Allocations.tsx   income_transactions, transactions_uploaded (x2),
-                            investment_accounts, allocation_plans, allocation_line_items (reads)
-src/pages/Wealth.tsx        account_balance_snapshots, investment_accounts,
-                            transactions_uploaded (read queries only)
-src/pages/Tax.tsx           transactions_uploaded, income_transactions (read queries)
-src/pages/CloseMonth.tsx    transactions_uploaded, income_transactions, allocation_plans
-src/pages/Reimbursements.tsx transactions_uploaded, reimbursement_groups (read queries)
-src/lib/health-check.ts     income_transactions, transactions_uploaded (read/count queries)
-src/lib/recurrence-detector.ts transactions_uploaded (read query)
-```
+You can later deactivate a code or add new ones without a code change.
 
-Approach: for each `select(...)` chain on the tables above, append `.is('deleted_at', null)`. Leave `insert`/`update`/`delete` chains alone. After edits, grep to confirm every read on a soft-deletable table includes the filter.
+### 2. Display name on profiles
+Add a `display_name` column to the existing `profiles` table, and update the existing new-user routine so it saves the display name entered at signup. Existing accounts are unaffected.
 
-This is pure frontend/query work — no schema or RLS changes.
+### 3. Signup function (server-side)
+A new backend function `signup-with-invite` that:
+- Validates email, password (min length), display name, and invite code (input validation).
+- Confirms the invite code exists and is active — case-insensitive, so `jared123` also works.
+- Creates the account with the display name attached and email auto-confirmed (instant access, per your choice).
+- Returns a clear error if the code is wrong/inactive or the email is already registered.
+- Never reveals whether an email already exists in a way that leaks data beyond a generic "already registered" message.
 
-## Part 2 — AI endpoint abuse guard (optional, ad-hoc)
+### 4. Login page: add a Sign Up view
+Update `src/pages/Login.tsx` to add a "Create account" toggle alongside the existing sign-in form. The signup form collects: display name, email, password, invite code. On success it signs the new user in and drops them into the app (the existing onboarding wizard then runs on first login).
 
-You asked for rate limiting on the AI edge functions (`assistant-chat`, `categorize-ai`). Important caveat: the platform has **no first-class rate-limiting primitive**, so anything here is best-effort and ad-hoc, not a hardened guarantee.
+The existing sign-in flow, MFA challenge, and "Private access only" framing stay intact.
 
-Proposed lightweight, DB-backed throttle:
+## What stays the same
+- Public Supabase signups remain disabled (the function is the only path in).
+- All existing RLS, multi-tenant isolation, MFA, and per-user data ownership are untouched — each new friend automatically owns only their own data.
+- No changes to financial logic or other pages.
 
-```text
-1. New table public.ai_usage_events (owner_id, fn text, created_at)
-   - GRANT to authenticated + service_role
-   - RLS: owner can SELECT own rows; INSERT via SECURITY DEFINER fn only
-2. SECURITY DEFINER fn check_ai_rate_limit(_fn text, _max int, _window interval)
-   - counts caller's events in window, inserts one, returns boolean allow/deny
-3. assistant-chat + categorize-ai call the fn after auth; on deny return HTTP 429
-   with a generic message. Sensible defaults (e.g. ~30 assistant calls / 5 min,
-   ~10 categorize batches / min) — tunable.
-```
+## Technical notes
+- `signup-with-invite` runs unauthenticated (`verify_jwt = false`) and uses the service-role key to create the user via the admin API; this is what lets account creation bypass the disabled-signup setting while the invite gate is enforced in code.
+- Tradeoff: the admin create path does not run the leaked-password (HIBP) check that normal signups would; the function enforces a minimum password length to compensate. Normal password changes/sign-ins still benefit from existing protections.
+- Invite code is stored uppercase and compared case-insensitively.
+- After build: deploy the function, then test a signup with `JARED123` (success) and a bad code (rejected).
 
-If you'd rather not add this complexity given it's only best-effort, we can **skip Part 2** and rely on the existing JWT-required + per-user RLS as the access boundary. Both edge functions already require auth, so anonymous abuse is already blocked — this only limits an authenticated user's volume.
-
-## Verification
-
-- `rg` to confirm no read on a soft-deletable table is missing `.is('deleted_at', null)`.
-- Build passes; spot-check Tax/Allocations/Wealth/Reimbursements totals are unchanged when nothing is soft-deleted.
-- (If Part 2) confirm a burst of calls returns 429 and normal usage is unaffected.
-
-## Out of scope / still manual (unchanged)
-
-- JWT/refresh-token expiry tuning (Cloud auth settings UI)
-- PITR / backups (Cloud project settings)
-- Per-user MFA enrollment
-- Real virus scanning on uploads
+## Manual step for you
+To invite friends, just share the code `JARED123` and the app link. To stop new signups later, deactivate the code (I can wire a quick toggle in Settings if you want, or it can be flipped directly in the backend).
