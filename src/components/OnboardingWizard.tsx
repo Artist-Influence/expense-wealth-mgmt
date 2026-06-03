@@ -12,12 +12,16 @@ import { Button } from '@/components/ui/button';
 import {
   Sparkles, Upload, CheckCheck, DollarSign, TrendingUp,
   MessageCircle, Settings as SettingsIcon, ArrowRight, ArrowLeft,
+  User, Briefcase, Layers, Check,
 } from 'lucide-react';
+import type { UsageProfile } from '@/hooks/useUsageProfile';
 
 interface OnboardingStep {
   icon: React.ComponentType<{ className?: string }>;
   title: string;
   body: React.ReactNode;
+  /** Special step keys render custom interactive content instead of `body`. */
+  key?: string;
 }
 
 const STEPS: OnboardingStep[] = [
