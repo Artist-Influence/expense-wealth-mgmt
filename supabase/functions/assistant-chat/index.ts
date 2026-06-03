@@ -421,7 +421,7 @@ Deno.serve(async (req) => {
 
     const result = streamText({
       model,
-      system: buildDateBlock(dateCtx) + PLATFORM_GUIDE,
+      system: SECURITY_GUIDE + buildDateBlock(dateCtx) + PLATFORM_GUIDE,
       messages: await convertToModelMessages(messages),
       tools,
       stopWhen: stepCountIs(50),
@@ -473,8 +473,8 @@ Deno.serve(async (req) => {
       },
     });
   } catch (e) {
-    console.error("assistant-chat error", e);
-    return new Response(JSON.stringify({ error: String(e) }), {
+    console.error("assistant-chat error");
+    return new Response(JSON.stringify({ error: "Something went wrong" }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
