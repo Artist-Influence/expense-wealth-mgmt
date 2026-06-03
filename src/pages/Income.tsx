@@ -486,8 +486,8 @@ export default function Income() {
           </div>
         </div>
 
-        {/* Mode toggle — hidden for investors */}
-        {!isInvestor && (
+        {/* Mode toggle — hidden for investors and locked usage profiles */}
+        {!isInvestor && !lockedMode && (
           <div className="flex items-center gap-2">
             <span className="text-xs text-muted-foreground uppercase tracking-wide">View:</span>
             <div className="inline-flex rounded-md border border-border bg-card p-0.5">
