@@ -86,14 +86,27 @@ export default function Subscriptions() {
           !t.is_split_parent &&
           !t.exclude_from_expense_totals,
       );
-      computeRecurringCharges(scoped).forEach((c) => out.push({ ...c, mode: m }));
+      // Surface BOTH auto-detected recurring charges (>= 3 charges) AND anything
+      // explicitly tagged with the "Subscriptions" category, even single charges.
+      computeRecurringCharges(scoped, { includeCategories: ['Subscriptions'] }).forEach((c) =>
+        out.push({ ...c, mode: m }),
+      );
     });
     return out.sort((a, b) => b.monthlyEstimate - a.monthlyEstimate);
   }, [rows, scope]);
 
-  const confirmed = candidates.filter((c) => statusFor(c.merchantKey, c.mode) === 'confirmed');
-  const dismissed = candidates.filter((c) => statusFor(c.merchantKey, c.mode) === 'dismissed');
-  const undecided = candidates.filter((c) => statusFor(c.merchantKey, c.mode) === undefined);
+  // A candidate tagged "Subscriptions" is treated as confirmed by default (the user
+  // already categorized it as one), unless they've explicitly overridden that decision.
+  const effectiveStatus = (c: Candidate): OverrideStatus | undefined => {
+    const override = statusFor(c.merchantKey, c.mode);
+    if (override) return override;
+    if ((c.category || '').toLowerCase() === 'subscriptions') return 'confirmed';
+    return undefined;
+  };
+
+  const confirmed = candidates.filter((c) => effectiveStatus(c) === 'confirmed');
+  const dismissed = candidates.filter((c) => effectiveStatus(c) === 'dismissed');
+  const undecided = candidates.filter((c) => effectiveStatus(c) === undefined);
 
   const confirmedMonthly = confirmed.reduce((s, c) => s + c.monthlyEstimate, 0);
 
