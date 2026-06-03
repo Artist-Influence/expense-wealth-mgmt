@@ -1,28 +1,29 @@
-## Problem
+# Fix Duplicate Resolver Behavior
 
-Clicking **"Keep oldest, archive N"** in Resolve Duplicates fails with:
-`violates check constraint "transactions_uploaded_review_status_check"`
+Two bugs in the **Resolve Duplicates** dialog on the Expenses page.
 
-The handler sets `review_status: 'archived'`, and the rest of the app already expects that value (it excludes `review_status = 'archived'` rows from expense totals and health checks). But the database check constraint only permits:
-`auto_categorized, suggested, ai_suggested, needs_review, approved, edited` — `'archived'` is missing, so the update is rejected.
+## Problem 1 — Tab jumps away after an action
 
-## Fix (1 migration, no code changes)
+In `src/components/DuplicateResolverDialog.tsx`, a `useEffect` that auto-selects the active tab depends on the cluster counts (`exactClusters.length`, `nearClusters.length`, `incomeClusters.length`, `crossModePairs.length`). After you click **Keep oldest, archive**, `onResolved()` re-runs the duplicate sweep, the counts change, and the effect fires again — re-picking the "first non-empty" tab and yanking you off the **Possible** tab you were working in.
 
-Update the check constraint on `public.transactions_uploaded.review_status` to add `'archived'` to the allowed values:
+**Fix:** Only reset the tab when the dialog transitions from closed → open (first render of a session), not when cluster counts change while it's open. Track previous open state with a ref so an in-session refresh leaves the user on their current tab.
 
-```text
-DROP CONSTRAINT transactions_uploaded_review_status_check
-ADD    CONSTRAINT transactions_uploaded_review_status_check
-       CHECK (review_status IN (
-         'auto_categorized','suggested','ai_suggested',
-         'needs_review','approved','edited','archived'
-       ))
-```
+## Problem 2 — "Not duplicates" doesn't remove the cluster
 
-This is a data-integrity constraint change (allowed via migration). No application code needs to change — the archive handler, the `!== 'archived'` filters in `Expenses.tsx`, and `health-check.ts` already align with this value.
+Clicking **Not duplicates** sets `duplicate_status = 'not_duplicate'` on the rows, but the duplicate sweep in `src/pages/Expenses.tsx` (`runDuplicateSweep`) re-clusters from `activeRows`, which is filtered only on amount / split / archived — it does **not** exclude rows already marked `not_duplicate`. So after the refresh the same rows re-cluster and the "Possible" entry reappears.
 
-## Verify
-After the migration, open Resolve Duplicates and click "Keep oldest, archive N" — the losers should move to archived (excluded from totals, preserved in the DB) without error. The income "delete" and "Not duplicates" paths are unaffected (they don't touch `review_status`).
+**Fix:** Add `r.duplicate_status !== 'not_duplicate'` to the `activeRows` filter so dismissed pairs are excluded from re-clustering and stay gone. This also prevents the sweep from re-stamping them as `possible_duplicate`.
 
-## Out of scope
-No changes to duplicate-detection logic, the dialog UI (already fixed), or other tables.
+## Technical changes
+
+- `src/components/DuplicateResolverDialog.tsx`
+  - Add a `prevOpen` ref. In the tab-selection `useEffect`, only run the "pick first non-empty tab" logic on the closed→open transition. Reduce/adjust the dependency array so changing counts no longer re-triggers a tab switch.
+- `src/pages/Expenses.tsx` (`runDuplicateSweep`, the `activeRows` filter ~lines 316–321)
+  - Add `r.duplicate_status !== 'not_duplicate'` to the filter.
+
+No database or schema changes. Income "delete duplicates" and cross-mode paths are unaffected.
+
+## Verification
+
+- Open Resolve Duplicates, go to **Possible**, click **Keep oldest, archive** → stays on **Possible**, archived row drops out.
+- Click **Not duplicates** on a possible cluster → cluster disappears and does not return after the silent refresh.

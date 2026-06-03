@@ -71,9 +71,12 @@ export function DuplicateResolverDialog({
   const [page, setPage] = useState(0);
   const [busyId, setBusyId] = useState<string | null>(null);
 
-  // Reset state when reopening — pick first non-empty tab
+  // Reset state ONLY when the dialog transitions from closed → open.
+  // Do NOT re-pick the tab when cluster counts change after an in-session
+  // resolution, otherwise the user gets yanked off the tab they're working in.
+  const prevOpen = useRef(false);
   useEffect(() => {
-    if (open) {
+    if (open && !prevOpen.current) {
       setPage(0);
       if (exactClusters.length > 0) setTab('exact');
       else if (incomeClusters.length > 0) setTab('income');
@@ -81,6 +84,7 @@ export function DuplicateResolverDialog({
       else if (crossModePairs.length > 0) setTab('cross');
       else setTab('exact');
     }
+    prevOpen.current = open;
   }, [open, exactClusters.length, nearClusters.length, crossModePairs.length, incomeClusters.length]);
 
   const activeList: { rowIds: string[] }[] =
