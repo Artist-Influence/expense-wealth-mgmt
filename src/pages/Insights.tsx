@@ -20,6 +20,8 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { NON_EARNING_TYPES } from '@/lib/income-classifier';
 import { effectiveCategory } from '@/lib/categorization-engine';
+import { computeRecurringCharges } from '@/lib/recurring-charges';
+import { useRecurringOverrides } from '@/hooks/useRecurringOverrides';
 
 // Mirror of effectiveCategory: prefer the user-confirmed value, fall back to the
 // engine's prediction. Most rows have predicted_method populated but final_method
@@ -129,6 +131,7 @@ export default function Insights() {
     profile === 'personal' ? 'personal' : profile === 'business' ? 'business' : null;
   const [mode, setMode] = useState<'personal' | 'business'>(isInvestor ? 'business' : 'personal');
   const [modeAutoSet, setModeAutoSet] = useState(isInvestor ? true : false);
+  const { overrides: recurringOverrides } = useRecurringOverrides(mode);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [incomeData, setIncomeData] = useState<IncomeTransaction[]>([]);
   const [taxReservePct, setTaxReservePct] = useState<number>(0);
@@ -382,36 +385,16 @@ export default function Insights() {
     return [...merchMap.entries()].sort((a, b) => b[1].total - a[1].total).slice(0, 10).map(([name, data]) => ({ name, ...data }));
   }, [approvedExpenses]);
 
-  const recurringCharges = useMemo(() => {
-    const merchMap = new Map<string, { amounts: number[]; dates: string[]; category: string }>();
-    approvedExpenses.forEach(t => {
-      if (!t.date) return;
-      const desc = (t.description_normalized || t.description_raw || '').substring(0, 40);
-      const existing = merchMap.get(desc) || { amounts: [], dates: [], category: '' };
-      existing.amounts.push(Math.abs(t.amount || 0));
-      existing.dates.push(t.date);
-      existing.category = t.final_category || '';
-      merchMap.set(desc, existing);
-    });
-    return [...merchMap.entries()]
-      .filter(([, data]) => data.amounts.length >= 3)
-      .map(([name, data]) => {
-        const avg = data.amounts.reduce((s, a) => s + a, 0) / data.amounts.length;
-        const sortedDates = data.dates.sort();
-        const lastCharged = sortedDates[sortedDates.length - 1];
-        const daySpan = (new Date(sortedDates[sortedDates.length - 1]).getTime() - new Date(sortedDates[0]).getTime()) / (1000 * 60 * 60 * 24);
-        const avgDaysBetween = daySpan / (data.amounts.length - 1);
-        let frequency = 'irregular';
-        if (avgDaysBetween >= 25 && avgDaysBetween <= 35) frequency = 'monthly';
-        else if (avgDaysBetween >= 6 && avgDaysBetween <= 8) frequency = 'weekly';
-        else if (avgDaysBetween >= 13 && avgDaysBetween <= 16) frequency = 'biweekly';
-        else if (avgDaysBetween >= 85 && avgDaysBetween <= 100) frequency = 'quarterly';
-        else if (avgDaysBetween >= 350 && avgDaysBetween <= 380) frequency = 'annual';
-        const monthlyEstimate = frequency === 'monthly' ? avg : frequency === 'weekly' ? avg * 4.3 : frequency === 'biweekly' ? avg * 2.15 : avg;
-        return { name, avg: Math.round(avg * 100) / 100, frequency, category: data.category, lastCharged, monthlyEstimate: Math.round(monthlyEstimate * 100) / 100, count: data.amounts.length };
-      })
-      .sort((a, b) => b.monthlyEstimate - a.monthlyEstimate);
-  }, [approvedExpenses]);
+  const allRecurringCharges = useMemo(() => computeRecurringCharges(approvedExpenses), [approvedExpenses]);
+  // Respect the user's Subscriptions-page decisions: hide dismissed merchants entirely,
+  // and flag confirmed ones so the table can highlight real subscriptions.
+  const recurringCharges = useMemo(
+    () =>
+      allRecurringCharges
+        .filter(rc => recurringOverrides[rc.merchantKey] !== 'dismissed')
+        .map(rc => ({ ...rc, confirmed: recurringOverrides[rc.merchantKey] === 'confirmed' })),
+    [allRecurringCharges, recurringOverrides],
+  );
 
   // Exclude non-earning income types from savings rate math
   const earnedIncomeAll = useMemo(() => incomeData.filter(t => !(NON_EARNING_TYPES as readonly string[]).includes(t.income_type)), [incomeData]);
@@ -1164,6 +1147,9 @@ export default function Insights() {
                   <div className="px-4 py-3 border-b border-border/40 flex items-center gap-2">
                     <RefreshCw className="h-3.5 w-3.5 text-primary" />
                     <h3 className="text-sm font-medium text-foreground">Recurring Charges</h3>
+                    <Link to="/subscriptions" className="ml-auto text-[11px] text-primary hover:underline inline-flex items-center gap-1">
+                      Manage subscriptions →
+                    </Link>
                   </div>
                   <div className="overflow-x-auto scrollbar-thin">
                     <table className="w-full text-xs">
@@ -1180,7 +1166,14 @@ export default function Insights() {
                       <tbody>
                         {recurringCharges.map((rc, i) => (
                           <tr key={i} className="border-b border-border/10 hover:bg-secondary/20">
-                            <td className="px-3 py-2 text-foreground">{rc.name}</td>
+                            <td className="px-3 py-2 text-foreground">
+                              <span className="inline-flex items-center gap-1.5">
+                                {rc.name}
+                                {rc.confirmed && (
+                                  <CheckCircle2 className="h-3 w-3 text-success" aria-label="Confirmed subscription" />
+                                )}
+                              </span>
+                            </td>
                             <td className="px-3 py-2 text-right font-mono text-foreground">{fmt(rc.avg)}</td>
                             <td className="px-3 py-2"><span className="match-tag bg-primary/10 text-primary/80">{rc.frequency}</span></td>
                             <td className="px-3 py-2 text-muted-foreground">{rc.category || '—'}</td>

@@ -6,7 +6,7 @@ import { useQuery } from '@tanstack/react-query';
 import {
   Receipt, BarChart3, Brain, Settings, LogOut, Database,
   DollarSign, TrendingUp, Landmark, FileSpreadsheet, Target, CalendarCheck,
-  Activity, MessageCircle,
+  Activity, MessageCircle, CreditCard,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -23,6 +23,7 @@ const navItems = [
   { to: '/', label: 'Expenses', icon: Receipt, active: true, showBadge: true },
   { to: '/income', label: 'Income', icon: DollarSign, active: true },
   { to: '/insights', label: 'Insights', icon: BarChart3, active: true },
+  { to: '/subscriptions', label: 'Subscriptions', icon: CreditCard, active: true },
   { to: '/wealth', label: 'Wealth', icon: TrendingUp, active: true },
   { to: '/allocations', label: 'Allocate', icon: Target, active: true },
   { to: '/tax', label: 'Tax', icon: Landmark, active: true },

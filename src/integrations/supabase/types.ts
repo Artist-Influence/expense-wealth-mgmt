@@ -768,6 +768,36 @@ export type Database = {
         }
         Relationships: []
       }
+      recurring_overrides: {
+        Row: {
+          created_at: string
+          id: string
+          merchant_key: string
+          mode: string
+          owner_id: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          merchant_key: string
+          mode: string
+          owner_id: string
+          status: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          merchant_key?: string
+          mode?: string
+          owner_id?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       reimbursement_groups: {
         Row: {
           created_at: string
