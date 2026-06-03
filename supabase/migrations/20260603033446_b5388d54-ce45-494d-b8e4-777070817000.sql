@@ -1,0 +1,1 @@
+REVOKE EXECUTE ON FUNCTION public.validate_usage_profile() FROM PUBLIC, anon, authenticated;
