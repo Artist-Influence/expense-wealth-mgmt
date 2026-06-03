@@ -1656,7 +1656,7 @@ export default function Expenses() {
           {/* 3-Way Mode Toggle — hidden for investors */}
           {!isInvestor && (
             <div className="flex rounded-lg border border-border/40 overflow-hidden">
-              {(Object.entries(MODE_CONFIG) as [TransactionMode, typeof MODE_CONFIG[TransactionMode]][]).map(([key, cfg]) => (
+              {(Object.entries(MODE_CONFIG) as [TransactionMode, typeof MODE_CONFIG[TransactionMode]][]).filter(([key]) => visibleModes.includes(key)).map(([key, cfg]) => (
                 <button
                   key={key}
                   onClick={() => setMode(key)}
