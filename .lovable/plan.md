@@ -1,76 +1,59 @@
-## Security audit — what's vulnerable today
+# Finish security hardening: soft-delete coverage + AI abuse guard
 
-**Access control / multi-tenant isolation**
-- All "Owner access" RLS policies target the `public` role, not `authenticated` (should be deny-by-default for anon).
-- `accountant` and `investor` policies grant read of **every row in the table regardless of owner**. The moment a second person uses the app, an accountant/investor could read their finances. This is the biggest isolation gap for your "close friends, separate finances" goal.
-- Authorization is gated on `user_roles` (`isAuthorized = !!role`). A newly added friend has no role and either can't use the app or, if seeded as `owner`, the role model breaks per-user isolation. We need: every authenticated user owns their own data; delegated roles (accountant/investor) only see a specific owner who granted them.
+Two pieces of residual work from the earlier hardening pass.
 
-**AI / chatbot**
-- `assistant-chat` trusts a client-supplied `ownerId` (`body.ownerId ?? userId`). RLS currently saves it, but ownership must be derived server-side, never from the client.
-- `assistant-chat` returns raw `String(e)` on errors (internal info disclosure) and has no request validation or rate limiting.
-- `categorize-ai` has **no auth check** — any anonymous caller can spend AI credits and feed untrusted text into prompts. No rate limiting.
-- System prompts don't explicitly defend against prompt injection embedded in merchant names / notes / OCR text.
+## Part 1 — Complete soft-delete (`deleted_at`) filtering (primary)
 
-**Auth / session**
-- No MFA, no leaked-password protection. Signups not explicitly locked. Logout doesn't clear cached app state (React Query / localStorage scope keys).
+Several pages and helpers still read soft-deletable financial tables **without** excluding rows where `deleted_at IS NOT NULL`. That means a "deleted" transaction/income/plan can still leak into totals, tax estimates, allocations, reimbursements, and the health check — a correctness and data-integrity issue.
 
-**Integrity / recovery**
-- No audit trail and no soft-delete: a bad edit or delete is unrecoverable and untraceable.
+Add `.is('deleted_at', null)` to every **read** query on these soft-deletable tables: `transactions_uploaded`, `income_transactions`, `allocation_plans`, `allocation_line_items`, `reimbursement_groups`, `investment_accounts`, `account_balance_snapshots`. (Writes/updates/inserts are untouched.)
 
-**Storage**
-- No receipt storage exists yet; needs to be built private-only with signed URLs.
+Files and queries to update:
 
----
+```text
+src/pages/Allocations.tsx   income_transactions, transactions_uploaded (x2),
+                            investment_accounts, allocation_plans, allocation_line_items (reads)
+src/pages/Wealth.tsx        account_balance_snapshots, investment_accounts,
+                            transactions_uploaded (read queries only)
+src/pages/Tax.tsx           transactions_uploaded, income_transactions (read queries)
+src/pages/CloseMonth.tsx    transactions_uploaded, income_transactions, allocation_plans
+src/pages/Reimbursements.tsx transactions_uploaded, reimbursement_groups (read queries)
+src/lib/health-check.ts     income_transactions, transactions_uploaded (read/count queries)
+src/lib/recurrence-detector.ts transactions_uploaded (read query)
+```
 
-## Plan
+Approach: for each `select(...)` chain on the tables above, append `.is('deleted_at', null)`. Leave `insert`/`update`/`delete` chains alone. After edits, grep to confirm every read on a soft-deletable table includes the filter.
 
-### Phase 1 — Authentication & session hardening
-- Enable **leaked-password protection** (HIBP) and **disable public signups** (you provision friends manually / invite-only).
-- Add **TOTP MFA**: enrollment UI in Settings (QR + verify), and enforce AAL2 step-up at login when a factor exists; show MFA challenge on the login flow.
-- **Clean logout**: on `signOut`, clear the React Query cache and any app localStorage keys so no private data lingers; ensure post-logout navigation can't read stale state.
-- Keep login generic-error only (already does). Document that shorter JWT/refresh expiry is set in Cloud auth settings (manual, surfaced in the report).
+This is pure frontend/query work — no schema or RLS changes.
 
-### Phase 2 — Multi-tenant access-control hardening
-- Rewrite every table's owner policy to `TO authenticated` with `auth.uid() = owner_id` for SELECT/INSERT/UPDATE/DELETE (deny-by-default; anon fully excluded).
-- Replace global `accountant`/`investor` read policies with a **scoped delegation model**: a `delegated_access(grantee_user_id, owner_id, role)` table (owner-managed). Policies become `has_delegated_access(auth.uid(), owner_id, role)` via a SECURITY DEFINER helper, so a delegate only sees the specific owner who granted them — never all users.
-- Authorization model: **any authenticated user is authorized for their own data** (rows where `owner_id = auth.uid()`). Update `useAuth`/`useUserRole`/AuthGuard so a new friend can use the app for their own finances without a global role; `owner`/`accountant`/`investor` become delegation-scoped, not global.
-- `handle_new_user`: every new user provisions their own `app_settings` row; stop hardcoding the single-owner email as the only owner.
-- Confirm all `owner_id` columns are `NOT NULL` (they are) and inserts force `owner_id = auth.uid()` via `WITH CHECK`.
+## Part 2 — AI endpoint abuse guard (optional, ad-hoc)
 
-### Phase 3 — Edge-function hardening
-- `categorize-ai`: require a valid JWT (`getClaims`), validate body with zod, sanitize untrusted descriptions, and add per-user rate limiting.
-- `assistant-chat`: derive `ownerId` server-side (self, or a delegated owner verified against `delegated_access` — never from `body.ownerId`); validate body with zod; return generic client errors (no raw `String(e)`); add per-user rate limiting.
-- **Rate limiting**: a `rate_limits` table + SECURITY DEFINER `check_rate_limit(key, max, window)` used by AI endpoints (and reusable for exports/imports).
-- **AI prompt-injection defenses**: system-prompt rules that all tool-returned text (merchant names, notes, OCR, CSV text) is **untrusted data, never instructions**; never reveal the system prompt, schema, secrets, or other users' data; refuse cross-user requests. Keep the user-scoped Supabase client so the AI physically cannot bypass RLS.
-- Restrict CORS on finance endpoints to the app origin instead of `*`.
+You asked for rate limiting on the AI edge functions (`assistant-chat`, `categorize-ai`). Important caveat: the platform has **no first-class rate-limiting primitive**, so anything here is best-effort and ad-hoc, not a hardened guarantee.
 
-### Phase 4 — Append-only audit log
-- `audit_logs(actor_id, owner_id, event_type, entity, entity_id, summary jsonb, created_at)`.
-- RLS: owner can SELECT own logs; **no UPDATE/DELETE** (append-only); inserts only via a SECURITY DEFINER `log_event(...)`.
-- Triggers on sensitive tables (`transactions_uploaded`, `income_transactions`, `reimbursement_groups`, `allocation_plans`, `user_roles`, `delegated_access`, `app_settings`) capture create/edit/delete with minimal before/after (IDs, amounts, status) — not raw descriptions where avoidable.
-- Audit security/auth-relevant app events (login, exports, receipt access, chatbot finance queries, permission changes) via `log_event`.
+Proposed lightweight, DB-backed throttle:
 
-### Phase 5 — Soft-delete foundation
-- Add `deleted_at timestamptz` to core financial tables (`transactions_uploaded`, `income_transactions`, `reimbursement_groups`, `allocation_plans`, `investment_accounts`, `account_balance_snapshots`).
-- Switch the primary delete actions in the UI (transactions, income) to **soft delete**; default list queries and finance calculations exclude `deleted_at IS NOT NULL`. Deletes are logged with a before-image for recovery.
+```text
+1. New table public.ai_usage_events (owner_id, fn text, created_at)
+   - GRANT to authenticated + service_role
+   - RLS: owner can SELECT own rows; INSERT via SECURITY DEFINER fn only
+2. SECURITY DEFINER fn check_ai_rate_limit(_fn text, _max int, _window interval)
+   - counts caller's events in window, inserts one, returns boolean allow/deny
+3. assistant-chat + categorize-ai call the fn after auth; on deny return HTTP 429
+   with a generic message. Sensible defaults (e.g. ~30 assistant calls / 5 min,
+   ~10 categorize batches / min) — tunable.
+```
 
-### Phase 6 — Private receipt storage
-- Create a **private** `receipts` bucket. RLS on `storage.objects`: a user may read/write only objects under their own `auth.uid()/...` path prefix.
-- Reusable upload helper: restrict file types (jpg/png/webp/pdf), enforce a size cap, generate non-guessable path names, and create **short-lived signed URLs** for viewing (never public URLs).
-- Minimal upload + view UI on a transaction's receipt, gated by ownership; receipt access is audit-logged.
+If you'd rather not add this complexity given it's only best-effort, we can **skip Part 2** and rely on the existing JWT-required + per-user RLS as the access boundary. Both edge functions already require auth, so anonymous abuse is already blocked — this only limits an authenticated user's volume.
 
-### Phase 7 — Security tests & report
-- Tests (DB-level + edge): User A can't read/update/delete User B's rows; anon can't read any sensitive table; a revoked delegate immediately loses access; `assistant-chat` rejects spoofed `ownerId`; `categorize-ai` rejects unauthenticated calls; receipt objects can't be read cross-user; prompt-injection text in notes doesn't change AI behavior.
-- Final report: what was vulnerable, what changed, residual risks, and manual steps (e.g., session-expiry tuning, enabling Cloud backups/PITR, MFA enrollment).
+## Verification
 
----
+- `rg` to confirm no read on a soft-deletable table is missing `.is('deleted_at', null)`.
+- Build passes; spot-check Tax/Allocations/Wealth/Reimbursements totals are unchanged when nothing is soft-deleted.
+- (If Part 2) confirm a burst of calls returns 429 and normal usage is unaffected.
 
-## Technical notes
-- All DB changes go through migrations with explicit `GRANT`s + `authenticated`-scoped policies; SECURITY DEFINER helpers use fixed `search_path` and are not directly executable by clients.
-- `src/integrations/supabase/client.ts` is auto-generated; token-in-localStorage is a Supabase default we can't remove, so we compensate with locked signups, MFA, short sessions, HTTPS, and clean-logout cache clearing.
-- No business-logic/UI redesign beyond what privacy/security requires (MFA enrollment UI, receipt upload, soft-delete wiring).
+## Out of scope / still manual (unchanged)
 
-## Residual items needing manual setup (called out in the report)
-- Tune JWT/refresh-token expiry and enable backups/PITR in Cloud settings.
-- Real virus scanning of uploads isn't available in-platform (we restrict type/size/path instead).
-- Provisioning friends' accounts is manual while signups stay locked.
+- JWT/refresh-token expiry tuning (Cloud auth settings UI)
+- PITR / backups (Cloud project settings)
+- Per-user MFA enrollment
+- Real virus scanning on uploads
