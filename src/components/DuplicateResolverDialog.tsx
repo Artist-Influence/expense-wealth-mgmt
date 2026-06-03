@@ -125,6 +125,7 @@ export function DuplicateResolverDialog({
         .from('transactions_uploaded')
         .update({ duplicate_status: 'unique', duplicate_of_transaction_id: null })
         .eq('id', keeperId);
+      setDismissedIds(prev => new Set([...prev, keeperId, ...loserIds]));
       toast.success(`Archived ${loserIds.length} duplicate${loserIds.length > 1 ? 's' : ''}`);
       onResolved();
     } catch (e: any) {
@@ -140,6 +141,7 @@ export function DuplicateResolverDialog({
     try {
       const { error } = await supabase.from('transactions_uploaded').delete().in('id', loserIds);
       if (error) throw error;
+      setDismissedIds(prev => new Set([...prev, ...loserIds]));
       toast.success(`Deleted ${loserIds.length} row${loserIds.length > 1 ? 's' : ''}`);
       onResolved();
     } catch (e: any) {
@@ -158,6 +160,8 @@ export function DuplicateResolverDialog({
         : { duplicate_status: 'not_duplicate', duplicate_of_transaction_id: null };
       const { error } = await supabase.from(table as any).update(updates).in('id', rowIds);
       if (error) throw error;
+      // Hide this cluster immediately so it disappears from the section.
+      setDismissedIds(prev => new Set([...prev, ...rowIds]));
       toast.success('Marked as not duplicates');
       onResolved();
     } catch (e: any) {
@@ -173,6 +177,7 @@ export function DuplicateResolverDialog({
     try {
       const { error } = await supabase.from('income_transactions').delete().in('id', loserIds);
       if (error) throw error;
+      setDismissedIds(prev => new Set([...prev, ...loserIds]));
       toast.success(`Deleted ${loserIds.length} duplicate income row${loserIds.length > 1 ? 's' : ''}`);
       onResolved();
     } catch (e: any) {
