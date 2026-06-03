@@ -177,6 +177,41 @@ export function OnboardingWizard({ open, onClose, persistOnComplete = true }: On
           </DialogDescription>
         </DialogHeader>
 
+        {isUsageStep && (
+          <div className="grid gap-2 py-1">
+            {([
+              { value: 'personal' as const, icon: User, label: 'Personal', desc: 'Track your own spending, income, and savings.' },
+              { value: 'business' as const, icon: Briefcase, label: 'Business', desc: 'Track business expenses, income, and reporting.' },
+              { value: 'both' as const, icon: Layers, label: 'Both', desc: 'Manage personal and business side by side.' },
+            ]).map((opt) => {
+              const OptIcon = opt.icon;
+              const selected = usageProfile === opt.value;
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setUsageProfile(opt.value)}
+                  className={`flex items-center gap-3 rounded-xl border p-3 text-left transition-all ${
+                    selected
+                      ? 'border-primary/50 bg-primary/10'
+                      : 'border-border/50 bg-secondary/30 hover:bg-secondary/50'
+                  }`}
+                >
+                  <div className={`flex h-9 w-9 items-center justify-center rounded-lg shrink-0 ${selected ? 'bg-primary/20' : 'bg-secondary/60'}`}>
+                    <OptIcon className={`h-4 w-4 ${selected ? 'text-primary' : 'text-muted-foreground'}`} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-medium text-foreground">{opt.label}</div>
+                    <div className="text-xs text-muted-foreground">{opt.desc}</div>
+                  </div>
+                  {selected && <Check className="h-4 w-4 text-primary shrink-0" />}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+
         {/* Progress dots */}
         <div className="flex items-center justify-center gap-1.5 py-2">
           {STEPS.map((_, i) => (
