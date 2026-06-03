@@ -297,14 +297,14 @@ export default function Expenses() {
     const tId = toast.loading('Scanning for duplicate transactions…');
     try {
       // Pull a slim row set across ALL modes (cross-mode tab needs it).
-      const rows: { id: string; date: string | null; description_normalized: string | null; description_raw: string | null; amount: number | null; duplicate_fingerprint: string | null; mode: string; created_at: string | null; final_category: string | null; predicted_category: string | null; final_method: string | null; predicted_method: string | null; source_file_name: string | null; source_account_name: string | null; duplicate_status: string | null; is_transfer: boolean | null; is_split_parent: boolean | null; parent_transaction_id: string | null; review_status: string }[] = [];
+      const rows: { id: string; date: string | null; description_normalized: string | null; description_raw: string | null; amount: number | null; duplicate_fingerprint: string | null; mode: string; created_at: string | null; final_category: string | null; predicted_category: string | null; final_method: string | null; predicted_method: string | null; source_file_name: string | null; source_account_name: string | null; duplicate_status: string | null; is_transfer: boolean | null; is_split_parent: boolean | null; parent_transaction_id: string | null; review_status: string; recurring_group_id: string | null }[] = [];
       let from = 0;
       const pageSize = 1000;
       let hasMore = true;
       while (hasMore) {
         const { data } = await supabase
           .from('transactions_uploaded')
-          .select('id, date, description_normalized, description_raw, amount, duplicate_fingerprint, mode, created_at, final_category, predicted_category, final_method, predicted_method, source_file_name, source_account_name, duplicate_status, is_transfer, is_split_parent, parent_transaction_id, review_status')
+          .select('id, date, description_normalized, description_raw, amount, duplicate_fingerprint, mode, created_at, final_category, predicted_category, final_method, predicted_method, source_file_name, source_account_name, duplicate_status, is_transfer, is_split_parent, parent_transaction_id, review_status, recurring_group_id')
           .eq('owner_id', ownerId!)
           .range(from, from + pageSize - 1);
         if (data) rows.push(...(data as any));
@@ -334,7 +334,13 @@ export default function Expenses() {
       const exact = findExactClusters(sameModeRows);
       const exactIds = new Set<string>();
       for (const c of exact) for (const id of c.rowIds) exactIds.add(id);
-      const near = findNearClusters(sameModeRows, exactIds, 7);
+      // Rows already tagged as recurring (subscriptions/transit/etc.) are legitimate
+      // repeat charges, not duplicates — keep them out of near-duplicate clustering.
+      const recurringIds = new Set(
+        activeRows.filter(r => r.recurring_group_id).map(r => r.id)
+      );
+      const nearExclude = new Set<string>([...exactIds, ...recurringIds]);
+      const near = findNearClusters(sameModeRows, nearExclude, 1);
 
       // Cross-mode pairs: same date + amount + matching merchant key, different mode.
       const crossPairs: { rowIds: string[] }[] = [];
