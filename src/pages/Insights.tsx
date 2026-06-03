@@ -1166,7 +1166,14 @@ export default function Insights() {
                       <tbody>
                         {recurringCharges.map((rc, i) => (
                           <tr key={i} className="border-b border-border/10 hover:bg-secondary/20">
-                            <td className="px-3 py-2 text-foreground">{rc.name}</td>
+                            <td className="px-3 py-2 text-foreground">
+                              <span className="inline-flex items-center gap-1.5">
+                                {rc.name}
+                                {rc.confirmed && (
+                                  <CheckCircle2 className="h-3 w-3 text-success" aria-label="Confirmed subscription" />
+                                )}
+                              </span>
+                            </td>
                             <td className="px-3 py-2 text-right font-mono text-foreground">{fmt(rc.avg)}</td>
                             <td className="px-3 py-2"><span className="match-tag bg-primary/10 text-primary/80">{rc.frequency}</span></td>
                             <td className="px-3 py-2 text-muted-foreground">{rc.category || '—'}</td>
