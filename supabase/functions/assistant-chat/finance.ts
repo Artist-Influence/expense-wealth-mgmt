@@ -115,6 +115,7 @@ async function loadCountedTxns(
       .from("transactions_uploaded")
       .select(TXN_FIELDS)
       .eq("owner_id", ownerId)
+      .is("deleted_at", null)
       .eq("is_split_parent", false)
       .in("review_status", COUNTED_STATUSES)
       .order("date", { ascending: true });
@@ -134,6 +135,7 @@ async function loadIncome(
       .from("income_transactions")
       .select("date, amount, mode, income_type, taxable_status, status, description_raw, source_account_name")
       .eq("owner_id", ownerId)
+      .is("deleted_at", null)
       .neq("status", "needs_review")
       .order("date", { ascending: true });
     if (opts.scope === "business") q = q.eq("mode", "business");
@@ -188,6 +190,7 @@ export async function getDataQuality(
         .from("transactions_uploaded")
         .select("amount, review_status, final_category, predicted_category, is_transfer, is_internal_transfer, linked_transaction_id, is_split_parent")
         .eq("owner_id", ownerId)
+        .is("deleted_at", null)
         .eq("is_split_parent", false)
         .order("date", { ascending: true });
       q = modeFilter(q, scope);
@@ -285,6 +288,7 @@ export async function getIncomeSummary(
       .from("income_transactions")
       .select("amount", { count: "exact" })
       .eq("owner_id", ownerId)
+      .is("deleted_at", null)
       .eq("status", "needs_review");
     if (scope === "business") uq = uq.eq("mode", "business");
     if (scope === "personal") uq = uq.eq("mode", "personal");
