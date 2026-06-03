@@ -131,6 +131,7 @@ export default function Insights() {
     profile === 'personal' ? 'personal' : profile === 'business' ? 'business' : null;
   const [mode, setMode] = useState<'personal' | 'business'>(isInvestor ? 'business' : 'personal');
   const [modeAutoSet, setModeAutoSet] = useState(isInvestor ? true : false);
+  const { overrides: recurringOverrides } = useRecurringOverrides(mode);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [incomeData, setIncomeData] = useState<IncomeTransaction[]>([]);
   const [taxReservePct, setTaxReservePct] = useState<number>(0);
