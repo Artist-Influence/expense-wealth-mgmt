@@ -103,6 +103,7 @@ interface AppSettingsData {
   tax_reserve_percent: number; monthly_savings_goal: number;
   monthly_personal_spend_limit: number; monthly_business_expense_target: number;
   report_basis: string;
+  usage_profile: 'personal' | 'business' | 'both';
 }
 
 interface Rule {
