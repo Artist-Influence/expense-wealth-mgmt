@@ -3,7 +3,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
 import { AppNav } from '@/components/AppNav';
 import { ModeScopeToggle, readPersistedScope, type ModeScope } from '@/components/ModeScopeToggle';
-import { useRecurringOverrides } from '@/hooks/useRecurringOverrides';
+import { useRecurringOverrides, type OverrideStatus } from '@/hooks/useRecurringOverrides';
 import { computeRecurringCharges, type RecurringCharge } from '@/lib/recurring-charges';
 import {
   RefreshCw, CheckCircle2, X, RotateCcw, ChevronDown, AlertTriangle, CreditCard,
