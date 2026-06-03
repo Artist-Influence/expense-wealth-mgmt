@@ -164,6 +164,12 @@ export function findNearClusters(
   const clusters: DuplicateCluster[] = [];
   for (const list of groups.values()) {
     if (list.length < 2) continue;
+    // Recurring-pattern guard: a genuine re-imported duplicate sits on the same
+    // date (or two adjacent dates from posting drift). A group whose rows span
+    // 3+ distinct dates is a recurring charge (e.g. daily transit, repeat
+    // same-amount merchant), not a duplicate — drop it.
+    const distinctDates = new Set(list.map(r => r.date || '')).size;
+    if (distinctDates >= 3) continue;
     list.sort((a, b) => (a.date || '').localeCompare(b.date || '') || (a.created_at || '').localeCompare(b.created_at || ''));
     clusters.push({ kind: 'near', rowIds: list.map(r => r.id) });
   }
