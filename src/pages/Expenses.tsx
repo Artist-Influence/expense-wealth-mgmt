@@ -1661,6 +1661,28 @@ export default function Expenses() {
                   <SheetTitle className="text-foreground">Upload Expenses</SheetTitle>
                 </SheetHeader>
                 <div className="mt-4 space-y-4">
+                  {isOwner && !setup.loading && !setup.isReady && (
+                    <div className="rounded-lg border border-warning/30 bg-warning/5 p-3">
+                      <div className="flex items-start gap-2">
+                        <AlertTriangle className="h-4 w-4 text-warning shrink-0 mt-0.5" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-medium text-foreground">Set up first for best results</p>
+                          <p className="text-[11px] text-muted-foreground mt-0.5">
+                            You haven't {!setup.hasMethods && 'added payment methods'}
+                            {!setup.hasMethods && !setup.hasReferenceData && ' or '}
+                            {!setup.hasReferenceData && 'seeded a reference statement'} yet.
+                            Uploading now may misclassify transactions.
+                          </p>
+                          <Link
+                            to="/settings"
+                            className="inline-flex items-center gap-1 mt-1.5 text-[11px] font-medium text-primary hover:underline"
+                          >
+                            Go to Settings <ArrowLeftRight className="h-3 w-3" />
+                          </Link>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                   <CsvUploader onFilesSelect={handleFilesSelect} disabled={isProcessing} />
                   {totalFiles > 0 && (
                     <div className="space-y-2">
