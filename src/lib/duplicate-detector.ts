@@ -112,7 +112,7 @@ export function findExactClusters(rows: ClusterRow[]): DuplicateCluster[] {
 export function findNearClusters(
   rows: ClusterRow[],
   excludeIds: Set<string>,
-  dayRange: number = 7
+  dayRange: number = 1
 ): DuplicateCluster[] {
   const candidates = rows.filter(r => !excludeIds.has(r.id));
   // Bucket by rounded amount (cents) for cheap pruning
