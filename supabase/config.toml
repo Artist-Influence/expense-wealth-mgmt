@@ -2,3 +2,6 @@ project_id = "hqfazvpnthsyxpzytggs"
 
 [functions.categorize-ai]
 verify_jwt = false
+
+[functions.signup-with-invite]
+verify_jwt = false
