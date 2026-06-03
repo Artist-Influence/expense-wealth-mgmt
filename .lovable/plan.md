@@ -1,35 +1,36 @@
-# Fix: "Possible duplicates" lumps recurring charges into one group
+# Personal / Business / Both usage profile
 
-## What actually happened
+## Goal
+Let the owner declare how they use the app — **Personal only**, **Business only**, or **Both** — during first-run onboarding. The choice then declutters the whole app: mode toggles, the Accountant nav item, and in-page dashboards only show what's relevant. "Both" keeps everything exactly as it is today.
 
-You marked one cluster as "Not duplicates," and it looked like it marked everything and the buttons vanished. That's because the cluster you clicked wasn't really a duplicate pair — it was **8 separate $3.00 MTA subway swipes** (May 7–27) that the detector merged into a single "Possible duplicate" card.
+There is no public signup in this app (single-owner login), so the choice is captured in the existing onboarding wizard on first login and can be changed later in Settings.
 
-Each action button (Not duplicates / Keep oldest, archive) applies to the **entire** cluster at once. So one click acted on all 8 rows ("marked all sections"), and since that emptied the section, the buttons disappeared.
+## Where the choice is stored
+Add one field, `usage_profile` (text, default `'both'`, values `personal` | `business` | `both`), to the existing `app_settings` row. A small validation trigger rejects any other value.
 
-### Why the detector merges them
+## What changes
 
-The near-duplicate scan groups rows that share the same amount + similar description within a **7-day window**, and it chains them transitively. Recurring same-merchant, same-amount charges on consecutive/close days (subway rides, daily coffee, etc.) get linked into one big false-positive group even though they are legitimately separate transactions.
+### 1. Capture the choice
+- **Onboarding wizard** (`OnboardingWizard.tsx`): add a new early step with three large cards — Personal, Business, Both — with a short description of each. The selection is required to advance. On completion, save `usage_profile` alongside the existing `onboarding_completed` flag.
+- **Settings**: add a "Usage profile" selector so the owner can switch later. Switching takes effect immediately across the app.
 
-This is a real detection bug, not just a UI issue — these recurring charges should never be flagged as possible duplicates.
+### 2. Read the choice everywhere
+- New hook `useUsageProfile()` returns `{ profile, loading }` for the current owner. Pages use it to decide which scopes to show and what to default to.
+- Rule used everywhere: if `profile === 'both'` → current behavior unchanged. If `personal` or `business` → force that mode and hide the scope selector. Existing investor/accountant role logic still wins (investor stays business-locked).
 
-## The fix
+### 3. Adapt the UI by profile
+- **Nav** (`AppNav.tsx`): hide the **Accountant** item when `profile === 'personal'` (the only page you marked business-specific). All other pages stay visible in every profile.
+- **Expenses**: the Personal / Business / Reimbursable tabs and the "Personal vs Business" comparison strip collapse to the chosen side. Personal-only hides the Business tab and comparison; Business-only hides the Personal tab.
+- **Insights**: the Personal/Business switch is locked to the profile and hidden when not "both".
+- **Income**: the All/Personal/Business filter locks to the profile and hides the other options when not "both".
+- **Wealth & Reimbursements**: the shared `ModeScopeToggle` is hidden and its scope forced to the profile when not "both" (default stays "all" for "both").
 
-### 1. `src/lib/duplicate-detector.ts` — `findNearClusters`
-- **Tighten the window** from 7 days to 1 day. True re-imports land on the same or an adjacent posting date; 7 days is far too loose.
-- **Add a recurring-pattern guard:** after grouping, drop any candidate group whose rows fall on **3 or more distinct dates**. A genuine re-imported duplicate sits on the same date (or two adjacent dates due to posting drift); a group spread across many distinct dates is a recurring charge, not a duplicate.
-  - 8 MTA swipes on 8 dates → dropped (correctly not a duplicate).
-  - 2 identical rows on the same date → kept (real duplicate).
-  - 2 rows one day apart → kept (posting drift).
-
-### 2. `src/pages/Expenses.tsx` — `runDuplicateSweep`
-- Exclude rows that already belong to a recurring group (`recurring_group_id` set) from the near-duplicate candidate set, so detected subscriptions/recurring charges are never re-flagged as duplicates.
-
-## Result
-- Recurring charges (MTA, subscriptions, repeat same-amount merchants) stop appearing in "Possible duplicates."
-- Genuine duplicates (same charge imported twice) still surface.
-- Marking one cluster only affects that one cluster, and remaining clusters keep their buttons.
+### 4. Default behavior
+- Existing data and the existing single owner default to `both`, so nothing changes for the current user until they pick a different profile.
 
 ## Technical notes
-- The optimistic `dismissedIds` logic in `DuplicateResolverDialog.tsx` already works correctly and stays as-is; the problem was upstream grouping, not the dialog.
-- No schema changes. The existing 20 `not_duplicate` and 78 `possible_duplicate` rows are unaffected; the next scan simply won't re-bundle recurring charges.
-- After the change I'll re-run the scan logic against the current data to confirm the MTA-type groups no longer appear and any true duplicates remain.
+- DB: migration adds `usage_profile` to `app_settings` with a default and a validation trigger (no CHECK constraint per project convention).
+- `useUsageProfile()` queries `app_settings.usage_profile` by `ownerId` from `useAuth`.
+- `ModeScopeToggle` gains an optional `hidden`/`lockedTo` handling so callers can force-and-hide it cleanly; pages compute the effective scope as `profile === 'both' ? persistedScope : profile`.
+- Investor/accountant role filtering is left intact and takes precedence over the usage profile.
+- No changes to financial calculations — only which views/toggles are shown.
