@@ -227,6 +227,7 @@ export default function SettingsPage() {
         monthly_personal_spend_limit: Number(data.monthly_personal_spend_limit ?? 0),
         monthly_business_expense_target: Number(data.monthly_business_expense_target ?? 0),
         report_basis: data.report_basis ?? 'cash',
+        usage_profile: (['personal', 'business', 'both'].includes((data as any).usage_profile) ? (data as any).usage_profile : 'both'),
       });
     }
   };
