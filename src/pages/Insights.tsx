@@ -20,6 +20,8 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { NON_EARNING_TYPES } from '@/lib/income-classifier';
 import { effectiveCategory } from '@/lib/categorization-engine';
+import { computeRecurringCharges } from '@/lib/recurring-charges';
+import { useRecurringOverrides } from '@/hooks/useRecurringOverrides';
 
 // Mirror of effectiveCategory: prefer the user-confirmed value, fall back to the
 // engine's prediction. Most rows have predicted_method populated but final_method
