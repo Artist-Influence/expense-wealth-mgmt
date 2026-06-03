@@ -222,6 +222,7 @@ export default function SettingsPage() {
     });
     setNewMethod({ name: '', mode: 'personal', account_type: 'credit_card', match_pattern: '' });
     await loadMethods();
+    setup.reload();
     toast.success(`Method "${name}" added`);
   };
 
