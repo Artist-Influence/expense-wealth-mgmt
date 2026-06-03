@@ -12,6 +12,10 @@ import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { HealthCheckPanel } from './HealthCheckPanel';
 import { runHealthCheck, shouldAutoRun, type HealthCheckSummary } from '@/lib/health-check';
+import { useUsageProfile } from '@/hooks/useUsageProfile';
+
+/** Pages that only make sense for business usage; hidden in personal-only mode. */
+const BUSINESS_ONLY_NAV = ['/accountant'];
 
 const INVESTOR_NAV = ['/', '/income', '/insights'];
 
