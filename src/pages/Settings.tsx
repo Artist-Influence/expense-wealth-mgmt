@@ -703,7 +703,7 @@ export default function SettingsPage() {
 
 
           {/* Historical Seed Import */}
-          <div className="glass-panel p-4">
+          <div ref={seedSectionRef} className="glass-panel p-4 scroll-mt-20">
             <h3 className="text-sm font-medium text-foreground mb-3">Import Historical CSV (Seed)</h3>
             <p className="text-[11px] text-muted-foreground mb-3">Build merchant memory from historical data. Upload expenses and income separately for each mode.</p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
