@@ -506,7 +506,7 @@ export default function SettingsPage() {
           </div>
 
           {/* Payment Methods */}
-          <div className="glass-panel p-4">
+          <div ref={methodsSectionRef} className="glass-panel p-4 scroll-mt-20">
             <h3 className="text-sm font-medium text-foreground mb-1">Payment Methods</h3>
             <p className="text-[11px] text-muted-foreground mb-3">
               Register your credit cards and bank accounts. The filename keyword auto-tags uploaded CSVs to the right account.
