@@ -3,22 +3,41 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 
 export type OverrideStatus = 'confirmed' | 'dismissed';
+type RowMode = 'personal' | 'business';
+
+interface OverrideRow {
+  merchant_key: string;
+  mode: RowMode;
+  status: OverrideStatus;
+}
 
 /** Map of merchant_key -> status for the active owner + mode. */
 export type OverrideMap = Record<string, OverrideStatus>;
 
 /**
- * Loads and mutates the user's recurring-charge decisions (confirmed / dismissed)
- * for a given mode. Decisions are remembered in the `recurring_overrides` table and
- * are read-only for delegated accountants.
+ * Loads and mutates the user's recurring-charge decisions (confirmed / dismissed).
+ * Decisions live in the `recurring_overrides` table and are read-only for delegated
+ * accountants.
  *
  * `mode` may be 'all' (used by the Personal/Business/All scope toggle); in that case
- * both personal and business rows are loaded, and writes default to the row's own mode.
+ * both personal and business rows are loaded. Use `statusFor(key, mode)` for precise,
+ * mode-aware lookups; the flat `overrides` map (keyed by merchant_key) is convenient
+ * for single-mode callers like the Insights page.
  */
 export function useRecurringOverrides(mode: 'personal' | 'business' | 'all') {
   const { user, ownerId, isOwner } = useAuth();
+  const [rows, setRows] = useState<OverrideRow[]>([]);
   const [overrides, setOverrides] = useState<OverrideMap>({});
   const [loading, setLoading] = useState(true);
+
+  const applyRows = useCallback((next: OverrideRow[]) => {
+    setRows(next);
+    const map: OverrideMap = {};
+    next.forEach((r) => {
+      map[r.merchant_key] = r.status;
+    });
+    setOverrides(map);
+  }, []);
 
   const reload = useCallback(async () => {
     if (!ownerId) return;
@@ -29,65 +48,57 @@ export function useRecurringOverrides(mode: 'personal' | 'business' | 'all') {
       .eq('owner_id', ownerId);
     if (mode !== 'all') q = q.eq('mode', mode);
     const { data } = await q;
-    const map: OverrideMap = {};
-    (data || []).forEach((row) => {
-      map[row.merchant_key] = row.status as OverrideStatus;
-    });
-    setOverrides(map);
+    applyRows((data || []) as OverrideRow[]);
     setLoading(false);
-  }, [ownerId, mode]);
+  }, [ownerId, mode, applyRows]);
 
   useEffect(() => {
     if (user && ownerId) reload();
     else setLoading(false);
   }, [user, ownerId, reload]);
 
-  // Persist a decision. `rowMode` is the concrete mode the merchant belongs to;
-  // when the page is in 'all' scope, the caller passes the candidate's own mode.
+  // Precise, mode-aware status lookup.
+  const statusFor = useCallback(
+    (merchantKey: string, rowMode: RowMode): OverrideStatus | undefined =>
+      rows.find((r) => r.merchant_key === merchantKey && r.mode === rowMode)?.status,
+    [rows],
+  );
+
   const setStatus = useCallback(
-    async (merchantKey: string, status: OverrideStatus, rowMode?: 'personal' | 'business') => {
+    async (merchantKey: string, status: OverrideStatus, rowMode: RowMode) => {
       if (!ownerId || !isOwner) return;
-      const effectiveMode = rowMode || (mode === 'all' ? 'personal' : mode);
-      setOverrides((prev) => ({ ...prev, [merchantKey]: status }));
+      applyRows([
+        ...rows.filter((r) => !(r.merchant_key === merchantKey && r.mode === rowMode)),
+        { merchant_key: merchantKey, mode: rowMode, status },
+      ]);
       await supabase
         .from('recurring_overrides')
         .upsert(
-          { owner_id: ownerId, mode: effectiveMode, merchant_key: merchantKey, status },
+          { owner_id: ownerId, mode: rowMode, merchant_key: merchantKey, status },
           { onConflict: 'owner_id,mode,merchant_key' },
         );
     },
-    [ownerId, isOwner, mode],
+    [ownerId, isOwner, rows, applyRows],
   );
 
-  // Clear a decision entirely (e.g. undo a removal back to "undecided").
+  // Clear a decision entirely (undo back to "undecided").
   const clearStatus = useCallback(
-    async (merchantKey: string, rowMode?: 'personal' | 'business') => {
+    async (merchantKey: string, rowMode: RowMode) => {
       if (!ownerId || !isOwner) return;
-      const effectiveMode = rowMode || (mode === 'all' ? 'personal' : mode);
-      setOverrides((prev) => {
-        const next = { ...prev };
-        delete next[merchantKey];
-        return next;
-      });
+      applyRows(rows.filter((r) => !(r.merchant_key === merchantKey && r.mode === rowMode)));
       await supabase
         .from('recurring_overrides')
         .delete()
         .eq('owner_id', ownerId)
-        .eq('mode', effectiveMode)
+        .eq('mode', rowMode)
         .eq('merchant_key', merchantKey);
     },
-    [ownerId, isOwner, mode],
+    [ownerId, isOwner, rows, applyRows],
   );
 
-  const confirm = useCallback(
-    (key: string, rowMode?: 'personal' | 'business') => setStatus(key, 'confirmed', rowMode),
-    [setStatus],
-  );
-  const dismiss = useCallback(
-    (key: string, rowMode?: 'personal' | 'business') => setStatus(key, 'dismissed', rowMode),
-    [setStatus],
-  );
+  const confirm = useCallback((key: string, rowMode: RowMode) => setStatus(key, 'confirmed', rowMode), [setStatus]);
+  const dismiss = useCallback((key: string, rowMode: RowMode) => setStatus(key, 'dismissed', rowMode), [setStatus]);
   const undo = clearStatus;
 
-  return { overrides, loading, reload, confirm, dismiss, undo, canEdit: isOwner };
+  return { overrides, statusFor, loading, reload, confirm, dismiss, undo, canEdit: isOwner };
 }
