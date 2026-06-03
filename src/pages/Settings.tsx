@@ -169,6 +169,7 @@ export default function SettingsPage() {
     tax_reserve_percent: 30, monthly_savings_goal: 0,
     monthly_personal_spend_limit: 0, monthly_business_expense_target: 0,
     report_basis: 'cash',
+    usage_profile: 'both',
   });
   const [seedingPersonal, setSeedingPersonal] = useState(false);
   const [seedingBusiness, setSeedingBusiness] = useState(false);
