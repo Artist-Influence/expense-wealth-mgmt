@@ -254,7 +254,7 @@ export function OnboardingWizard({ open, onClose, persistOnComplete = true }: On
                 <ArrowRight className="h-3.5 w-3.5" />
               </Button>
             ) : (
-              <Button size="sm" onClick={() => setStep((s) => s + 1)} className="gap-1.5">
+              <Button size="sm" onClick={() => setStep((s) => s + 1)} disabled={nextDisabled} className="gap-1.5">
                 Next
                 <ArrowRight className="h-3.5 w-3.5" />
               </Button>
