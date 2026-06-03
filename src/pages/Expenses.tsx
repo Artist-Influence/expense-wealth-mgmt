@@ -35,7 +35,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import {
   Upload, Search, Download, Check, CheckCheck, Edit3, X,
   ArrowLeftRight, AlertTriangle, Ban, FileText, Filter,
-  Calendar, ChevronDown, Trash2, Briefcase, User, Receipt, Scissors, RefreshCw, Copy
+  Calendar, ChevronDown, Trash2, Briefcase, User, Receipt, Scissors, RefreshCw, Copy, ArrowRight
 } from 'lucide-react';
 
 type TransactionMode = 'personal' | 'business' | 'reimbursable_work';
