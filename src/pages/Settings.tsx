@@ -117,7 +117,10 @@ const emptyRule = {
 };
 
 export default function SettingsPage() {
-  const { user, ownerId, isAccountant } = useAuth();
+  const { user, ownerId, isAccountant, isOwner } = useAuth();
+  const setup = useSetupStatus();
+  const methodsSectionRef = useRef<HTMLDivElement>(null);
+  const seedSectionRef = useRef<HTMLDivElement>(null);
   const [wizardOpen, setWizardOpen] = useState(false);
   const [personalCats, setPersonalCats] = useState<CategoryOption[]>([]);
   const [businessCats, setBusinessCats] = useState<CategoryOption[]>([]);
