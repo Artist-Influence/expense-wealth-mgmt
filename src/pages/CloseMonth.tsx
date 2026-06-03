@@ -74,7 +74,8 @@ export default function CloseMonth() {
         .eq('transaction_mode', scope)
         .in('review_status', ['needs_review', 'suggested', 'ai_suggested'])
         .gte('date', dateRange.start)
-        .lte('date', dateRange.end);
+        .lte('date', dateRange.end)
+        .is('deleted_at', null);
       return data || [];
     },
     enabled: !!user && !!ownerId,
@@ -107,7 +108,8 @@ export default function CloseMonth() {
         .eq('owner_id', ownerId!)
         .eq('mode', scope)
         .gte('date', dateRange.start)
-        .lte('date', dateRange.end);
+        .lte('date', dateRange.end)
+        .is('deleted_at', null);
       return (data || []).filter(r => !(NON_EARNING_TYPES as readonly string[]).includes(r.income_type));
     },
     enabled: !!user && !!ownerId,
@@ -123,6 +125,7 @@ export default function CloseMonth() {
         .select('*')
         .eq('owner_id', ownerId!)
         .eq('month', selectedMonth)
+        .is('deleted_at', null)
         .maybeSingle();
       return data;
     },

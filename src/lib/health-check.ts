@@ -39,6 +39,7 @@ export async function runHealthCheck(userId: string): Promise<HealthCheckSummary
     .from('income_transactions')
     .select('id, date, amount, description_raw, description_normalized, mode, source_file_name, source_account_name, income_type, taxable_status, status, duplicate_status, created_at')
     .eq('owner_id', userId)
+    .is('deleted_at', null)
     .neq('duplicate_status', 'not_duplicate'); // honor user "not duplicates" marker
 
   const incomeRowsTyped = (incomeRows || []).map((r: any) => ({
@@ -74,6 +75,7 @@ export async function runHealthCheck(userId: string): Promise<HealthCheckSummary
     .from('transactions_uploaded')
     .select('id, date, amount, description_raw, description_normalized, mode, source_file_name, final_category, predicted_category, final_method, predicted_method, duplicate_status, duplicate_fingerprint, created_at, review_status')
     .eq('owner_id', userId)
+    .is('deleted_at', null)
     .neq('review_status', 'archived');
 
   // Honor the user's "not duplicates" marker everywhere — dismissed rows must
@@ -133,8 +135,8 @@ export async function runHealthCheck(userId: string): Promise<HealthCheckSummary
 
   // ---- NEEDS REVIEW ----
   const [{ count: incomeReviewCount }, { count: expReviewCount }] = await Promise.all([
-    supabase.from('income_transactions').select('id', { count: 'exact', head: true }).eq('owner_id', userId).eq('status', 'needs_review'),
-    supabase.from('transactions_uploaded').select('id', { count: 'exact', head: true }).eq('owner_id', userId).in('review_status', ['needs_review', 'suggested', 'ai_suggested']),
+    supabase.from('income_transactions').select('id', { count: 'exact', head: true }).eq('owner_id', userId).eq('status', 'needs_review').is('deleted_at', null),
+    supabase.from('transactions_uploaded').select('id', { count: 'exact', head: true }).eq('owner_id', userId).in('review_status', ['needs_review', 'suggested', 'ai_suggested']).is('deleted_at', null),
   ]);
 
   // ---- STALE REVIEWS (>7 days old still in needs_review) ----
@@ -145,6 +147,7 @@ export async function runHealthCheck(userId: string): Promise<HealthCheckSummary
     .eq('owner_id', userId)
     .in('review_status', ['needs_review', 'suggested', 'ai_suggested'])
     .lt('date', cutoff)
+    .is('deleted_at', null)
     .order('date', { ascending: true })
     .limit(1000);
 
@@ -153,7 +156,8 @@ export async function runHealthCheck(userId: string): Promise<HealthCheckSummary
     .from('transactions_uploaded')
     .select('id', { count: 'exact', head: true })
     .eq('owner_id', userId)
-    .eq('parse_status', 'error');
+    .eq('parse_status', 'error')
+    .is('deleted_at', null);
 
   const totalIssues =
     incomeExact.length +

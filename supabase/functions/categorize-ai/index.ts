@@ -37,7 +37,22 @@ serve(async (req) => {
       });
     }
 
+    // Best-effort per-user throttle. The platform has no first-class rate-limit
+    // primitive, so this is an ad-hoc guard backed by a DB counter.
+    const { data: rlAllowed, error: rlError } = await authClient.rpc("check_ai_rate_limit", {
+      _fn: "categorize-ai",
+      _max: 15,
+      _window_seconds: 60,
+    });
+    if (!rlError && rlAllowed === false) {
+      return new Response(
+        JSON.stringify({ error: "Rate limit exceeded. Please try again in a minute." }),
+        { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
     const { descriptions, allowedCategories, mode } = await req.json();
+
 
     if (!descriptions || !Array.isArray(descriptions) || descriptions.length === 0 || descriptions.length > 500) {
       return new Response(JSON.stringify({ error: "descriptions array required (max 500)" }), {

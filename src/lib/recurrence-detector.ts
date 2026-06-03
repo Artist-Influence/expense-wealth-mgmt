@@ -217,6 +217,7 @@ export async function backfillRecurringForOwner(
       .eq('mode', mode)
       .gte('date', since)
       .not('amount', 'is', null)
+      .is('deleted_at', null)
       .range(from, from + pageSize - 1);
     if (error) throw error;
     if (!data || data.length === 0) break;

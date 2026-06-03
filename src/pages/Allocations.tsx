@@ -62,7 +62,8 @@ export default function Allocations() {
         .eq('owner_id', ownerId!)
         .eq('mode', scope)
         .gte('date', start)
-        .lte('date', end);
+        .lte('date', end)
+        .is('deleted_at', null);
       return (data || [])
         .filter(r => !(NON_EARNING_TYPES as readonly string[]).includes(r.income_type))
         .reduce((s, r) => s + Number(r.amount || 0), 0);
@@ -86,7 +87,8 @@ export default function Allocations() {
         .gte('date', start)
         .lte('date', end)
         .eq('exclude_from_expense_totals', false)
-        .eq('is_split_parent', false);
+        .eq('is_split_parent', false)
+        .is('deleted_at', null);
       return (data || []).reduce((s, r) => s + Math.abs(Number(r.amount || 0)), 0);
     },
     enabled: !!user && !!ownerId,
@@ -106,7 +108,8 @@ export default function Allocations() {
         .eq('transaction_mode', scope)
         .gte('date', start)
         .lte('date', end)
-        .in('review_status', ['needs_review', 'suggested', 'ai_suggested']);
+        .in('review_status', ['needs_review', 'suggested', 'ai_suggested'])
+        .is('deleted_at', null);
       return count || 0;
     },
     enabled: !!user && !!ownerId,
@@ -130,6 +133,7 @@ export default function Allocations() {
         .from('investment_accounts')
         .select('*')
         .eq('is_active', true)
+        .is('deleted_at', null)
         .order('priority', { ascending: false });
       if (error) throw error;
       return data;
@@ -145,6 +149,7 @@ export default function Allocations() {
         .from('allocation_plans')
         .select('*')
         .eq('month', selectedMonth)
+        .is('deleted_at', null)
         .maybeSingle();
       return data;
     },

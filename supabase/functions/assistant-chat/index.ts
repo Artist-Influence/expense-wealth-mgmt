@@ -170,6 +170,21 @@ Deno.serve(async (req) => {
     }
     const userId = claimsData.claims.sub as string;
 
+    // Best-effort per-user throttle. The platform has no first-class rate-limit
+    // primitive, so this is an ad-hoc guard backed by a DB counter.
+    const { data: rlAllowed, error: rlError } = await supabase.rpc("check_ai_rate_limit", {
+      _fn: "assistant-chat",
+      _max: 30,
+      _window_seconds: 300,
+    });
+    if (!rlError && rlAllowed === false) {
+      return new Response(
+        JSON.stringify({ error: "Rate limit exceeded. Please slow down and try again shortly." }),
+        { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
+
     // Validate request body. Never trust client-supplied shapes.
     const BodySchema = z.object({
       messages: z.array(z.any()).min(1).max(200),

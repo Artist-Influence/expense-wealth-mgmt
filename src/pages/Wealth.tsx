@@ -403,6 +403,7 @@ export default function Wealth() {
       const { data, error } = await supabase
         .from('investment_accounts')
         .select('*')
+        .is('deleted_at', null)
         .order('priority', { ascending: false });
       if (error) throw error;
       return data as Account[];
@@ -416,6 +417,7 @@ export default function Wealth() {
       const { data, error } = await supabase
         .from('account_balance_snapshots')
         .select('account_id, as_of_date, balance')
+        .is('deleted_at', null)
         .order('as_of_date', { ascending: true });
       if (error) throw error;
       return (data || []).map(s => ({
@@ -494,6 +496,7 @@ export default function Wealth() {
           .eq('mode', 'personal')
           .gte('date', yearStart)
           .lte('date', yearEnd)
+          .is('deleted_at', null)
           .or(orParts.join(','));
         const total = (matches || []).reduce((s, r) => s + Math.abs(Number(r.amount || 0)), 0);
         map.set(acc.id, total);
@@ -546,6 +549,7 @@ export default function Wealth() {
       .from('account_balance_snapshots')
       .select('balance')
       .eq('account_id', account_id)
+      .is('deleted_at', null)
       .order('as_of_date', { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -695,7 +699,7 @@ export default function Wealth() {
       }
 
       // 2. Re-fetch (we may have added rows above).
-      const { data: latest } = await supabase.from('investment_accounts').select('*').eq('owner_id', ownerId!);
+      const { data: latest } = await supabase.from('investment_accounts').select('*').eq('owner_id', ownerId!).is('deleted_at', null);
       const all = (latest || []) as Account[];
 
       // 3. For each account with a pattern, sum matching personal expenses YTD.
@@ -713,6 +717,7 @@ export default function Wealth() {
           .eq('mode', 'personal')
           .gte('date', yearStart)
           .lte('date', yearEnd)
+          .is('deleted_at', null)
           .or(orParts.join(','));
 
         const total = (matches || []).reduce((s, r) => s + Math.abs(Number(r.amount || 0)), 0);

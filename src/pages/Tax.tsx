@@ -146,6 +146,7 @@ export default function Tax() {
           .in('review_status', reportingStatuses)
           .gte('date', yearStart)
           .lte('date', yearEnd)
+          .is('deleted_at', null)
           .range(from, from + pageSize - 1);
         if (data) all = [...all, ...data];
         hasMore = (data?.length ?? 0) === pageSize;
@@ -154,8 +155,8 @@ export default function Tax() {
       return all;
     };
     const [incPersonal, incBusiness, txPersonal, txBusiness] = await Promise.all([
-      supabase.from('income_transactions').select('amount, taxable_status').eq('owner_id', ownerId!).eq('mode', 'personal').gte('date', yearStart).lte('date', yearEnd).then(r => r.data),
-      supabase.from('income_transactions').select('amount, taxable_status').eq('owner_id', ownerId!).eq('mode', 'business').gte('date', yearStart).lte('date', yearEnd).then(r => r.data),
+      supabase.from('income_transactions').select('amount, taxable_status').eq('owner_id', ownerId!).eq('mode', 'personal').gte('date', yearStart).lte('date', yearEnd).is('deleted_at', null).then(r => r.data),
+      supabase.from('income_transactions').select('amount, taxable_status').eq('owner_id', ownerId!).eq('mode', 'business').gte('date', yearStart).lte('date', yearEnd).is('deleted_at', null).then(r => r.data),
       fetchAll('personal'),
       fetchAll('business'),
     ]);
@@ -200,7 +201,8 @@ export default function Tax() {
       .select('income_type, taxable_status, amount')
       .eq('owner_id', ownerId!)
       .gte('date', yearStart)
-      .lte('date', yearEnd);
+      .lte('date', yearEnd)
+      .is('deleted_at', null);
     if (scope !== 'all') q = q.eq('mode', scope);
     const { data } = await q;
     setIncomeRows((data as IncomeRow[]) || []);
@@ -224,6 +226,7 @@ export default function Tax() {
         .in('review_status', reportingStatuses)
         .gte('date', yearStart)
         .lte('date', yearEnd)
+        .is('deleted_at', null)
         .range(from, from + pageSize - 1);
       if (scope !== 'all') q = q.eq('transaction_mode', scope);
       const { data } = await q;
@@ -249,7 +252,8 @@ export default function Tax() {
       .eq('is_transfer', false)
       .eq('review_status', 'needs_review')
       .gte('date', yearStart)
-      .lte('date', yearEnd);
+      .lte('date', yearEnd)
+      .is('deleted_at', null);
     if (scope === 'business' || scope === 'all') {
       cq = cq.eq('transaction_mode', 'business');
     } else {
@@ -272,6 +276,7 @@ export default function Tax() {
       .in('treatment_type', ['tax_payment', 'estimated_tax_payment'])
       .gte('date', yearStart)
       .lte('date', yearEnd)
+      .is('deleted_at', null)
       .order('date', { ascending: false });
     setTaxPayments((data as TaxPaymentRow[]) || []);
   }
