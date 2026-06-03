@@ -124,17 +124,23 @@ export function OnboardingWizard({ open, onClose, persistOnComplete = true }: On
   const { ownerId } = useAuth();
   const [step, setStep] = useState(0);
   const [saving, setSaving] = useState(false);
+  const [usageProfile, setUsageProfile] = useState<UsageProfile | null>(null);
 
   const isLast = step === STEPS.length - 1;
   const current = STEPS[step];
   const Icon = current.icon;
+  const isUsageStep = current.key === 'usage';
+  const nextDisabled = isUsageStep && !usageProfile;
 
   const markComplete = async () => {
     if (!persistOnComplete || !ownerId) return;
     try {
       await supabase
         .from('app_settings')
-        .update({ onboarding_completed: true })
+        .update({
+          onboarding_completed: true,
+          ...(usageProfile ? { usage_profile: usageProfile } : {}),
+        })
         .eq('owner_id', ownerId);
     } catch {
       /* non-blocking */
