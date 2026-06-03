@@ -1940,17 +1940,17 @@ export default function Expenses() {
               <Button size="sm" variant="outline" onClick={bulkMarkTransfer} className="h-8 gap-1 text-xs">
                 <ArrowLeftRight className="h-3 w-3" /> Transfer
               </Button>
-              {mode !== 'personal' && (
+              {mode !== 'personal' && visibleModes.includes('personal') && (
                 <Button size="sm" variant="outline" onClick={() => bulkSwitchMode('personal')} className="h-8 gap-1 text-xs">
                   <User className="h-3 w-3" /> → Personal
                 </Button>
               )}
-              {mode !== 'business' && (
+              {mode !== 'business' && visibleModes.includes('business') && (
                 <Button size="sm" variant="outline" onClick={() => bulkSwitchMode('business')} className="h-8 gap-1 text-xs text-primary border-primary/30">
                   <Briefcase className="h-3 w-3" /> → Business
                 </Button>
               )}
-              {mode !== 'reimbursable_work' && (
+              {mode !== 'reimbursable_work' && visibleModes.includes('reimbursable_work') && (
                 <Button size="sm" variant="outline" onClick={() => bulkSwitchMode('reimbursable_work')} className="h-8 gap-1 text-xs text-warning border-warning/30">
                   <Receipt className="h-3 w-3" /> → Reimburse
                 </Button>
