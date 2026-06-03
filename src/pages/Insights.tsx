@@ -124,6 +124,9 @@ const readReviewMode = (): ReviewMode => {
 
 export default function Insights() {
   const { user, isInvestor, isAccountant, ownerId } = useAuth();
+  const { profile } = useUsageProfile();
+  const lockedMode: 'personal' | 'business' | null =
+    profile === 'personal' ? 'personal' : profile === 'business' ? 'business' : null;
   const [mode, setMode] = useState<'personal' | 'business'>(isInvestor ? 'business' : 'personal');
   const [modeAutoSet, setModeAutoSet] = useState(isInvestor ? true : false);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
