@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAuth } from '@/hooks/useAuth';
+import { useUsageProfile } from '@/hooks/useUsageProfile';
 import { supabase } from '@/integrations/supabase/client';
 import { AppNav } from '@/components/AppNav';
 import { CsvUploader } from '@/components/CsvUploader';
