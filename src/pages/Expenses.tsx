@@ -15,6 +15,7 @@ import { previewCsvFile, parseCsvFileWithMapping, type ParsePreview, type Column
 import { categorizeTransactions, categorizeWithAI, updateMerchantMemory, isDeductibleCategory } from '@/lib/categorization-engine';
 import { detectMethodFromFilename } from '@/lib/method-detector';
 import { usePaymentMethods, type PaymentMethod } from '@/hooks/usePaymentMethods';
+import { useSetupStatus } from '@/hooks/useSetupStatus';
 import { MethodSelect } from '@/components/MethodSelect';
 import { detectTransfer } from '@/lib/transfer-detector';
 import { routeTransaction } from '@/lib/transaction-router';
