@@ -382,36 +382,16 @@ export default function Insights() {
     return [...merchMap.entries()].sort((a, b) => b[1].total - a[1].total).slice(0, 10).map(([name, data]) => ({ name, ...data }));
   }, [approvedExpenses]);
 
-  const recurringCharges = useMemo(() => {
-    const merchMap = new Map<string, { amounts: number[]; dates: string[]; category: string }>();
-    approvedExpenses.forEach(t => {
-      if (!t.date) return;
-      const desc = (t.description_normalized || t.description_raw || '').substring(0, 40);
-      const existing = merchMap.get(desc) || { amounts: [], dates: [], category: '' };
-      existing.amounts.push(Math.abs(t.amount || 0));
-      existing.dates.push(t.date);
-      existing.category = t.final_category || '';
-      merchMap.set(desc, existing);
-    });
-    return [...merchMap.entries()]
-      .filter(([, data]) => data.amounts.length >= 3)
-      .map(([name, data]) => {
-        const avg = data.amounts.reduce((s, a) => s + a, 0) / data.amounts.length;
-        const sortedDates = data.dates.sort();
-        const lastCharged = sortedDates[sortedDates.length - 1];
-        const daySpan = (new Date(sortedDates[sortedDates.length - 1]).getTime() - new Date(sortedDates[0]).getTime()) / (1000 * 60 * 60 * 24);
-        const avgDaysBetween = daySpan / (data.amounts.length - 1);
-        let frequency = 'irregular';
-        if (avgDaysBetween >= 25 && avgDaysBetween <= 35) frequency = 'monthly';
-        else if (avgDaysBetween >= 6 && avgDaysBetween <= 8) frequency = 'weekly';
-        else if (avgDaysBetween >= 13 && avgDaysBetween <= 16) frequency = 'biweekly';
-        else if (avgDaysBetween >= 85 && avgDaysBetween <= 100) frequency = 'quarterly';
-        else if (avgDaysBetween >= 350 && avgDaysBetween <= 380) frequency = 'annual';
-        const monthlyEstimate = frequency === 'monthly' ? avg : frequency === 'weekly' ? avg * 4.3 : frequency === 'biweekly' ? avg * 2.15 : avg;
-        return { name, avg: Math.round(avg * 100) / 100, frequency, category: data.category, lastCharged, monthlyEstimate: Math.round(monthlyEstimate * 100) / 100, count: data.amounts.length };
-      })
-      .sort((a, b) => b.monthlyEstimate - a.monthlyEstimate);
-  }, [approvedExpenses]);
+  const allRecurringCharges = useMemo(() => computeRecurringCharges(approvedExpenses), [approvedExpenses]);
+  // Respect the user's Subscriptions-page decisions: hide dismissed merchants entirely,
+  // and flag confirmed ones so the table can highlight real subscriptions.
+  const recurringCharges = useMemo(
+    () =>
+      allRecurringCharges
+        .filter(rc => recurringOverrides[rc.merchantKey] !== 'dismissed')
+        .map(rc => ({ ...rc, confirmed: recurringOverrides[rc.merchantKey] === 'confirmed' })),
+    [allRecurringCharges, recurringOverrides],
+  );
 
   // Exclude non-earning income types from savings rate math
   const earnedIncomeAll = useMemo(() => incomeData.filter(t => !(NON_EARNING_TYPES as readonly string[]).includes(t.income_type)), [incomeData]);
