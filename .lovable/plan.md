@@ -1,48 +1,29 @@
-# Guide new owners to set up before uploading
+## Problem
 
-New owners should configure their **payment methods** and seed at least one **reference (historical) statement** in Settings before uploading real statements. Per your choices: a **soft warning** (upload stays allowed), the two required steps are **methods + reference statements**, and the guidance lives as a **checklist banner at the top of Settings**.
+In **Resolve Duplicates**, the action buttons (e.g. "Not duplicates", "Keep oldest, delete N", "Keep oldest, archive N") *do* exist in the code, but they're invisible because each cluster card grows wider than the dialog. The transaction descriptions (long `ORIG CO NAME:INTUIT ...` strings) don't truncate inside the scroll area, so the card expands to fit the text and the `justify-between` header row pushes the buttons off the right edge of the screen. Result: nothing visible to click, on every tab (Income, Possible, Exact).
 
-## What "ready" means
+## Root cause
 
-Setup is considered complete for an owner when both are true:
-- At least one **payment method** exists (`payment_methods` for the owner).
-- At least one **reference statement** has been seeded — detected by the presence of `merchant_memory` rows for the owner (the historical-seed flow in Settings writes these).
+In `src/components/DuplicateResolverDialog.tsx`:
+- The `ScrollArea` content and cluster panels have no horizontal width constraint, so `truncate` on the description never kicks in (truncation needs a bounded-width parent).
+- The action buttons live in the same flex row as the cluster summary using `justify-between`; when the card overflows, the buttons travel off-screen with it.
 
-No new database columns are needed; readiness is derived live from existing tables.
+## Fix (UI only, single file)
 
-## 1. Shared readiness hook
+In `src/components/DuplicateResolverDialog.tsx`:
 
-New hook `src/hooks/useSetupStatus.ts`:
-- Queries counts of `payment_methods` and `merchant_memory` for the current `ownerId` (head/count requests, cheap).
-- Returns `{ hasMethods, hasReferenceData, isReady, loading, reload }`.
-- Owner-only concern; investors/accountants never see the gate.
+1. **Constrain widths so cards can't overflow**
+   - Add `w-full min-w-0` to the `ScrollArea` and the inner `space-y-3` container.
+   - Add `w-full min-w-0 overflow-hidden` to each cluster `glass-panel`.
 
-## 2. Settings "Get started" checklist banner
+2. **Make the action buttons always visible**
+   - Restructure each cluster header so the action buttons sit in their own row (or allow `flex-wrap`) instead of being pinned to the right of a `justify-between` row. This guarantees they render regardless of description length / viewport width.
 
-At the top of `src/pages/Settings.tsx` (above existing sections, owner only — hidden for accountants):
-- A glass-panel banner titled "Finish setup to get accurate results".
-- Two checklist rows, each showing a check (done) or empty circle (todo):
-  1. **Add your payment methods** — short text; "Add methods" button scrolls to the existing Payment Methods section.
-  2. **Seed a reference statement** — short text explaining this teaches the categorizer; "Seed history" button scrolls to the existing historical-seed section.
-- When both are complete, the banner collapses into a subtle "You're all set — uploads are ready" confirmation (or hides).
-- Uses `useSetupStatus`; refreshes after a method is added or a seed completes (call `reload`).
-- Anchors: add `id`/`ref` to the existing Payment Methods and Historical Seed sections so the buttons can scroll to them.
+3. **Force descriptions to truncate**
+   - Ensure the description `<span className="truncate">` has a properly bounded `min-w-0` flex parent and add `max-w-full`/`flex-1 min-w-0` so long INTUIT strings ellipsis instead of expanding the card.
 
-## 3. Soft warning before uploading (Expenses)
-
-In `src/pages/Expenses.tsx`, inside the existing Upload sheet (and only for owners when setup is incomplete):
-- Show a warning callout at the top of the upload sheet body: "Set up first for best results — you haven't added payment methods / seeded a reference statement yet. Uploading now may misclassify transactions." with a "Go to Settings" link (routes to `/settings`).
-- The Upload CSV button and flow remain fully enabled (soft warning only).
-- Only the missing item(s) are mentioned; the warning disappears once `isReady`.
+4. **Quick verify**
+   - Open the dialog on the Income tab (5 clusters) and confirm the "Not duplicates" and "Keep oldest, delete N" buttons are visible and clickable, and that resolving refreshes the list. Repeat spot-check on Possible/Exact tabs.
 
 ## Out of scope
-
-- No hard blocking/disabling of upload.
-- No schema changes, no changes to categorization, seeding, or method-detection logic.
-- Investor/accountant experiences unchanged.
-
-## Technical notes
-
-- Reuse existing semantic tokens (`glass-panel`, `warning`, `primary`, `muted-foreground`); no new colors.
-- Section scrolling via `ref.scrollIntoView({ behavior: 'smooth' })`.
-- Readiness checks use `select('id', { count: 'exact', head: true })` filtered by `owner_id`.
+No changes to duplicate-detection logic, database, or how resolution is processed — the handlers (`archiveLosers`, `markNotDuplicates`, `deleteIncomeLosers`, `hardDelete`) already work; they just weren't reachable.
