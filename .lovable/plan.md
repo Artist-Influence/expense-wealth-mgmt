@@ -1,54 +1,36 @@
-# Subscription Tracking
+# Show all Subscriptions-tagged expenses on the Subscriptions page
 
-## Goal
-Turn the current throwaway "Recurring Charges" list into something you control: a dedicated **Subscriptions** page where each auto-detected recurring charge can be marked as a real subscription or removed (hidden) if it isn't one. Your decisions are remembered, and anything you remove disappears from the Recurring Charges section on Insights. Detection still drives the candidates — there's no manual entry of made-up subscriptions.
+## Problem
 
-## How it works today
-The Recurring Charges table on Insights is computed live from approved expenses (grouped by merchant, needs ≥3 charges with a regular cadence). Nothing is saved, so there's no way to confirm a real subscription or remove a false positive — it recomputes every visit.
+The Subscriptions page only lists merchants the detector sees **3 or more times**. Anything you manually tagged with the `Subscriptions` category but that appears only once or twice never shows up.
 
-## What changes
+Confirmed against your live data: 43 transactions are tagged `Subscriptions` (40 business + 3 personal), but only 4 merchants clear the 3-charge threshold. Real subscriptions like Lovable, OpenAI, Slack, Airtable, Twilio, Squarespace, Verizon, CapCut (business) are silently dropped.
 
-### 1. Remember your decisions (backend)
-A new private table stores one row per merchant you've acted on, scoped to you and the current mode (personal/business):
-- The merchant key (the same merchant grouping the detector already uses)
-- A status: `confirmed` (a real subscription) or `dismissed` (not recurring — hide it)
+## Fix
 
-Only you can read/write your own rows (with read access for a delegated accountant, matching every other table). No manual "add a subscription from scratch" — rows only ever reference a real detected merchant.
+Make the page include **any expense explicitly categorized as `Subscriptions`** in addition to the auto-detected recurring charges, for both personal and business.
 
-### 2. Shared recurring-charge detection
-The detection logic currently living inside Insights moves into a small reusable helper so both Insights and the new page produce the exact same candidate list (merchant, avg amount, frequency, category, last charged, monthly estimate).
+### 1. `src/lib/recurring-charges.ts` (shared detector)
 
-### 3. New Subscriptions page (`/subscriptions`)
-A nav link is added. The page uses the same Personal/Business/All scope toggle as the rest of the app and shows:
-- **Confirmed subscriptions** — candidates you marked as real, with a total monthly load, plus a "stale" hint if one hasn't charged recently. Each has a **Remove** action.
-- **Detected candidates** — recurring charges you haven't decided on yet, each with **Confirm** (it's a real subscription) and **Dismiss** (not recurring — hide it).
-- **Removed** — a small collapsed list of dismissed merchants with an **Undo** so a mistaken removal can be brought back.
+- Add an options argument: `computeRecurringCharges(expenses, { includeCategories?: string[]; minCount?: number })`. Defaults preserve today's behavior (`minCount = 3`, `includeCategories = []`), so the Insights "Recurring Charges" section is unchanged.
+- A merchant qualifies if it has `>= minCount` charges **OR** its category is in `includeCategories` (e.g. `Subscriptions`).
+- Guard the cadence math for low-count groups (currently `daySpan / (count - 1)` divides by zero for a single charge and produces `NaN`):
+  - `count < 2` → `frequency = 'monthly'` (sensible default for a manually-tagged subscription), `monthlyEstimate = avg`.
+  - `count >= 2` → unchanged logic.
 
-### 4. Insights respects your decisions
-The Recurring Charges section on Insights filters out anything you've **dismissed**, and visually flags rows you've **confirmed**. The subscription-related "Where to Save" suggestions use the same filtered list, so dismissed items no longer inflate your subscription load.
+### 2. `src/pages/Subscriptions.tsx`
 
-## Technical notes
+- Call the detector with `{ includeCategories: ['Subscriptions'] }` so every tagged merchant appears, even with one charge.
+- Treat a candidate whose `category === 'Subscriptions'` as **confirmed by default** (it already lives in "Your subscriptions" without needing a click), unless the user has explicitly dismissed it via an override. Auto-detected recurring charges that are *not* tagged still appear under "Detected recurring charges" for confirm/dismiss as today. Override rows (confirm/dismiss/undo) continue to win over the default.
+- The Personal / Business / All scope toggle already drives this, so it works across both modes automatically.
 
-**Migration** (new `recurring_overrides` table):
-```text
-recurring_overrides
-  id           uuid pk
-  owner_id     uuid   (= auth.uid())
-  mode         text   ('personal' | 'business')
-  merchant_key text   (truncated normalized description, matching the detector)
-  status       text   ('confirmed' | 'dismissed')
-  created_at / updated_at timestamps
-  unique (owner_id, mode, merchant_key)
-```
-- GRANTs: `authenticated` (select/insert/update/delete), `service_role` (all); no `anon`.
-- RLS: `owner_all` (`auth.uid() = owner_id`) + `delegated_accountant_read` via `has_delegated_access(...)`, mirroring existing tables.
-- `updated_at` trigger using existing `update_updated_at_column()`.
+## Notes / out of scope
 
-**Frontend:**
-- Extract the `recurringCharges` `useMemo` body from `src/pages/Insights.tsx` into `src/lib/recurring-charges.ts` (`computeRecurringCharges(approvedExpenses)` returning the same shape plus the `merchant_key`). The detector key stays the current `desc.substring(0, 40)` so existing behavior is unchanged.
-- New `src/hooks/useRecurringOverrides.ts` — loads/saves rows for `ownerId` + `mode`, exposes `confirm`, `dismiss`, `undo`, and lookups.
-- New `src/pages/Subscriptions.tsx` reusing `ModeScopeToggle`, the same data-load pattern as Insights (transactions for `ownerId`/`mode`, `.is('deleted_at', null)`, counted statuses only), glass-panel styling.
-- Register `/subscriptions` in `src/App.tsx` behind `AuthGuard`; add the nav entry in `src/components/AppNav.tsx`.
-- Update the Insights Recurring Charges render + subscription suggestions to drop dismissed merchants and tag confirmed ones.
+- Some merchants split into separate rows because grouping uses the first 40 characters of the description (e.g. `GOOGLE *CLOUD 6PMVXQ` vs `GOOGLE *CLOUD 7DJMVW`). They'll all now be visible but may show as distinct line items. Tighter merchant normalization is a separate, larger change — not included here.
+- The console "order of Hooks" warning on the Insights page is a hot-reload artifact from the recent edits and clears on a full refresh; I'll verify it's gone after the change. No structural hook bug was found.
 
-**Out of scope:** no changes to categorization, the `Subscriptions` category tag, or transaction records — removing a false positive only hides it; underlying data is untouched (as chosen).
+## Verification
+
+- Load `/subscriptions` in Personal, Business, and All scopes and confirm all 24 distinct tagged merchants now appear.
+- Confirm the Insights "Recurring Charges" section still lists only the 3+ charge merchants (unchanged).
+- Confirm/dismiss/undo still persist correctly.

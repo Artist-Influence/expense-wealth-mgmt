@@ -31,7 +31,20 @@ export interface RecurringCharge {
   count: number;
 }
 
-export function computeRecurringCharges(expenses: RecurringExpenseInput[]): RecurringCharge[] {
+export interface RecurringChargeOptions {
+  /** Minimum number of charges for a merchant to auto-qualify as recurring. Default 3. */
+  minCount?: number;
+  /** Categories that always qualify regardless of charge count (e.g. 'Subscriptions'). */
+  includeCategories?: string[];
+}
+
+export function computeRecurringCharges(
+  expenses: RecurringExpenseInput[],
+  options: RecurringChargeOptions = {},
+): RecurringCharge[] {
+  const minCount = options.minCount ?? 3;
+  const includeCategories = new Set((options.includeCategories ?? []).map((c) => c.toLowerCase()));
+
   const merchMap = new Map<string, { amounts: number[]; dates: string[]; category: string }>();
   expenses.forEach((t) => {
     if (!t.date) return;
@@ -45,21 +58,30 @@ export function computeRecurringCharges(expenses: RecurringExpenseInput[]): Recu
   });
 
   return [...merchMap.entries()]
-    .filter(([, data]) => data.amounts.length >= 3)
+    .filter(
+      ([, data]) =>
+        data.amounts.length >= minCount ||
+        (data.category && includeCategories.has(data.category.toLowerCase())),
+    )
     .map(([name, data]) => {
       const avg = data.amounts.reduce((s, a) => s + a, 0) / data.amounts.length;
       const sortedDates = [...data.dates].sort();
       const lastCharged = sortedDates[sortedDates.length - 1];
-      const daySpan =
-        (new Date(sortedDates[sortedDates.length - 1]).getTime() - new Date(sortedDates[0]).getTime()) /
-        (1000 * 60 * 60 * 24);
-      const avgDaysBetween = daySpan / (data.amounts.length - 1);
       let frequency = 'irregular';
-      if (avgDaysBetween >= 25 && avgDaysBetween <= 35) frequency = 'monthly';
-      else if (avgDaysBetween >= 6 && avgDaysBetween <= 8) frequency = 'weekly';
-      else if (avgDaysBetween >= 13 && avgDaysBetween <= 16) frequency = 'biweekly';
-      else if (avgDaysBetween >= 85 && avgDaysBetween <= 100) frequency = 'quarterly';
-      else if (avgDaysBetween >= 350 && avgDaysBetween <= 380) frequency = 'annual';
+      if (data.amounts.length < 2) {
+        // Single charge: cadence is unknown — assume monthly for tracking purposes.
+        frequency = 'monthly';
+      } else {
+        const daySpan =
+          (new Date(sortedDates[sortedDates.length - 1]).getTime() - new Date(sortedDates[0]).getTime()) /
+          (1000 * 60 * 60 * 24);
+        const avgDaysBetween = daySpan / (data.amounts.length - 1);
+        if (avgDaysBetween >= 25 && avgDaysBetween <= 35) frequency = 'monthly';
+        else if (avgDaysBetween >= 6 && avgDaysBetween <= 8) frequency = 'weekly';
+        else if (avgDaysBetween >= 13 && avgDaysBetween <= 16) frequency = 'biweekly';
+        else if (avgDaysBetween >= 85 && avgDaysBetween <= 100) frequency = 'quarterly';
+        else if (avgDaysBetween >= 350 && avgDaysBetween <= 380) frequency = 'annual';
+      }
       const monthlyEstimate =
         frequency === 'monthly'
           ? avg
