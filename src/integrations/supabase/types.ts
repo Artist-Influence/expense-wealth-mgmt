@@ -20,6 +20,7 @@ export type Database = {
           as_of_date: string
           balance: number
           created_at: string
+          deleted_at: string | null
           id: string
           owner_id: string
           updated_at: string
@@ -29,6 +30,7 @@ export type Database = {
           as_of_date: string
           balance?: number
           created_at?: string
+          deleted_at?: string | null
           id?: string
           owner_id: string
           updated_at?: string
@@ -38,6 +40,7 @@ export type Database = {
           as_of_date?: string
           balance?: number
           created_at?: string
+          deleted_at?: string | null
           id?: string
           owner_id?: string
           updated_at?: string
@@ -100,6 +103,7 @@ export type Database = {
       allocation_plans: {
         Row: {
           created_at: string
+          deleted_at: string | null
           emergency_fund_amount: number
           free_cash: number
           id: string
@@ -114,6 +118,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          deleted_at?: string | null
           emergency_fund_amount?: number
           free_cash?: number
           id?: string
@@ -128,6 +133,7 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          deleted_at?: string | null
           emergency_fund_amount?: number
           free_cash?: number
           id?: string
@@ -426,6 +432,7 @@ export type Database = {
           amount: number | null
           created_at: string
           date: string | null
+          deleted_at: string | null
           description_normalized: string | null
           description_raw: string | null
           duplicate_of_income_id: string | null
@@ -448,6 +455,7 @@ export type Database = {
           amount?: number | null
           created_at?: string
           date?: string | null
+          deleted_at?: string | null
           description_normalized?: string | null
           description_raw?: string | null
           duplicate_of_income_id?: string | null
@@ -470,6 +478,7 @@ export type Database = {
           amount?: number | null
           created_at?: string
           date?: string | null
+          deleted_at?: string | null
           description_normalized?: string | null
           description_raw?: string | null
           duplicate_of_income_id?: string | null
@@ -514,6 +523,7 @@ export type Database = {
           contributions_ytd: number
           created_at: string
           current_balance: number
+          deleted_at: string | null
           id: string
           is_active: boolean
           mode: string
@@ -533,6 +543,7 @@ export type Database = {
           contributions_ytd?: number
           created_at?: string
           current_balance?: number
+          deleted_at?: string | null
           id?: string
           is_active?: boolean
           mode?: string
@@ -552,6 +563,7 @@ export type Database = {
           contributions_ytd?: number
           created_at?: string
           current_balance?: number
+          deleted_at?: string | null
           id?: string
           is_active?: boolean
           mode?: string
@@ -711,6 +723,7 @@ export type Database = {
       reimbursement_groups: {
         Row: {
           created_at: string
+          deleted_at: string | null
           id: string
           notes: string | null
           owner_id: string
@@ -725,6 +738,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          deleted_at?: string | null
           id?: string
           notes?: string | null
           owner_id: string
@@ -739,6 +753,7 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          deleted_at?: string | null
           id?: string
           notes?: string | null
           owner_id?: string
@@ -827,6 +842,7 @@ export type Database = {
           counts_toward_true_personal_spend: boolean
           created_at: string
           date: string | null
+          deleted_at: string | null
           description_normalized: string | null
           description_raw: string | null
           direction: string | null
@@ -884,6 +900,7 @@ export type Database = {
           counts_toward_true_personal_spend?: boolean
           created_at?: string
           date?: string | null
+          deleted_at?: string | null
           description_normalized?: string | null
           description_raw?: string | null
           direction?: string | null
@@ -941,6 +958,7 @@ export type Database = {
           counts_toward_true_personal_spend?: boolean
           created_at?: string
           date?: string | null
+          deleted_at?: string | null
           description_normalized?: string | null
           description_raw?: string | null
           direction?: string | null
