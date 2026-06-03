@@ -150,9 +150,14 @@ export default function Insights() {
   const [dateLabel, setDateLabel] = useState<string>('Year to Date');
   const [hiddenTrendCats, setHiddenTrendCats] = useState<Set<string>>(new Set());
 
+  // Lock mode to the usage profile when it isn't "both"
+  useEffect(() => {
+    if (lockedMode) setMode(lockedMode);
+  }, [lockedMode]);
+
   // Auto-pick the mode that actually has data on first load
   useEffect(() => {
-    if (!user || !ownerId || modeAutoSet) return;
+    if (!user || !ownerId || modeAutoSet || lockedMode) return;
     (async () => {
       const [{ count: pCount }, { count: bCount }] = await Promise.all([
         supabase.from('transactions_uploaded').select('id', { count: 'exact', head: true }).eq('owner_id', ownerId!).eq('mode', 'personal'),
@@ -163,7 +168,7 @@ export default function Insights() {
       if (businessN > personalN) setMode('business');
       setModeAutoSet(true);
     })();
-  }, [user, ownerId, modeAutoSet]);
+  }, [user, ownerId, modeAutoSet, lockedMode]);
 
   useEffect(() => {
     if (user && ownerId) loadData();
