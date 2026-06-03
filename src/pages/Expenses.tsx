@@ -304,7 +304,7 @@ export default function Expenses() {
       while (hasMore) {
         const { data } = await supabase
           .from('transactions_uploaded')
-          .select('id, date, description_normalized, description_raw, amount, duplicate_fingerprint, mode, created_at, final_category, predicted_category, final_method, predicted_method, source_file_name, source_account_name, duplicate_status, is_transfer, is_split_parent, parent_transaction_id, review_status')
+          .select('id, date, description_normalized, description_raw, amount, duplicate_fingerprint, mode, created_at, final_category, predicted_category, final_method, predicted_method, source_file_name, source_account_name, duplicate_status, is_transfer, is_split_parent, parent_transaction_id, review_status, recurring_group_id')
           .eq('owner_id', ownerId!)
           .range(from, from + pageSize - 1);
         if (data) rows.push(...(data as any));
