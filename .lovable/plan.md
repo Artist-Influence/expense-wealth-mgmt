@@ -1,40 +1,48 @@
-# Setup Wizard for New Owners
+# Guide new owners to set up before uploading
 
-Add a multi-step welcome modal that introduces the owner to the tool's workflow the first time they sign in, with the ability to replay it later from Settings.
+New owners should configure their **payment methods** and seed at least one **reference (historical) statement** in Settings before uploading real statements. Per your choices: a **soft warning** (upload stays allowed), the two required steps are **methods + reference statements**, and the guidance lives as a **checklist banner at the top of Settings**.
 
-## Behavior
+## What "ready" means
 
-- Shows automatically the first time the **owner** logs in (investors and accountants never see it).
-- Dismissable; completion is remembered so it won't reappear.
-- Can be reopened anytime from a "Replay walkthrough" button in Settings.
+Setup is considered complete for an owner when both are true:
+- At least one **payment method** exists (`payment_methods` for the owner).
+- At least one **reference statement** has been seeded — detected by the presence of `merchant_memory` rows for the owner (the historical-seed flow in Settings writes these).
 
-## Wizard content (steps)
+No new database columns are needed; readiness is derived live from existing tables.
 
-A clean glass-panel dialog matching the dark glassmorphism theme, with a progress dots indicator and Back / Next / Finish buttons. Steps:
+## 1. Shared readiness hook
 
-1. **Welcome** — What this tool is: a single-account cash control system that turns bank/card CSVs into categorized expenses, tracked income, and wealth allocation.
-2. **Upload statements** — Drag CSVs into the Expenses page; the app auto-detects the payment method, prevents duplicates, and runs categorization.
-3. **Review & categorize** — Only reviewed transactions count toward totals. Explains the red badge in the nav, approving/editing categories, splitting mixed-use charges, and marking transfers.
-4. **Income & reimbursements** — Upload income CSVs; separate true earnings from reimbursements/fronted money.
-5. **Wealth, allocations & tax** — Set wealth targets, allocate investable surplus, and view tax reserve estimates.
-6. **Assistant & monthly close** — Ask the AI assistant financial questions, and use the guided Close Month workflow to finalize each period.
-7. **Finish** — Encourages setting preferences in Settings (cash buffers, tax %, goals) and starts the user on the Expenses page.
+New hook `src/hooks/useSetupStatus.ts`:
+- Queries counts of `payment_methods` and `merchant_memory` for the current `ownerId` (head/count requests, cheap).
+- Returns `{ hasMethods, hasReferenceData, isReady, loading, reload }`.
+- Owner-only concern; investors/accountants never see the gate.
 
-Each step has a short title, 2-4 sentences of plain-English guidance, and a relevant lucide icon (reusing the icons already used in the nav).
+## 2. Settings "Get started" checklist banner
 
-## Persistence
+At the top of `src/pages/Settings.tsx` (above existing sections, owner only — hidden for accountants):
+- A glass-panel banner titled "Finish setup to get accurate results".
+- Two checklist rows, each showing a check (done) or empty circle (todo):
+  1. **Add your payment methods** — short text; "Add methods" button scrolls to the existing Payment Methods section.
+  2. **Seed a reference statement** — short text explaining this teaches the categorizer; "Seed history" button scrolls to the existing historical-seed section.
+- When both are complete, the banner collapses into a subtle "You're all set — uploads are ready" confirmation (or hides).
+- Uses `useSetupStatus`; refreshes after a method is added or a seed completes (call `reload`).
+- Anchors: add `id`/`ref` to the existing Payment Methods and Historical Seed sections so the buttons can scroll to them.
 
-Add an `onboarding_completed` boolean column (default `false`) to `app_settings`. The wizard reads it on load; clicking Finish or Skip sets it to `true`. The "Replay walkthrough" button in Settings simply reopens the modal without changing the flag (or optionally resets it).
+## 3. Soft warning before uploading (Expenses)
 
-## Technical details
-
-- **Migration**: `ALTER TABLE public.app_settings ADD COLUMN onboarding_completed boolean NOT NULL DEFAULT false;` (existing RLS/grants already cover this table). The Supabase types file regenerates automatically after the migration.
-- **New component** `src/components/OnboardingWizard.tsx` — a controlled `Dialog` (shadcn) holding step state, the step content array, progress dots, and navigation buttons. Props: `open`, `onClose`. On finish/skip it updates `app_settings.onboarding_completed = true` for the current `ownerId`.
-- **Trigger logic**: In `Expenses.tsx` (the `/` landing page), for `isOwner` only, query `app_settings.onboarding_completed` for `ownerId` after auth resolves; if `false`/missing, open the wizard. Gate on role so investors/accountants are excluded.
-- **Replay entry point**: Add a "Walkthrough" / "Replay setup guide" button in `Settings.tsx` that opens the same `OnboardingWizard` with local open state.
-- Styling uses existing semantic tokens (`glass-panel`, `primary`, `muted-foreground`) — no new colors. No backend/business-logic changes beyond the single boolean flag.
+In `src/pages/Expenses.tsx`, inside the existing Upload sheet (and only for owners when setup is incomplete):
+- Show a warning callout at the top of the upload sheet body: "Set up first for best results — you haven't added payment methods / seeded a reference statement yet. Uploading now may misclassify transactions." with a "Go to Settings" link (routes to `/settings`).
+- The Upload CSV button and flow remain fully enabled (soft warning only).
+- Only the missing item(s) are mentioned; the warning disappears once `isReady`.
 
 ## Out of scope
 
-- No interactive element-pointing tour (modal only).
-- No changes to categorization, income, tax, or allocation logic.
+- No hard blocking/disabling of upload.
+- No schema changes, no changes to categorization, seeding, or method-detection logic.
+- Investor/accountant experiences unchanged.
+
+## Technical notes
+
+- Reuse existing semantic tokens (`glass-panel`, `warning`, `primary`, `muted-foreground`); no new colors.
+- Section scrolling via `ref.scrollIntoView({ behavior: 'smooth' })`.
+- Readiness checks use `select('id', { count: 'exact', head: true })` filtered by `owner_id`.

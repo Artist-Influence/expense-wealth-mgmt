@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '@/hooks/useAuth';
+import { useSetupStatus } from '@/hooks/useSetupStatus';
 import { supabase } from '@/integrations/supabase/client';
 import { AppNav } from '@/components/AppNav';
 import { toast } from 'sonner';
@@ -10,7 +11,7 @@ import { Slider } from '@/components/ui/slider';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
-import { Plus, Trash2, ChevronDown, Zap, Save, Wand2, HelpCircle } from 'lucide-react';
+import { Plus, Trash2, ChevronDown, Zap, Save, Wand2, HelpCircle, CheckCircle2, Circle, CreditCard, Database, ArrowRight } from 'lucide-react';
 import { previewCsvFile, parseCsvFileWithMapping, type ColumnMapping, type ParsePreview } from '@/lib/csv-parser';
 import { updateMerchantMemory } from '@/lib/categorization-engine';
 import { SeedMappingDialog } from '@/components/SeedMappingDialog';
@@ -115,8 +116,43 @@ const emptyRule = {
   category_output: '', method_output: '', notes_output: '', priority: 100, is_active: true,
 };
 
+function SetupRow({
+  done, icon: Icon, title, desc, actionLabel, onAction,
+}: {
+  done: boolean;
+  icon: React.ComponentType<{ className?: string }>;
+  title: string;
+  desc: string;
+  actionLabel: string;
+  onAction: () => void;
+}) {
+  return (
+    <div className={`flex items-start gap-3 rounded-lg border p-3 ${done ? 'border-primary/20 bg-primary/5' : 'border-warning/30 bg-warning/5'}`}>
+      {done
+        ? <CheckCircle2 className="h-4 w-4 text-primary shrink-0 mt-0.5" />
+        : <Circle className="h-4 w-4 text-warning shrink-0 mt-0.5" />}
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-1.5">
+          <Icon className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+          <span className="text-xs font-medium text-foreground">{title}</span>
+        </div>
+        <p className="text-[11px] text-muted-foreground mt-0.5">{desc}</p>
+      </div>
+      {!done && (
+        <Button size="sm" variant="outline" className="h-7 gap-1 text-xs shrink-0" onClick={onAction}>
+          {actionLabel}
+          <ArrowRight className="h-3 w-3" />
+        </Button>
+      )}
+    </div>
+  );
+}
+
 export default function SettingsPage() {
-  const { user, ownerId, isAccountant } = useAuth();
+  const { user, ownerId, isAccountant, isOwner } = useAuth();
+  const setup = useSetupStatus();
+  const methodsSectionRef = useRef<HTMLDivElement>(null);
+  const seedSectionRef = useRef<HTMLDivElement>(null);
   const [wizardOpen, setWizardOpen] = useState(false);
   const [personalCats, setPersonalCats] = useState<CategoryOption[]>([]);
   const [businessCats, setBusinessCats] = useState<CategoryOption[]>([]);
@@ -218,6 +254,7 @@ export default function SettingsPage() {
     });
     setNewMethod({ name: '', mode: 'personal', account_type: 'credit_card', match_pattern: '' });
     await loadMethods();
+    setup.reload();
     toast.success(`Method "${name}" added`);
   };
 
@@ -315,6 +352,7 @@ export default function SettingsPage() {
         await loadRules();
       }
       await loadCategories();
+      setup.reload();
       toast.success(`Seeded ${merchantMap.size} merchants${!isIncome ? `, ${newCatCount} new categories, ${ruleCount} auto-rules` : ''} from ${parsed.length} transactions`);
     } catch (err: any) { toast.error(err.message); }
     finally { setLoading(false); }
@@ -456,6 +494,43 @@ export default function SettingsPage() {
         </div>
 
         <div className="space-y-4">
+          {/* Setup checklist — owner only */}
+          {isOwner && !setup.loading && (
+            <div className="glass-panel p-4">
+              {setup.isReady ? (
+                <div className="flex items-center gap-2 text-sm text-foreground">
+                  <CheckCircle2 className="h-4 w-4 text-primary shrink-0" />
+                  <span>You're all set — uploads are ready to import accurately.</span>
+                </div>
+              ) : (
+                <>
+                  <h3 className="text-sm font-medium text-foreground mb-1">Finish setup to get accurate results</h3>
+                  <p className="text-[11px] text-muted-foreground mb-3">
+                    Complete these steps before uploading your statements so transactions get categorized correctly.
+                  </p>
+                  <div className="space-y-2">
+                    <SetupRow
+                      done={setup.hasMethods}
+                      icon={CreditCard}
+                      title="Add your payment methods"
+                      desc="Register your cards and bank accounts so uploads tag to the right account."
+                      actionLabel="Add methods"
+                      onAction={() => methodsSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                    />
+                    <SetupRow
+                      done={setup.hasReferenceData}
+                      icon={Database}
+                      title="Seed a reference statement"
+                      desc="Import a historical CSV to teach the categorizer your merchants and categories."
+                      actionLabel="Seed history"
+                      onAction={() => seedSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                    />
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
           {/* Categories */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <CategoryList cats={personalCats} mode="personal" newVal={newCatPersonal} setNewVal={setNewCatPersonal} />
@@ -463,7 +538,7 @@ export default function SettingsPage() {
           </div>
 
           {/* Payment Methods */}
-          <div className="glass-panel p-4">
+          <div ref={methodsSectionRef} className="glass-panel p-4 scroll-mt-20">
             <h3 className="text-sm font-medium text-foreground mb-1">Payment Methods</h3>
             <p className="text-[11px] text-muted-foreground mb-3">
               Register your credit cards and bank accounts. The filename keyword auto-tags uploaded CSVs to the right account.
@@ -660,7 +735,7 @@ export default function SettingsPage() {
 
 
           {/* Historical Seed Import */}
-          <div className="glass-panel p-4">
+          <div ref={seedSectionRef} className="glass-panel p-4 scroll-mt-20">
             <h3 className="text-sm font-medium text-foreground mb-3">Import Historical CSV (Seed)</h3>
             <p className="text-[11px] text-muted-foreground mb-3">Build merchant memory from historical data. Upload expenses and income separately for each mode.</p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
