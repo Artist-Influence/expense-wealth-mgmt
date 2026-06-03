@@ -37,6 +37,16 @@ const STEPS: OnboardingStep[] = [
     ),
   },
   {
+    icon: Layers,
+    key: 'usage',
+    title: 'How will you use this?',
+    body: (
+      <>
+        Pick how you'll use the app so we can keep it focused. You can change this anytime in Settings.
+      </>
+    ),
+  },
+  {
     icon: Upload,
     title: '1 · Upload your statements',
     body: (
