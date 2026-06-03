@@ -106,6 +106,7 @@ export default function Income() {
         .from('income_transactions')
         .select('*')
         .eq('owner_id', ownerId!)
+        .is('deleted_at', null)
         .order('date', { ascending: false })
         .range(from, from + pageSize - 1);
       if (error) { toast.error('Failed to load income'); console.error(error); break; }
@@ -403,7 +404,7 @@ export default function Income() {
     if (selectedIds.size === 0) return;
     if (!confirm(`Delete ${selectedIds.size} income transaction(s)? This cannot be undone.`)) return;
     const ids = Array.from(selectedIds);
-    const { error } = await supabase.from('income_transactions').delete().in('id', ids);
+    const { error } = await supabase.from('income_transactions').update({ deleted_at: new Date().toISOString() } as never).in('id', ids);
     if (error) toast.error('Delete failed');
     else {
       setTransactions(prev => prev.filter(t => !ids.includes(t.id)));

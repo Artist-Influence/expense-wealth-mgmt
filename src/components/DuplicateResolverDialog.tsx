@@ -139,7 +139,7 @@ export function DuplicateResolverDialog({
     if (!confirm(`Permanently delete ${loserIds.length} row${loserIds.length > 1 ? 's' : ''}? This cannot be undone.`)) return;
     setBusyId(clusterKey);
     try {
-      const { error } = await supabase.from('transactions_uploaded').delete().in('id', loserIds);
+      const { error } = await supabase.from('transactions_uploaded').update({ deleted_at: new Date().toISOString() } as never).in('id', loserIds);
       if (error) throw error;
       setDismissedIds(prev => new Set([...prev, ...loserIds]));
       toast.success(`Deleted ${loserIds.length} row${loserIds.length > 1 ? 's' : ''}`);
@@ -175,7 +175,7 @@ export function DuplicateResolverDialog({
     if (!confirm(`Delete ${loserIds.length} duplicate income row${loserIds.length > 1 ? 's' : ''}? Keeps the oldest.`)) return;
     setBusyId(clusterKey);
     try {
-      const { error } = await supabase.from('income_transactions').delete().in('id', loserIds);
+      const { error } = await supabase.from('income_transactions').update({ deleted_at: new Date().toISOString() } as never).in('id', loserIds);
       if (error) throw error;
       setDismissedIds(prev => new Set([...prev, ...loserIds]));
       toast.success(`Deleted ${loserIds.length} duplicate income row${loserIds.length > 1 ? 's' : ''}`);
