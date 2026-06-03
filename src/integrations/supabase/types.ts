@@ -20,6 +20,7 @@ export type Database = {
           as_of_date: string
           balance: number
           created_at: string
+          deleted_at: string | null
           id: string
           owner_id: string
           updated_at: string
@@ -29,6 +30,7 @@ export type Database = {
           as_of_date: string
           balance?: number
           created_at?: string
+          deleted_at?: string | null
           id?: string
           owner_id: string
           updated_at?: string
@@ -38,6 +40,7 @@ export type Database = {
           as_of_date?: string
           balance?: number
           created_at?: string
+          deleted_at?: string | null
           id?: string
           owner_id?: string
           updated_at?: string
@@ -100,6 +103,7 @@ export type Database = {
       allocation_plans: {
         Row: {
           created_at: string
+          deleted_at: string | null
           emergency_fund_amount: number
           free_cash: number
           id: string
@@ -114,6 +118,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          deleted_at?: string | null
           emergency_fund_amount?: number
           free_cash?: number
           id?: string
@@ -128,6 +133,7 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          deleted_at?: string | null
           emergency_fund_amount?: number
           free_cash?: number
           id?: string
@@ -229,6 +235,39 @@ export type Database = {
           usage_profile?: string
           wealth_target_amount?: number
           wealth_target_year?: number
+        }
+        Relationships: []
+      }
+      audit_logs: {
+        Row: {
+          actor_id: string | null
+          created_at: string
+          entity: string | null
+          entity_id: string | null
+          event_type: string
+          id: string
+          owner_id: string
+          summary: Json | null
+        }
+        Insert: {
+          actor_id?: string | null
+          created_at?: string
+          entity?: string | null
+          entity_id?: string | null
+          event_type: string
+          id?: string
+          owner_id: string
+          summary?: Json | null
+        }
+        Update: {
+          actor_id?: string | null
+          created_at?: string
+          entity?: string | null
+          entity_id?: string | null
+          event_type?: string
+          id?: string
+          owner_id?: string
+          summary?: Json | null
         }
         Relationships: []
       }
@@ -363,12 +402,37 @@ export type Database = {
         }
         Relationships: []
       }
+      delegated_access: {
+        Row: {
+          created_at: string
+          grantee_user_id: string
+          id: string
+          owner_id: string
+          role: Database["public"]["Enums"]["app_role"]
+        }
+        Insert: {
+          created_at?: string
+          grantee_user_id: string
+          id?: string
+          owner_id: string
+          role: Database["public"]["Enums"]["app_role"]
+        }
+        Update: {
+          created_at?: string
+          grantee_user_id?: string
+          id?: string
+          owner_id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+        }
+        Relationships: []
+      }
       income_transactions: {
         Row: {
           allocation_month: string | null
           amount: number | null
           created_at: string
           date: string | null
+          deleted_at: string | null
           description_normalized: string | null
           description_raw: string | null
           duplicate_of_income_id: string | null
@@ -391,6 +455,7 @@ export type Database = {
           amount?: number | null
           created_at?: string
           date?: string | null
+          deleted_at?: string | null
           description_normalized?: string | null
           description_raw?: string | null
           duplicate_of_income_id?: string | null
@@ -413,6 +478,7 @@ export type Database = {
           amount?: number | null
           created_at?: string
           date?: string | null
+          deleted_at?: string | null
           description_normalized?: string | null
           description_raw?: string | null
           duplicate_of_income_id?: string | null
@@ -457,6 +523,7 @@ export type Database = {
           contributions_ytd: number
           created_at: string
           current_balance: number
+          deleted_at: string | null
           id: string
           is_active: boolean
           mode: string
@@ -476,6 +543,7 @@ export type Database = {
           contributions_ytd?: number
           created_at?: string
           current_balance?: number
+          deleted_at?: string | null
           id?: string
           is_active?: boolean
           mode?: string
@@ -495,6 +563,7 @@ export type Database = {
           contributions_ytd?: number
           created_at?: string
           current_balance?: number
+          deleted_at?: string | null
           id?: string
           is_active?: boolean
           mode?: string
@@ -654,6 +723,7 @@ export type Database = {
       reimbursement_groups: {
         Row: {
           created_at: string
+          deleted_at: string | null
           id: string
           notes: string | null
           owner_id: string
@@ -668,6 +738,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          deleted_at?: string | null
           id?: string
           notes?: string | null
           owner_id: string
@@ -682,6 +753,7 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          deleted_at?: string | null
           id?: string
           notes?: string | null
           owner_id?: string
@@ -770,6 +842,7 @@ export type Database = {
           counts_toward_true_personal_spend: boolean
           created_at: string
           date: string | null
+          deleted_at: string | null
           description_normalized: string | null
           description_raw: string | null
           direction: string | null
@@ -802,6 +875,7 @@ export type Database = {
           predicted_method: string | null
           predicted_notes: string | null
           receipt_attached: boolean
+          receipt_path: string | null
           receipt_required: boolean
           recurrence_frequency: string | null
           recurring_group_id: string | null
@@ -827,6 +901,7 @@ export type Database = {
           counts_toward_true_personal_spend?: boolean
           created_at?: string
           date?: string | null
+          deleted_at?: string | null
           description_normalized?: string | null
           description_raw?: string | null
           direction?: string | null
@@ -859,6 +934,7 @@ export type Database = {
           predicted_method?: string | null
           predicted_notes?: string | null
           receipt_attached?: boolean
+          receipt_path?: string | null
           receipt_required?: boolean
           recurrence_frequency?: string | null
           recurring_group_id?: string | null
@@ -884,6 +960,7 @@ export type Database = {
           counts_toward_true_personal_spend?: boolean
           created_at?: string
           date?: string | null
+          deleted_at?: string | null
           description_normalized?: string | null
           description_raw?: string | null
           direction?: string | null
@@ -916,6 +993,7 @@ export type Database = {
           predicted_method?: string | null
           predicted_notes?: string | null
           receipt_attached?: boolean
+          receipt_path?: string | null
           receipt_required?: boolean
           recurrence_frequency?: string | null
           recurring_group_id?: string | null
@@ -1048,12 +1126,30 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      has_delegated_access: {
+        Args: {
+          _grantee: string
+          _owner: string
+          _role: Database["public"]["Enums"]["app_role"]
+        }
+        Returns: boolean
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
           _user_id: string
         }
         Returns: boolean
+      }
+      log_event: {
+        Args: {
+          _entity?: string
+          _entity_id?: string
+          _event_type: string
+          _owner: string
+          _summary?: Json
+        }
+        Returns: undefined
       }
     }
     Enums: {

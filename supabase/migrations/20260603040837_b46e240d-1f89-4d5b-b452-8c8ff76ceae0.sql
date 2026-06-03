@@ -1,0 +1,1 @@
+ALTER TABLE public.transactions_uploaded ADD COLUMN IF NOT EXISTS receipt_path text;

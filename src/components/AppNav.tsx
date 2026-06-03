@@ -48,6 +48,7 @@ export function AppNav() {
         .from('transactions_uploaded')
         .select('id', { count: 'exact', head: true })
         .eq('owner_id', ownerId!)
+        .is('deleted_at', null)
         .in('review_status', ['needs_review', 'suggested', 'ai_suggested']);
       return count || 0;
     },

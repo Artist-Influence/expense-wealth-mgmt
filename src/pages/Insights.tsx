@@ -199,7 +199,7 @@ export default function Insights() {
       const { data } = await supabase
         .from('transactions_uploaded')
         .select('date, description_raw, description_normalized, amount, final_category, predicted_category, final_method, predicted_method, review_status, is_transfer, transfer_type, exclude_from_expense_totals, parse_status, is_split_parent')
-        .eq('owner_id', ownerId!).eq('mode', mode).neq('parse_status', 'parse_error')
+        .eq('owner_id', ownerId!).is('deleted_at', null).eq('mode', mode).neq('parse_status', 'parse_error')
         .range(from, from + pageSize - 1);
       if (data) allData = [...allData, ...(data as Transaction[])];
       hasMore = (data?.length ?? 0) === pageSize;

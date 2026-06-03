@@ -121,6 +121,7 @@ export default function Accountant() {
         .from('transactions_uploaded')
         .select('*')
         .eq('owner_id', ownerId!)
+        .is('deleted_at', null)
         .gte('date', dateRange.start)
         .lte('date', dateRange.end)
         .order('date');
@@ -137,6 +138,7 @@ export default function Accountant() {
         .from('income_transactions')
         .select('*')
         .eq('owner_id', ownerId!)
+        .is('deleted_at', null)
         .gte('date', dateRange.start)
         .lte('date', dateRange.end)
         .order('date');

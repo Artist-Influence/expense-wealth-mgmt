@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { MethodSelect } from '@/components/MethodSelect';
 import type { PaymentMethod } from '@/hooks/usePaymentMethods';
+import { ReceiptManager } from '@/components/ReceiptManager';
 
 interface Transaction {
   id: string;
@@ -48,6 +49,7 @@ interface Transaction {
   business_purpose: string | null;
   receipt_required: boolean;
   receipt_attached: boolean;
+  receipt_path?: string | null;
   parse_status: string | null;
   duplicate_status: string | null;
   is_transfer: boolean | null;
@@ -74,6 +76,8 @@ interface TransactionDetailDrawerProps {
   onToggleTransfer: (tx: Transaction) => Promise<void>;
   onSplit?: (tx: Transaction) => void;
   onAddCategory?: () => void;
+  ownerId?: string | null;
+  readOnly?: boolean;
   /** When set, drawer auto-applies this value to its category field, then clears it via onPendingCategoryConsumed. */
   pendingCategoryToSelect?: string | null;
   onPendingCategoryConsumed?: () => void;
@@ -110,6 +114,8 @@ export function TransactionDetailDrawer({
   onToggleTransfer,
   onSplit,
   onAddCategory,
+  ownerId,
+  readOnly,
   pendingCategoryToSelect,
   onPendingCategoryConsumed,
 }: TransactionDetailDrawerProps) {
@@ -438,11 +444,18 @@ export function TransactionDetailDrawer({
                 <Textarea value={editValues.business_purpose} onChange={e => setEditValues(prev => ({ ...prev, business_purpose: e.target.value }))} className="mt-1 text-xs min-h-[50px]" placeholder="Why was this expense incurred for work?" />
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <Badge variant="outline" className={`text-xs ${tx.receipt_attached ? 'border-green-400/30 text-green-400' : 'border-muted-foreground/30 text-muted-foreground'}`}>
                   {tx.receipt_attached ? '✓ Receipt attached' : 'No receipt'}
                 </Badge>
+                <ReceiptManager
+                  transactionId={tx.id}
+                  ownerId={ownerId ?? null}
+                  receiptPath={tx.receipt_path ?? null}
+                  readOnly={readOnly}
+                />
               </div>
+
             </div>
             <Separator className="mb-4" />
           </>

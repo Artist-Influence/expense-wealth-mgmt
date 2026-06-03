@@ -16,6 +16,7 @@ import { previewCsvFile, parseCsvFileWithMapping, type ColumnMapping, type Parse
 import { updateMerchantMemory } from '@/lib/categorization-engine';
 import { SeedMappingDialog } from '@/components/SeedMappingDialog';
 import { OnboardingWizard } from '@/components/OnboardingWizard';
+import { MfaCard } from '@/components/MfaCard';
 import type { PaymentMethod } from '@/hooks/usePaymentMethods';
 
 const STOP_WORDS = new Set(['THE', 'AND', 'INC', 'LLC', 'LTD', 'FOR', 'FROM', 'WITH', 'COM', 'WWW', 'HTTP', 'HTTPS', 'NET', 'ORG', 'CO', 'USA', 'TST', 'SQ', 'POS', 'DES', 'ACH', 'REF', 'TXN', 'PMT', 'CKS', 'INT', 'FEE', 'TAX', 'PRE', 'ATM', 'WEB', 'TEL', 'PPD', 'CCD']);
@@ -497,6 +498,9 @@ export default function SettingsPage() {
         </div>
 
         <div className="space-y-4">
+          {/* Account security — 2FA (all accounts) */}
+          <MfaCard />
+
           {/* Setup checklist — owner only */}
           {isOwner && !setup.loading && (
             <div className="glass-panel p-4">

@@ -256,7 +256,8 @@ export default function Expenses() {
       let q = supabase
         .from('transactions_uploaded')
         .select('amount, transaction_mode, mode, is_split_parent, is_transfer, exclude_from_expense_totals, is_non_expense_cash_movement, parse_status, counts_toward_true_personal_spend, counts_toward_true_business_spend, is_reimbursable, reimbursement_status, date')
-        .eq('owner_id', ownerId!);
+        .eq('owner_id', ownerId!)
+        .is('deleted_at', null);
       if (isInvestor) q = q.eq('mode', 'business');
       const { data } = await q.range(from, from + pageSize - 1);
       if (data) all = [...all, ...(data as unknown as AllModeRow[])];
@@ -290,6 +291,7 @@ export default function Expenses() {
         .from('transactions_uploaded')
         .select('*')
         .eq('owner_id', ownerId!)
+        .is('deleted_at', null)
         .eq('transaction_mode', mode)
         .order('date', { ascending: false })
         .range(from, from + pageSize - 1);
@@ -997,14 +999,15 @@ export default function Expenses() {
       affectedTxs.map(t => t.upload_batch_id).filter(Boolean) as string[]
     )];
 
-    const { error } = await supabase.from('transactions_uploaded').delete().in('id', ids);
+    const { error } = await supabase.from('transactions_uploaded').update({ deleted_at: new Date().toISOString() } as never).in('id', ids);
     if (error) { toast.error('Failed to delete'); return; }
 
     for (const batchId of affectedBatchIds) {
       const { count } = await supabase
         .from('transactions_uploaded')
         .select('id', { count: 'exact', head: true })
-        .eq('upload_batch_id', batchId);
+        .eq('upload_batch_id', batchId)
+        .is('deleted_at', null);
       if (count === 0) {
         await supabase.from('upload_batches').delete().eq('id', batchId);
         setFileQueue(prev => prev.filter(item => item.result?.batchId !== batchId));
@@ -2313,6 +2316,8 @@ export default function Expenses() {
           setAddCategoryTarget({ kind: 'drawer' });
           setAddCategoryOpen(true);
         }}
+        ownerId={ownerId}
+        readOnly={isAccountant || isInvestor}
         pendingCategoryToSelect={pendingDrawerCategory}
         onPendingCategoryConsumed={() => setPendingDrawerCategory(null)}
       />
