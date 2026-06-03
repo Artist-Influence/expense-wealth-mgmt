@@ -10,10 +10,11 @@ import { Slider } from '@/components/ui/slider';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
-import { Plus, Trash2, ChevronDown, Zap, Save, Wand2 } from 'lucide-react';
+import { Plus, Trash2, ChevronDown, Zap, Save, Wand2, HelpCircle } from 'lucide-react';
 import { previewCsvFile, parseCsvFileWithMapping, type ColumnMapping, type ParsePreview } from '@/lib/csv-parser';
 import { updateMerchantMemory } from '@/lib/categorization-engine';
 import { SeedMappingDialog } from '@/components/SeedMappingDialog';
+import { OnboardingWizard } from '@/components/OnboardingWizard';
 import type { PaymentMethod } from '@/hooks/usePaymentMethods';
 
 const STOP_WORDS = new Set(['THE', 'AND', 'INC', 'LLC', 'LTD', 'FOR', 'FROM', 'WITH', 'COM', 'WWW', 'HTTP', 'HTTPS', 'NET', 'ORG', 'CO', 'USA', 'TST', 'SQ', 'POS', 'DES', 'ACH', 'REF', 'TXN', 'PMT', 'CKS', 'INT', 'FEE', 'TAX', 'PRE', 'ATM', 'WEB', 'TEL', 'PPD', 'CCD']);
@@ -116,6 +117,7 @@ const emptyRule = {
 
 export default function SettingsPage() {
   const { user, ownerId, isAccountant } = useAuth();
+  const [wizardOpen, setWizardOpen] = useState(false);
   const [personalCats, setPersonalCats] = useState<CategoryOption[]>([]);
   const [businessCats, setBusinessCats] = useState<CategoryOption[]>([]);
   const [newCatPersonal, setNewCatPersonal] = useState('');
@@ -438,10 +440,19 @@ export default function SettingsPage() {
   return (
     <div className="min-h-screen bg-background">
       <AppNav />
+      <OnboardingWizard open={wizardOpen} onClose={() => setWizardOpen(false)} persistOnComplete={false} />
       <div className="container py-6 animate-fade-in max-w-4xl">
-        <div className="mb-6">
-          <h1 className="text-lg font-semibold text-foreground">Settings</h1>
-          <p className="text-sm text-muted-foreground">Manage categories, thresholds, rules, and import logic</p>
+        <div className="mb-6 flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-lg font-semibold text-foreground">Settings</h1>
+            <p className="text-sm text-muted-foreground">Manage categories, thresholds, rules, and import logic</p>
+          </div>
+          {!isAccountant && (
+            <Button variant="outline" size="sm" onClick={() => setWizardOpen(true)} className="gap-1.5 shrink-0">
+              <HelpCircle className="h-3.5 w-3.5" />
+              Replay walkthrough
+            </Button>
+          )}
         </div>
 
         <div className="space-y-4">

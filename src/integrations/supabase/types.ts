@@ -158,6 +158,7 @@ export type Database = {
           monthly_business_expense_target: number
           monthly_personal_spend_limit: number
           monthly_savings_goal: number
+          onboarding_completed: boolean
           owner_id: string
           passcode_enabled: boolean
           passcode_hash: string | null
@@ -186,6 +187,7 @@ export type Database = {
           monthly_business_expense_target?: number
           monthly_personal_spend_limit?: number
           monthly_savings_goal?: number
+          onboarding_completed?: boolean
           owner_id: string
           passcode_enabled?: boolean
           passcode_hash?: string | null
@@ -214,6 +216,7 @@ export type Database = {
           monthly_business_expense_target?: number
           monthly_personal_spend_limit?: number
           monthly_savings_goal?: number
+          onboarding_completed?: boolean
           owner_id?: string
           passcode_enabled?: boolean
           passcode_hash?: string | null

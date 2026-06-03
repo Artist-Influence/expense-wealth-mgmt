@@ -9,6 +9,7 @@ import { ImportPreviewDialog, type FilePreviewInfo } from '@/components/ImportPr
 import { TransactionDetailDrawer } from '@/components/TransactionDetailDrawer';
 import { SplitTransactionDialog } from '@/components/SplitTransactionDialog';
 import { AddCategoryDialog } from '@/components/AddCategoryDialog';
+import { OnboardingWizard } from '@/components/OnboardingWizard';
 import { DuplicateResolverDialog, type DupClusterRow } from '@/components/DuplicateResolverDialog';
 import { previewCsvFile, parseCsvFileWithMapping, type ParsePreview, type ColumnMapping } from '@/lib/csv-parser';
 import { categorizeTransactions, categorizeWithAI, updateMerchantMemory, isDeductibleCategory } from '@/lib/categorization-engine';
@@ -91,7 +92,8 @@ const MODE_CONFIG: Record<TransactionMode, { label: string; color: string; activ
 };
 
 export default function Expenses() {
-  const { user, isInvestor, isAccountant, ownerId } = useAuth();
+  const { user, isInvestor, isAccountant, isOwner, ownerId } = useAuth();
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
   const { methods: paymentMethods } = usePaymentMethods();
   const [mode, setMode] = useState<TransactionMode>(isInvestor ? 'business' : 'personal');
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -154,6 +156,23 @@ export default function Expenses() {
   useEffect(() => {
     if (user && ownerId) { loadTransactions(); loadCategories(); loadAllModeTransactions(); }
   }, [user, ownerId, mode]);
+
+  // Show the setup walkthrough on the owner's first visit
+  useEffect(() => {
+    if (!isOwner || !ownerId) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from('app_settings')
+        .select('onboarding_completed')
+        .eq('owner_id', ownerId)
+        .maybeSingle();
+      if (!cancelled && data && data.onboarding_completed === false) {
+        setOnboardingOpen(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isOwner, ownerId]);
 
   // Apply incoming URL params (e.g. linked from Allocations review warning).
   // Supported: ?month=YYYY-MM, &scope=personal|business|reimbursable_work, &review=unreviewed|<status>
@@ -1602,6 +1621,7 @@ export default function Expenses() {
 
   return (
     <div className="min-h-screen bg-background">
+      <OnboardingWizard open={onboardingOpen} onClose={() => setOnboardingOpen(false)} />
       <AppNav />
       <div className="container py-4 animate-fade-in">
         {/* Top Control Bar */}

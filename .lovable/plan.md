@@ -1,74 +1,40 @@
-## Goal
+# Setup Wizard for New Owners
 
-Turn the `/assistant` chatbot into a finance analyst that **calculates first, explains second**. The AI never invents numbers — it only narrates results returned by deterministic backend functions, always states the date range/scope, separates profit vs cash flow vs transfers, and flags messy data.
+Add a multi-step welcome modal that introduces the owner to the tool's workflow the first time they sign in, with the ability to replay it later from Settings.
 
-Grounded in your real data: 1,884 expense rows + 224 income rows (Dec 2025–Jun 2026), 36 cash-balance snapshots, 4 investment accounts. Today `treatment_type` only knows expense/transfer/credit_card_payment/refund, and business↔personal moves are generic `account_transfer`. We will add the missing classifications.
+## Behavior
 
----
+- Shows automatically the first time the **owner** logs in (investors and accountants never see it).
+- Dismissable; completion is remembered so it won't reappear.
+- Can be reopened anytime from a "Replay walkthrough" button in Settings.
 
-## Layer 1 — Add missing transaction classifications (migration + reclass)
+## Wizard content (steps)
 
-Extend `transactions_uploaded.treatment_type` usage with new values (kept as text, no enum change needed): `owner_draw`, `owner_contribution`, `loan_proceeds`, `loan_repayment`, `tax_payment`, `payroll`, `contractor`, `investment`. Add helper columns:
+A clean glass-panel dialog matching the dark glassmorphism theme, with a progress dots indicator and Back / Next / Finish buttons. Steps:
 
-- `is_internal_transfer boolean default false`
-- `linked_transaction_id uuid` (paired transfers)
-- `direction text` (inflow/outflow, derived from sign)
-- `recurring_group_id uuid`, `recurrence_frequency text`, `expected_next_date date`
+1. **Welcome** — What this tool is: a single-account cash control system that turns bank/card CSVs into categorized expenses, tracked income, and wealth allocation.
+2. **Upload statements** — Drag CSVs into the Expenses page; the app auto-detects the payment method, prevents duplicates, and runs categorization.
+3. **Review & categorize** — Only reviewed transactions count toward totals. Explains the red badge in the nav, approving/editing categories, splitting mixed-use charges, and marking transfers.
+4. **Income & reimbursements** — Upload income CSVs; separate true earnings from reimbursements/fronted money.
+5. **Wealth, allocations & tax** — Set wealth targets, allocate investable surplus, and view tax reserve estimates.
+6. **Assistant & monthly close** — Ask the AI assistant financial questions, and use the guided Close Month workflow to finalize each period.
+7. **Finish** — Encourages setting preferences in Settings (cash buffers, tax %, goals) and starts the user on the Expenses page.
 
-A one-time backfill (SQL + a reclass pass in the edge function/script) sets:
-- Business→personal `account_transfer` → `owner_draw`; personal→business → `owner_contribution` (detected by `economic_owner` change + transfer pairing).
-- Loan keywords (loan, SBA, advance, line of credit) → `loan_proceeds` (inflow) / `loan_repayment` (outflow).
-- Tax keywords (IRS, NYS DTF, franchise tax, estimated tax) → `tax_payment`.
-- Payroll/contractor keywords → `payroll`/`contractor`.
-- Transfer pairing: match opposite-sign rows, equal/near amount, dates within 0–3 days, transfer-like descriptions → set `is_internal_transfer=true` + link both `linked_transaction_id`.
+Each step has a short title, 2-4 sentences of plain-English guidance, and a relevant lucide icon (reusing the icons already used in the nav).
 
-Import-time classification (in `categorization-engine.ts` / `transfer-detector.ts`) applies the same rules to new CSVs so future imports are correct.
+## Persistence
 
-## Layer 2 — Deterministic calculation module (edge function)
+Add an `onboarding_completed` boolean column (default `false`) to `app_settings`. The wizard reads it on load; clicking Finish or Skip sets it to `true`. The "Replay walkthrough" button in Settings simply reopens the modal without changing the flag (or optionally resets it).
 
-New file `supabase/functions/assistant-chat/finance.ts` exporting pure functions that take `(supabase, ownerId, params)` and return structured numbers. These encode the accounting rules so the AI can't get them wrong:
+## Technical details
 
-- `getIncomeSummary` — gross_income, true_operating_income, refunds, reimbursements, loan_proceeds, owner_contributions, excluded_inflows, by_source/account/month.
-- `getExpenseSummary` — total/operating/personal/business expenses, tax_payments, debt_payments, credit_card_payments, transfers_out, excluded_outflows, by_category/vendor/account/month.
-- `getProfitAndLoss` — gross_revenue, operating_expenses, net_operating_profit, owner_draws, taxes_paid, estimated_tax_reserve, net_cash_after_draws, margin, biggest_categories, MoM change.
-- `getCashFlow` — starting/ending cash (from `account_balance_snapshots`), net change, cash in/out, operating vs transfers/debt/owner-draws split.
-- `getNetWorth` — **assets-only** (cash snapshots + investment_accounts), with explicit `liabilities_tracked: false` warning baked in.
-- `getRunway` — available cash, 3mo/6mo avg burn, runway_months, upcoming recurring, warning flags.
-- `getCategoryDrilldown` / `getMerchantDrilldown` — totals, counts, avg size, top merchants/related txns, MoM.
-- `getRecurring` — subscriptions/fixed overhead via `recurring_group_id` + cadence (reuse `recurrence-detector.ts` logic).
-- `getAnomalies` — categories/merchants up >X% MoM, unusually large txns, income drops, possible duplicates.
-- `getAffordability(amount)` — combines available cash, avg personal+business burn, upcoming fixed expenses, tax reserve, min cash buffer → "yes / no / yes-but" verdict.
-- `getDataQuality` — uncategorized count + value, % of volume/value, unmatched transfers, needs_review count.
+- **Migration**: `ALTER TABLE public.app_settings ADD COLUMN onboarding_completed boolean NOT NULL DEFAULT false;` (existing RLS/grants already cover this table). The Supabase types file regenerates automatically after the migration.
+- **New component** `src/components/OnboardingWizard.tsx` — a controlled `Dialog` (shadcn) holding step state, the step content array, progress dots, and navigation buttons. Props: `open`, `onClose`. On finish/skip it updates `app_settings.onboarding_completed = true` for the current `ownerId`.
+- **Trigger logic**: In `Expenses.tsx` (the `/` landing page), for `isOwner` only, query `app_settings.onboarding_completed` for `ownerId` after auth resolves; if `false`/missing, open the wizard. Gate on role so investors/accountants are excluded.
+- **Replay entry point**: Add a "Walkthrough" / "Replay setup guide" button in `Settings.tsx` that opens the same `OnboardingWizard` with local open state.
+- Styling uses existing semantic tokens (`glass-panel`, `primary`, `muted-foreground`) — no new colors. No backend/business-logic changes beyond the single boolean flag.
 
-Every function honors existing integrity rules (only `COUNTED_STATUSES`, exclude split-parents, exclude transfers/non-expense movements from spend) and returns a `_debug` block: rows included/excluded, filters, warnings.
+## Out of scope
 
-## Layer 3 — Expose as AI tools + harden the prompt
-
-Replace the current thin tools with tools that wrap the Layer-2 functions (`income_summary`, `expense_summary`, `profit_and_loss`, `cash_flow`, `net_worth`, `runway`, `category_drilldown`, `merchant_drilldown`, `recurring`, `anomalies`, `affordability`, `data_quality`), keeping `get_today`.
-
-Rewrite `PLATFORM_GUIDE` with explicit rules:
-- **Intent → date → scope → function → answer.** Always call a tool; never invent figures.
-- **Default definitions:** "make" = gross income then net operating profit; "spend" = true expenses excluding transfers/CC payments (mention total outflow if different); "profit" = business income − business operating expenses (exclude draws/transfers/CC/loans/contributions); "cash flow" = all movement, broken out; "take home" = owner draws + owner payroll; "net worth" = assets minus liabilities (note liabilities not tracked); "afford" = use affordability function, not raw balance.
-- **Guardrails:** auto-append warnings when uncategorized >5% of value/volume, transfers unmatched, CC import assumed, taxes excluded, cash-basis only, or N txns need review.
-- **Response format:** answer sentence first → bulleted breakdown → one insight → warning if needed.
-
-## Layer 4 — Per-answer audit/debug panel (chat UI)
-
-In `AssistantChat.tsx`, add a collapsible **Audit** panel under each assistant message that reads the `_debug` blocks from that message's tool outputs and shows: parsed intent, date range, filters/scope, function(s) called, rows included/excluded, uncategorized/transfer counts, confidence/data warnings. Built from the existing AI Elements `Tool` parts (no new backend channel needed). Hidden behind a small "Why this answer?" toggle so it doesn't clutter normal use.
-
-## Layer 5 — Saved finance preferences
-
-Add a `finance_preferences` row (extend `app_settings` or a new table) for: min personal/business cash buffer, tax reserve %, monthly savings goal, personal/business spend targets, categories excluded from reports, cash vs accrual basis. The affordability/runway/tax functions read these; a small section in `/settings` lets you edit them.
-
-## Deploy & verify
-
-- Run migration, backfill reclass, redeploy `assistant-chat`.
-- Test each scenario from the spec (business income, personal spend, profit, "why did cash go down", Amex spend, owner draw, CC payment, loan proceeds, refund, uncategorized warning) via direct edge-function calls and confirm numbers match SQL and the audit panel reflects the right filters.
-
----
-
-### Technical notes
-- No enum migration required — `treatment_type` is already free text; we add new allowed values + helper columns and GRANTs stay unchanged (columns added to existing table).
-- Net worth is assets-only by your choice; the tool hard-codes a "liabilities not tracked" warning so the AI always discloses it.
-- Recurring/anomaly logic reuses `recurrence-detector.ts` rather than reinventing it.
-- All AI calls, tools, and prompts stay server-side in the edge function; the client only renders streamed parts + the audit panel.
+- No interactive element-pointing tour (modal only).
+- No changes to categorization, income, tax, or allocation logic.
