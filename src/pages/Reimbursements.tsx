@@ -384,7 +384,9 @@ export default function Reimbursements() {
             <p className="text-sm text-muted-foreground mt-1">Track expenses you fronted — get your money back.</p>
           </div>
           <div className="flex items-center gap-2">
-            <ModeScopeToggle value={scope} onChange={setScope} storageKey="reimbursements_scope" />
+            {profile === 'both' && (
+              <ModeScopeToggle value={scope} onChange={setScope} storageKey="reimbursements_scope" />
+            )}
             <Button variant="outline" size="sm" onClick={exportCsv} className="gap-1.5">
               <Download className="h-3.5 w-3.5" /> Export
             </Button>
