@@ -2316,6 +2316,8 @@ export default function Expenses() {
           setAddCategoryTarget({ kind: 'drawer' });
           setAddCategoryOpen(true);
         }}
+        ownerId={ownerId}
+        readOnly={isAccountant || isInvestor}
         pendingCategoryToSelect={pendingDrawerCategory}
         onPendingCategoryConsumed={() => setPendingDrawerCategory(null)}
       />
