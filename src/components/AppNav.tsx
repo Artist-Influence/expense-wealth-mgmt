@@ -103,7 +103,10 @@ export function AppNav() {
             <span className="font-semibold text-foreground text-xs">Expense Memory</span>
           </Link>
           
-          {navItems.filter(({ to }) => !isInvestor || INVESTOR_NAV.includes(to)).map(({ to, label, icon: Icon, active, showBadge }) => {
+          {navItems
+            .filter(({ to }) => !isInvestor || INVESTOR_NAV.includes(to))
+            .filter(({ to }) => isInvestor || isAccountant || profile !== 'personal' || !BUSINESS_ONLY_NAV.includes(to))
+            .map(({ to, label, icon: Icon, active, showBadge }) => {
             const isActive = to === '/' ? location.pathname === '/' : location.pathname.startsWith(to);
             
             if (!active) {
