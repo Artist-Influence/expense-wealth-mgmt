@@ -462,6 +462,43 @@ export default function SettingsPage() {
         </div>
 
         <div className="space-y-4">
+          {/* Setup checklist — owner only */}
+          {isOwner && !setup.loading && (
+            <div className="glass-panel p-4">
+              {setup.isReady ? (
+                <div className="flex items-center gap-2 text-sm text-foreground">
+                  <CheckCircle2 className="h-4 w-4 text-primary shrink-0" />
+                  <span>You're all set — uploads are ready to import accurately.</span>
+                </div>
+              ) : (
+                <>
+                  <h3 className="text-sm font-medium text-foreground mb-1">Finish setup to get accurate results</h3>
+                  <p className="text-[11px] text-muted-foreground mb-3">
+                    Complete these steps before uploading your statements so transactions get categorized correctly.
+                  </p>
+                  <div className="space-y-2">
+                    <SetupRow
+                      done={setup.hasMethods}
+                      icon={CreditCard}
+                      title="Add your payment methods"
+                      desc="Register your cards and bank accounts so uploads tag to the right account."
+                      actionLabel="Add methods"
+                      onAction={() => methodsSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                    />
+                    <SetupRow
+                      done={setup.hasReferenceData}
+                      icon={Database}
+                      title="Seed a reference statement"
+                      desc="Import a historical CSV to teach the categorizer your merchants and categories."
+                      actionLabel="Seed history"
+                      onAction={() => seedSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                    />
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
           {/* Categories */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <CategoryList cats={personalCats} mode="personal" newVal={newCatPersonal} setNewVal={setNewCatPersonal} />
