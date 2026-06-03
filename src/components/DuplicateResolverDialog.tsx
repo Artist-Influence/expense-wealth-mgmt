@@ -203,8 +203,8 @@ export function DuplicateResolverDialog({
                 <p className="text-sm">No {tab === 'exact' ? 'exact expense' : tab === 'near' ? 'possible' : tab === 'cross' ? 'cross-mode' : 'income'} duplicates found.</p>
               </div>
             ) : (
-              <ScrollArea className="h-[55vh] pr-3">
-                <div className="space-y-3">
+              <ScrollArea className="h-[55vh] w-full pr-3">
+                <div className="space-y-3 w-full min-w-0">
                   {visible.map((cluster, ci) => {
                     const clusterKey = `${tab}-${page}-${ci}`;
                     const rows = cluster.rowIds.map(id => getRow(activeRowIndex, id)).filter(Boolean) as DupClusterRow[];
@@ -215,14 +215,14 @@ export function DuplicateResolverDialog({
                     const isIncome = tab === 'income';
 
                     return (
-                      <div key={clusterKey} className="glass-panel p-3 space-y-2">
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                            <AlertTriangle className="h-3.5 w-3.5 text-warning" />
-                            <span>{rows.length} rows · {fmtMoney(keeper.amount)}</span>
+                      <div key={clusterKey} className="glass-panel p-3 space-y-2 w-full min-w-0 overflow-hidden">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground min-w-0">
+                            <AlertTriangle className="h-3.5 w-3.5 text-warning shrink-0" />
+                            <span className="truncate">{rows.length} rows · {fmtMoney(keeper.amount)}</span>
                           </div>
                           {!isCross && (
-                            <div className="flex items-center gap-1">
+                            <div className="flex flex-wrap items-center gap-1 shrink-0">
                               <Button
                                 size="sm"
                                 variant="outline"
