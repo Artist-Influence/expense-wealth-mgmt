@@ -317,7 +317,8 @@ export default function Expenses() {
         r.amount != null &&
         !r.is_split_parent &&
         !r.parent_transaction_id &&
-        r.review_status !== 'archived'
+        r.review_status !== 'archived' &&
+        r.duplicate_status !== 'not_duplicate'
       );
 
       // Same-mode clustering uses normalized fingerprint already in DB (or recomputed).
