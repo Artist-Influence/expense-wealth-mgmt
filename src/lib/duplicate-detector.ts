@@ -164,12 +164,18 @@ export function findNearClusters(
   const clusters: DuplicateCluster[] = [];
   for (const list of groups.values()) {
     if (list.length < 2) continue;
-    // Recurring-pattern guard: a genuine re-imported duplicate sits on the same
-    // date (or two adjacent dates from posting drift). A group whose rows span
-    // 3+ distinct dates is a recurring charge (e.g. daily transit, repeat
-    // same-amount merchant), not a duplicate — drop it.
-    const distinctDates = new Set(list.map(r => r.date || '')).size;
-    if (distinctDates >= 3) continue;
+    // Recurring-pattern guard: a genuine re-imported duplicate lands on the SAME
+    // date (same charge captured twice from overlapping statements). If every row
+    // in the group is on a different date, it's a recurring charge (daily transit,
+    // repeat same-amount merchant), not a duplicate — drop it. We require at least
+    // one date to be shared by 2+ rows.
+    const dateCounts = new Map<string, number>();
+    for (const r of list) {
+      const d = r.date || '';
+      dateCounts.set(d, (dateCounts.get(d) || 0) + 1);
+    }
+    const hasSharedDate = [...dateCounts.values()].some(c => c >= 2);
+    if (!hasSharedDate) continue;
     list.sort((a, b) => (a.date || '').localeCompare(b.date || '') || (a.created_at || '').localeCompare(b.created_at || ''));
     clusters.push({ kind: 'near', rowIds: list.map(r => r.id) });
   }
