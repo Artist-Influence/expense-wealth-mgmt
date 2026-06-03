@@ -161,10 +161,42 @@ Deno.serve(async (req) => {
     }
     const userId = claimsData.claims.sub as string;
 
-    const body = await req.json();
-    const messages: UIMessage[] = body.messages ?? [];
-    const threadId: string | undefined = body.threadId;
-    const ownerId: string = body.ownerId ?? userId;
+    // Validate request body. Never trust client-supplied shapes.
+    const BodySchema = z.object({
+      messages: z.array(z.any()).min(1).max(200),
+      threadId: z.string().uuid().optional(),
+      ownerId: z.string().uuid().optional(),
+    });
+    const parsedBody = BodySchema.safeParse(await req.json());
+    if (!parsedBody.success) {
+      return new Response(JSON.stringify({ error: "Invalid request" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    const messages: UIMessage[] = parsedBody.data.messages as UIMessage[];
+    const threadId: string | undefined = parsedBody.data.threadId;
+
+    // Derive the effective owner SERVER-SIDE. A client may only act on its own
+    // data, or on an owner that has explicitly delegated access to this user.
+    let ownerId: string = userId;
+    if (parsedBody.data.ownerId && parsedBody.data.ownerId !== userId) {
+      const { data: deleg } = await supabase
+        .from("delegated_access")
+        .select("owner_id")
+        .eq("grantee_user_id", userId)
+        .eq("owner_id", parsedBody.data.ownerId)
+        .in("role", ["accountant", "investor"])
+        .maybeSingle();
+      if (!deleg?.owner_id) {
+        return new Response(JSON.stringify({ error: "Forbidden" }), {
+          status: 403,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      ownerId = deleg.owner_id as string;
+    }
+
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) {
