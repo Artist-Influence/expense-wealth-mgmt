@@ -19,6 +19,7 @@ import {
   Plus, FolderOpen, ChevronDown
 } from 'lucide-react';
 import { ModeScopeToggle, readPersistedScope, type ModeScope } from '@/components/ModeScopeToggle';
+import { useUsageProfile } from '@/hooks/useUsageProfile';
 
 interface ReimbursableTransaction {
   id: string;
