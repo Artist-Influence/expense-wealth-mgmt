@@ -812,7 +812,9 @@ export default function Wealth() {
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-3 flex-wrap">
             <h1 className="text-xl font-semibold text-foreground">Wealth</h1>
-            <ModeScopeToggle value={scope} onChange={setScope} storageKey="wealth_scope" />
+            {profile === 'both' && (
+              <ModeScopeToggle value={scope} onChange={setScope} storageKey="wealth_scope" />
+            )}
             <span className="text-[10px] text-muted-foreground">
               Showing: <span className="text-foreground/80 font-medium">{scope === 'all' ? 'All' : scope === 'business' ? 'Business' : 'Personal'}</span>
             </span>
