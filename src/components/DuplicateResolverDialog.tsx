@@ -70,6 +70,10 @@ export function DuplicateResolverDialog({
   const [tab, setTab] = useState<'exact' | 'near' | 'cross' | 'income'>('exact');
   const [page, setPage] = useState(0);
   const [busyId, setBusyId] = useState<string | null>(null);
+  // IDs of rows whose cluster has been resolved in-session. Used to hide the
+  // cluster immediately (optimistically) instead of waiting for the parent
+  // refresh/sweep round-trip.
+  const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
 
   // Reset state ONLY when the dialog transitions from closed → open.
   // Do NOT re-pick the tab when cluster counts change after an in-session
@@ -78,6 +82,7 @@ export function DuplicateResolverDialog({
   useEffect(() => {
     if (open && !prevOpen.current) {
       setPage(0);
+      setDismissedIds(new Set());
       if (exactClusters.length > 0) setTab('exact');
       else if (incomeClusters.length > 0) setTab('income');
       else if (nearClusters.length > 0) setTab('near');
@@ -87,11 +92,16 @@ export function DuplicateResolverDialog({
     prevOpen.current = open;
   }, [open, exactClusters.length, nearClusters.length, crossModePairs.length, incomeClusters.length]);
 
-  const activeList: { rowIds: string[] }[] =
+  const rawActiveList: { rowIds: string[] }[] =
     tab === 'exact' ? exactClusters
     : tab === 'near' ? nearClusters
     : tab === 'cross' ? crossModePairs
     : incomeClusters;
+  // Hide any cluster that contains a row we've already resolved this session.
+  const activeList = useMemo(
+    () => rawActiveList.filter(c => !c.rowIds.some(id => dismissedIds.has(id))),
+    [rawActiveList, dismissedIds],
+  );
   const activeRowIndex = tab === 'income' ? incomeRowIndex : rowIndex;
 
   const pageCount = Math.max(1, Math.ceil(activeList.length / PAGE_SIZE));
