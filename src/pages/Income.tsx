@@ -61,12 +61,21 @@ const INCOME_TYPE_BADGE: Record<string, { class: string }> = {
 
 export default function Income() {
   const { user, isInvestor, isAccountant, ownerId } = useAuth();
+  const { profile } = useUsageProfile();
+  const lockedMode: 'personal' | 'business' | null =
+    profile === 'personal' ? 'personal' : profile === 'business' ? 'business' : null;
   const [transactions, setTransactions] = useState<IncomeTransaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [filterMode, setFilterMode] = useState<'all' | 'personal' | 'business'>(isInvestor ? 'business' : 'all');
+
+  // Lock the view to the usage profile when it isn't "both"
+  useEffect(() => {
+    if (lockedMode) setFilterMode(lockedMode);
+  }, [lockedMode]);
+
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showManualEntry, setShowManualEntry] = useState(false);
   const [showUploader, setShowUploader] = useState(false);
