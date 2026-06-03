@@ -937,7 +937,7 @@ export default function Insights() {
               </button>
             )}
 
-            {!isInvestor && (
+            {!isInvestor && !lockedMode && (
               <div className="flex rounded-lg border border-border/40 overflow-hidden">
                 <button onClick={() => setMode('personal')} className={`px-3 py-1.5 text-xs font-medium transition-colors ${mode === 'personal' ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground'}`}>
                   Personal
