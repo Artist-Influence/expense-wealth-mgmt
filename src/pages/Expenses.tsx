@@ -95,6 +95,17 @@ const MODE_CONFIG: Record<TransactionMode, { label: string; color: string; activ
 
 export default function Expenses() {
   const { user, isInvestor, isAccountant, isOwner, ownerId } = useAuth();
+  const { profile } = useUsageProfile();
+  const lockedMode: 'personal' | 'business' | null =
+    profile === 'personal' ? 'personal' : profile === 'business' ? 'business' : null;
+  // Which mode tabs to show based on usage profile
+  const visibleModes: TransactionMode[] =
+    profile === 'personal' ? ['personal', 'reimbursable_work']
+    : profile === 'business' ? ['business']
+    : ['personal', 'business', 'reimbursable_work'];
+  // Which summary cards to show
+  const showPersonalCards = !isInvestor && profile !== 'business';
+  const showBusinessCards = profile !== 'personal';
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const { methods: paymentMethods } = usePaymentMethods();
   const setup = useSetupStatus();
