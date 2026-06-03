@@ -95,6 +95,7 @@ export default function Expenses() {
   const { user, isInvestor, isAccountant, isOwner, ownerId } = useAuth();
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const { methods: paymentMethods } = usePaymentMethods();
+  const setup = useSetupStatus();
   const [mode, setMode] = useState<TransactionMode>(isInvestor ? 'business' : 'personal');
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
