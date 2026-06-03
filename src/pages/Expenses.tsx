@@ -297,7 +297,7 @@ export default function Expenses() {
     const tId = toast.loading('Scanning for duplicate transactions…');
     try {
       // Pull a slim row set across ALL modes (cross-mode tab needs it).
-      const rows: { id: string; date: string | null; description_normalized: string | null; description_raw: string | null; amount: number | null; duplicate_fingerprint: string | null; mode: string; created_at: string | null; final_category: string | null; predicted_category: string | null; final_method: string | null; predicted_method: string | null; source_file_name: string | null; source_account_name: string | null; duplicate_status: string | null; is_transfer: boolean | null; is_split_parent: boolean | null; parent_transaction_id: string | null; review_status: string }[] = [];
+      const rows: { id: string; date: string | null; description_normalized: string | null; description_raw: string | null; amount: number | null; duplicate_fingerprint: string | null; mode: string; created_at: string | null; final_category: string | null; predicted_category: string | null; final_method: string | null; predicted_method: string | null; source_file_name: string | null; source_account_name: string | null; duplicate_status: string | null; is_transfer: boolean | null; is_split_parent: boolean | null; parent_transaction_id: string | null; review_status: string; recurring_group_id: string | null }[] = [];
       let from = 0;
       const pageSize = 1000;
       let hasMore = true;
