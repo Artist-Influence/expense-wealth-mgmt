@@ -363,6 +363,30 @@ export type Database = {
         }
         Relationships: []
       }
+      delegated_access: {
+        Row: {
+          created_at: string
+          grantee_user_id: string
+          id: string
+          owner_id: string
+          role: Database["public"]["Enums"]["app_role"]
+        }
+        Insert: {
+          created_at?: string
+          grantee_user_id: string
+          id?: string
+          owner_id: string
+          role: Database["public"]["Enums"]["app_role"]
+        }
+        Update: {
+          created_at?: string
+          grantee_user_id?: string
+          id?: string
+          owner_id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+        }
+        Relationships: []
+      }
       income_transactions: {
         Row: {
           allocation_month: string | null
@@ -1048,6 +1072,14 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      has_delegated_access: {
+        Args: {
+          _grantee: string
+          _owner: string
+          _role: Database["public"]["Enums"]["app_role"]
+        }
+        Returns: boolean
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
