@@ -320,6 +320,7 @@ export default function SettingsPage() {
         await loadRules();
       }
       await loadCategories();
+      setup.reload();
       toast.success(`Seeded ${merchantMap.size} merchants${!isIncome ? `, ${newCatCount} new categories, ${ruleCount} auto-rules` : ''} from ${parsed.length} transactions`);
     } catch (err: any) { toast.error(err.message); }
     finally { setLoading(false); }
