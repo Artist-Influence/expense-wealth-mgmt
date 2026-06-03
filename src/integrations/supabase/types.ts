@@ -161,7 +161,6 @@ export type Database = {
           onboarding_completed: boolean
           owner_id: string
           passcode_enabled: boolean
-          passcode_hash: string | null
           personal_auto_threshold: number
           personal_suggest_threshold: number
           prevent_exact_duplicates: boolean
@@ -191,7 +190,6 @@ export type Database = {
           onboarding_completed?: boolean
           owner_id: string
           passcode_enabled?: boolean
-          passcode_hash?: string | null
           personal_auto_threshold?: number
           personal_suggest_threshold?: number
           prevent_exact_duplicates?: boolean
@@ -221,7 +219,6 @@ export type Database = {
           onboarding_completed?: boolean
           owner_id?: string
           passcode_enabled?: boolean
-          passcode_hash?: string | null
           personal_auto_threshold?: number
           personal_suggest_threshold?: number
           prevent_exact_duplicates?: boolean
@@ -563,6 +560,30 @@ export type Database = {
           owner_id?: string
           raw_example?: string | null
           times_seen?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      owner_secrets: {
+        Row: {
+          created_at: string
+          id: string
+          owner_id: string
+          passcode_hash: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          owner_id: string
+          passcode_hash?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          owner_id?: string
+          passcode_hash?: string | null
           updated_at?: string
         }
         Relationships: []
