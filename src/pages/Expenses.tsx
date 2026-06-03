@@ -226,6 +226,12 @@ export default function Expenses() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Lock the active mode tab to the usage profile when it isn't "both"
+  useEffect(() => {
+    if (lockedMode) setMode((m) => (visibleModes.includes(m) ? m : lockedMode));
+  }, [lockedMode]); // eslint-disable-line react-hooks/exhaustive-deps
+
+
   // All-mode transaction snapshot — needed because `loadTransactions` is
   // already scoped to the active mode tab, but the summary strip compares
   // Personal vs Business side-by-side. We keep this slim (only the math
