@@ -875,6 +875,7 @@ export type Database = {
           predicted_method: string | null
           predicted_notes: string | null
           receipt_attached: boolean
+          receipt_path: string | null
           receipt_required: boolean
           recurrence_frequency: string | null
           recurring_group_id: string | null
@@ -933,6 +934,7 @@ export type Database = {
           predicted_method?: string | null
           predicted_notes?: string | null
           receipt_attached?: boolean
+          receipt_path?: string | null
           receipt_required?: boolean
           recurrence_frequency?: string | null
           recurring_group_id?: string | null
@@ -991,6 +993,7 @@ export type Database = {
           predicted_method?: string | null
           predicted_notes?: string | null
           receipt_attached?: boolean
+          receipt_path?: string | null
           receipt_required?: boolean
           recurrence_frequency?: string | null
           recurring_group_id?: string | null
