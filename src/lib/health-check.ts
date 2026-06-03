@@ -76,7 +76,11 @@ export async function runHealthCheck(userId: string): Promise<HealthCheckSummary
     .eq('owner_id', userId)
     .neq('review_status', 'archived');
 
-  const expRowsTyped = (expRows || []).map((r: any) => ({
+  // Honor the user's "not duplicates" marker everywhere — dismissed rows must
+  // never resurface as exact, near, or cross-mode duplicates.
+  const expRowsActive = (expRows || []).filter((r: any) => r.duplicate_status !== 'not_duplicate');
+
+  const expRowsTyped = expRowsActive.map((r: any) => ({
     id: r.id,
     date: r.date,
     amount: Number(r.amount || 0),
@@ -88,14 +92,14 @@ export async function runHealthCheck(userId: string): Promise<HealthCheckSummary
   const exactIds = new Set<string>();
   for (const c of expExact) for (const id of c.rowIds) exactIds.add(id);
   const expNear = findNearClusters(
-    expRowsTyped.filter((r: any) => r.duplicate_status !== 'not_duplicate'),
+    expRowsTyped,
     exactIds,
     7,
   );
 
   // Cross-mode: same date+amount+normalized desc but mode differs
   const byKey = new Map<string, any[]>();
-  for (const r of expRows || []) {
+  for (const r of expRowsActive) {
     const k = `${r.date || ''}|${Number(r.amount || 0)}|${(r.description_normalized || r.description_raw || '').toUpperCase().trim()}`;
     if (!k.replace(/\|/g, '')) continue;
     const list = byKey.get(k) || [];
