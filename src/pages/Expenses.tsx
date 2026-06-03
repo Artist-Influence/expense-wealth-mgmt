@@ -1620,6 +1620,7 @@ export default function Expenses() {
 
   return (
     <div className="min-h-screen bg-background">
+      <OnboardingWizard open={onboardingOpen} onClose={() => setOnboardingOpen(false)} />
       <AppNav />
       <div className="container py-4 animate-fade-in">
         {/* Top Control Bar */}
