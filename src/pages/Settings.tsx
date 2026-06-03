@@ -116,6 +116,38 @@ const emptyRule = {
   category_output: '', method_output: '', notes_output: '', priority: 100, is_active: true,
 };
 
+function SetupRow({
+  done, icon: Icon, title, desc, actionLabel, onAction,
+}: {
+  done: boolean;
+  icon: React.ComponentType<{ className?: string }>;
+  title: string;
+  desc: string;
+  actionLabel: string;
+  onAction: () => void;
+}) {
+  return (
+    <div className={`flex items-start gap-3 rounded-lg border p-3 ${done ? 'border-primary/20 bg-primary/5' : 'border-warning/30 bg-warning/5'}`}>
+      {done
+        ? <CheckCircle2 className="h-4 w-4 text-primary shrink-0 mt-0.5" />
+        : <Circle className="h-4 w-4 text-warning shrink-0 mt-0.5" />}
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-1.5">
+          <Icon className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+          <span className="text-xs font-medium text-foreground">{title}</span>
+        </div>
+        <p className="text-[11px] text-muted-foreground mt-0.5">{desc}</p>
+      </div>
+      {!done && (
+        <Button size="sm" variant="outline" className="h-7 gap-1 text-xs shrink-0" onClick={onAction}>
+          {actionLabel}
+          <ArrowRight className="h-3 w-3" />
+        </Button>
+      )}
+    </div>
+  );
+}
+
 export default function SettingsPage() {
   const { user, ownerId, isAccountant, isOwner } = useAuth();
   const setup = useSetupStatus();
