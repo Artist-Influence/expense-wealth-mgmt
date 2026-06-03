@@ -690,7 +690,30 @@ export default function SettingsPage() {
             </div>
           </div>
 
-          {/* Finance Preferences (used by the AI assistant for affordability, runway & tax) */}
+          {/* Usage profile — controls how much of the app is shown */}
+          <div className="glass-panel p-4 space-y-4">
+            <div>
+              <h3 className="text-sm font-medium text-foreground">Usage profile</h3>
+              <p className="text-[11px] text-muted-foreground">
+                Choose how you use the app. Personal or Business hides the parts you don't need; Both shows everything.
+              </p>
+            </div>
+            <div className="max-w-xs space-y-1.5">
+              <label className="text-xs text-muted-foreground">I use this for</label>
+              <Select
+                value={settings.usage_profile}
+                onValueChange={v => setSettings(s => ({ ...s, usage_profile: v as AppSettingsData['usage_profile'] }))}
+              >
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="personal">Personal only</SelectItem>
+                  <SelectItem value="business">Business only</SelectItem>
+                  <SelectItem value="both">Both</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
           <div className="glass-panel p-4 space-y-4">
             <div>
               <h3 className="text-sm font-medium text-foreground">Finance Preferences</h3>
