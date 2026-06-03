@@ -497,6 +497,9 @@ export default function SettingsPage() {
         </div>
 
         <div className="space-y-4">
+          {/* Account security — 2FA (all accounts) */}
+          <MfaCard />
+
           {/* Setup checklist — owner only */}
           {isOwner && !setup.loading && (
             <div className="glass-panel p-4">
