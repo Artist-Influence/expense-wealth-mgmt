@@ -156,6 +156,23 @@ export default function Expenses() {
     if (user && ownerId) { loadTransactions(); loadCategories(); loadAllModeTransactions(); }
   }, [user, ownerId, mode]);
 
+  // Show the setup walkthrough on the owner's first visit
+  useEffect(() => {
+    if (!isOwner || !ownerId) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from('app_settings')
+        .select('onboarding_completed')
+        .eq('owner_id', ownerId)
+        .maybeSingle();
+      if (!cancelled && data && data.onboarding_completed === false) {
+        setOnboardingOpen(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isOwner, ownerId]);
+
   // Apply incoming URL params (e.g. linked from Allocations review warning).
   // Supported: ?month=YYYY-MM, &scope=personal|business|reimbursable_work, &review=unreviewed|<status>
   const [searchParams, setSearchParams] = useSearchParams();
