@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "npm:@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -12,10 +13,34 @@ serve(async (req) => {
   }
 
   try {
+    // Require an authenticated user — this endpoint spends AI credits and must
+    // never be callable anonymously.
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader?.startsWith("Bearer ")) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    const authClient = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_ANON_KEY")!,
+      { global: { headers: { Authorization: authHeader } } },
+    );
+    const { data: claimsData, error: claimsError } = await authClient.auth.getClaims(
+      authHeader.replace("Bearer ", ""),
+    );
+    if (claimsError || !claimsData?.claims) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const { descriptions, allowedCategories, mode } = await req.json();
 
-    if (!descriptions || !Array.isArray(descriptions) || descriptions.length === 0) {
-      return new Response(JSON.stringify({ error: "descriptions array required" }), {
+    if (!descriptions || !Array.isArray(descriptions) || descriptions.length === 0 || descriptions.length > 500) {
+      return new Response(JSON.stringify({ error: "descriptions array required (max 500)" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
