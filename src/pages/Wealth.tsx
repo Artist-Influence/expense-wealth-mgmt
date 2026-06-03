@@ -18,6 +18,7 @@ import { cn } from '@/lib/utils';
 import { useState } from 'react';
 import { toast } from 'sonner';
 import { ModeScopeToggle, readPersistedScope, type ModeScope } from '@/components/ModeScopeToggle';
+import { useUsageProfile } from '@/hooks/useUsageProfile';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { CombinedWealthChart, type Snapshot } from '@/components/CombinedWealthChart';
