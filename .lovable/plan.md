@@ -1,44 +1,54 @@
+# Subscription Tracking
+
 ## Goal
+Turn the current throwaway "Recurring Charges" list into something you control: a dedicated **Subscriptions** page where each auto-detected recurring charge can be marked as a real subscription or removed (hidden) if it isn't one. Your decisions are remembered, and anything you remove disappears from the Recurring Charges section on Insights. Detection still drives the candidates — there's no manual entry of made-up subscriptions.
 
-Let your friends create their own accounts using a shared invite code (`JARED123`), give a display name, and start using the platform immediately — without opening the door to the public.
+## How it works today
+The Recurring Charges table on Insights is computed live from approved expenses (grouped by merchant, needs ≥3 charges with a regular cadence). Nothing is saved, so there's no way to confirm a real subscription or remove a false positive — it recomputes every visit.
 
-## Security approach (why this design)
+## What changes
 
-Platform-level signups stay **disabled**. If we simply turned Supabase signups on, anyone could register by calling the API directly and skip the invite code. Instead, a server-side function holds the only key to account creation: it checks the invite code first, then creates the account. The code is validated on the server, never trusted from the browser.
+### 1. Remember your decisions (backend)
+A new private table stores one row per merchant you've acted on, scoped to you and the current mode (personal/business):
+- The merchant key (the same merchant grouping the detector already uses)
+- A status: `confirmed` (a real subscription) or `dismissed` (not recurring — hide it)
 
-## What gets built
+Only you can read/write your own rows (with read access for a delegated accountant, matching every other table). No manual "add a subscription from scratch" — rows only ever reference a real detected merchant.
 
-### 1. Invite codes table
-A new `invite_codes` table holding the code, an active flag, and an optional label. Seeded with one row: `JARED123` (active, reusable by everyone, no usage cap — per your choice). The table is locked down (no public/browser access); only the signup function can read it.
+### 2. Shared recurring-charge detection
+The detection logic currently living inside Insights moves into a small reusable helper so both Insights and the new page produce the exact same candidate list (merchant, avg amount, frequency, category, last charged, monthly estimate).
 
-You can later deactivate a code or add new ones without a code change.
+### 3. New Subscriptions page (`/subscriptions`)
+A nav link is added. The page uses the same Personal/Business/All scope toggle as the rest of the app and shows:
+- **Confirmed subscriptions** — candidates you marked as real, with a total monthly load, plus a "stale" hint if one hasn't charged recently. Each has a **Remove** action.
+- **Detected candidates** — recurring charges you haven't decided on yet, each with **Confirm** (it's a real subscription) and **Dismiss** (not recurring — hide it).
+- **Removed** — a small collapsed list of dismissed merchants with an **Undo** so a mistaken removal can be brought back.
 
-### 2. Display name on profiles
-Add a `display_name` column to the existing `profiles` table, and update the existing new-user routine so it saves the display name entered at signup. Existing accounts are unaffected.
-
-### 3. Signup function (server-side)
-A new backend function `signup-with-invite` that:
-- Validates email, password (min length), display name, and invite code (input validation).
-- Confirms the invite code exists and is active — case-insensitive, so `jared123` also works.
-- Creates the account with the display name attached and email auto-confirmed (instant access, per your choice).
-- Returns a clear error if the code is wrong/inactive or the email is already registered.
-- Never reveals whether an email already exists in a way that leaks data beyond a generic "already registered" message.
-
-### 4. Login page: add a Sign Up view
-Update `src/pages/Login.tsx` to add a "Create account" toggle alongside the existing sign-in form. The signup form collects: display name, email, password, invite code. On success it signs the new user in and drops them into the app (the existing onboarding wizard then runs on first login).
-
-The existing sign-in flow, MFA challenge, and "Private access only" framing stay intact.
-
-## What stays the same
-- Public Supabase signups remain disabled (the function is the only path in).
-- All existing RLS, multi-tenant isolation, MFA, and per-user data ownership are untouched — each new friend automatically owns only their own data.
-- No changes to financial logic or other pages.
+### 4. Insights respects your decisions
+The Recurring Charges section on Insights filters out anything you've **dismissed**, and visually flags rows you've **confirmed**. The subscription-related "Where to Save" suggestions use the same filtered list, so dismissed items no longer inflate your subscription load.
 
 ## Technical notes
-- `signup-with-invite` runs unauthenticated (`verify_jwt = false`) and uses the service-role key to create the user via the admin API; this is what lets account creation bypass the disabled-signup setting while the invite gate is enforced in code.
-- Tradeoff: the admin create path does not run the leaked-password (HIBP) check that normal signups would; the function enforces a minimum password length to compensate. Normal password changes/sign-ins still benefit from existing protections.
-- Invite code is stored uppercase and compared case-insensitively.
-- After build: deploy the function, then test a signup with `JARED123` (success) and a bad code (rejected).
 
-## Manual step for you
-To invite friends, just share the code `JARED123` and the app link. To stop new signups later, deactivate the code (I can wire a quick toggle in Settings if you want, or it can be flipped directly in the backend).
+**Migration** (new `recurring_overrides` table):
+```text
+recurring_overrides
+  id           uuid pk
+  owner_id     uuid   (= auth.uid())
+  mode         text   ('personal' | 'business')
+  merchant_key text   (truncated normalized description, matching the detector)
+  status       text   ('confirmed' | 'dismissed')
+  created_at / updated_at timestamps
+  unique (owner_id, mode, merchant_key)
+```
+- GRANTs: `authenticated` (select/insert/update/delete), `service_role` (all); no `anon`.
+- RLS: `owner_all` (`auth.uid() = owner_id`) + `delegated_accountant_read` via `has_delegated_access(...)`, mirroring existing tables.
+- `updated_at` trigger using existing `update_updated_at_column()`.
+
+**Frontend:**
+- Extract the `recurringCharges` `useMemo` body from `src/pages/Insights.tsx` into `src/lib/recurring-charges.ts` (`computeRecurringCharges(approvedExpenses)` returning the same shape plus the `merchant_key`). The detector key stays the current `desc.substring(0, 40)` so existing behavior is unchanged.
+- New `src/hooks/useRecurringOverrides.ts` — loads/saves rows for `ownerId` + `mode`, exposes `confirm`, `dismiss`, `undo`, and lookups.
+- New `src/pages/Subscriptions.tsx` reusing `ModeScopeToggle`, the same data-load pattern as Insights (transactions for `ownerId`/`mode`, `.is('deleted_at', null)`, counted statuses only), glass-panel styling.
+- Register `/subscriptions` in `src/App.tsx` behind `AuthGuard`; add the nav entry in `src/components/AppNav.tsx`.
+- Update the Insights Recurring Charges render + subscription suggestions to drop dismissed merchants and tag confirmed ones.
+
+**Out of scope:** no changes to categorization, the `Subscriptions` category tag, or transaction records — removing a false positive only hides it; underlying data is untouched (as chosen).
