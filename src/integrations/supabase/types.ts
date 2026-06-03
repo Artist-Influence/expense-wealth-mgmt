@@ -55,6 +55,27 @@ export type Database = {
           },
         ]
       }
+      ai_usage_events: {
+        Row: {
+          created_at: string
+          fn: string
+          id: string
+          owner_id: string
+        }
+        Insert: {
+          created_at?: string
+          fn: string
+          id?: string
+          owner_id: string
+        }
+        Update: {
+          created_at?: string
+          fn?: string
+          id?: string
+          owner_id?: string
+        }
+        Relationships: []
+      }
       allocation_line_items: {
         Row: {
           allocation_plan_id: string
@@ -1126,6 +1147,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      check_ai_rate_limit: {
+        Args: { _fn: string; _max: number; _window_seconds: number }
+        Returns: boolean
+      }
       has_delegated_access: {
         Args: {
           _grantee: string
