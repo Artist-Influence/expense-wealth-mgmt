@@ -140,11 +140,13 @@ export default function Reimbursements() {
         .select('*')
         .eq('owner_id', ownerId!)
         .eq('is_reimbursable', true)
+        .is('deleted_at', null)
         .order('date', { ascending: false }),
       (supabase as any)
         .from('reimbursement_groups')
         .select('*')
         .eq('owner_id', ownerId!)
+        .is('deleted_at', null)
         .order('created_at', { ascending: false }),
     ]);
     setTransactions((txResult.data || []) as unknown as ReimbursableTransaction[]);
@@ -260,6 +262,7 @@ export default function Reimbursements() {
       .from('transactions_uploaded')
       .select('*')
       .eq('linked_reimbursement_group_id', group.id)
+      .is('deleted_at', null)
       .order('date', { ascending: false });
     setGroupTxs((data || []) as unknown as ReimbursableTransaction[]);
   };
