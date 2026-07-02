@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { NON_EARNING_TYPES } from '@/lib/income-classifier';
+import { fetchAllRows } from '@/lib/fetch-all';
 
 type ExportType = 'expense_ledger' | 'income_ledger' | 'tax_deductions' | 'tax_payments' | 'year_end_summary';
 
@@ -117,15 +118,18 @@ export default function Accountant() {
     queryKey: ['accountant-expenses', user?.id, ownerId, dateRange],
     queryFn: async () => {
       if (!user || !ownerId) return [];
-      const { data } = await supabase
-        .from('transactions_uploaded')
-        .select('*')
-        .eq('owner_id', ownerId!)
-        .is('deleted_at', null)
-        .gte('date', dateRange.start)
-        .lte('date', dateRange.end)
-        .order('date');
-      return data || [];
+      return fetchAllRows((from, to) =>
+        supabase
+          .from('transactions_uploaded')
+          .select('*')
+          .eq('owner_id', ownerId!)
+          .is('deleted_at', null)
+          .gte('date', dateRange.start)
+          .lte('date', dateRange.end)
+          .order('date')
+          .order('id')
+          .range(from, to),
+      );
     },
     enabled: !!user && !!ownerId,
   });
@@ -134,15 +138,18 @@ export default function Accountant() {
     queryKey: ['accountant-income', user?.id, ownerId, dateRange],
     queryFn: async () => {
       if (!user || !ownerId) return [];
-      const { data } = await supabase
-        .from('income_transactions')
-        .select('*')
-        .eq('owner_id', ownerId!)
-        .is('deleted_at', null)
-        .gte('date', dateRange.start)
-        .lte('date', dateRange.end)
-        .order('date');
-      return data || [];
+      return fetchAllRows((from, to) =>
+        supabase
+          .from('income_transactions')
+          .select('*')
+          .eq('owner_id', ownerId!)
+          .is('deleted_at', null)
+          .gte('date', dateRange.start)
+          .lte('date', dateRange.end)
+          .order('date')
+          .order('id')
+          .range(from, to),
+      );
     },
     enabled: !!user && !!ownerId,
   });

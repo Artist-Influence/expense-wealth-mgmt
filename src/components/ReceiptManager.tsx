@@ -54,9 +54,17 @@ export function ReceiptManager({ transactionId, ownerId, receiptPath, readOnly, 
     setBusy(true);
     const res = await uploadReceipt(file);
     if ('error' in res) { toast.error(res.error); setBusy(false); return; }
-    // Replace any previous file.
-    if (path) await deleteReceipt(path).catch(() => {});
-    await persist(res.path);
+    // Point the DB at the new file BEFORE deleting the old one, so a failed
+    // write never leaves the transaction referencing a deleted object.
+    const oldPath = path;
+    const ok = await persist(res.path);
+    if (!ok) {
+      // DB write failed — remove the orphaned new upload, keep the old file.
+      await deleteReceipt(res.path).catch(() => {});
+      setBusy(false);
+      return;
+    }
+    if (oldPath) await deleteReceipt(oldPath).catch(() => {});
     toast.success('Receipt attached');
     setBusy(false);
   };
@@ -82,8 +90,11 @@ export function ReceiptManager({ transactionId, ownerId, receiptPath, readOnly, 
   const remove = async () => {
     if (!path) return;
     setBusy(true);
-    await deleteReceipt(path).catch(() => {});
-    await persist(null);
+    // Clear the DB pointer first; only delete the object once nothing references it.
+    const oldPath = path;
+    const ok = await persist(null);
+    if (!ok) { setBusy(false); return; }
+    await deleteReceipt(oldPath).catch(() => {});
     setBusy(false);
     toast.success('Receipt removed');
   };

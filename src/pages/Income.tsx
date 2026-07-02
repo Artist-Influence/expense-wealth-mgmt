@@ -1,12 +1,13 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { useUsageProfile } from '@/hooks/useUsageProfile';
 import { supabase } from '@/integrations/supabase/client';
 import { AppNav } from '@/components/AppNav';
 import { CsvUploader } from '@/components/CsvUploader';
 import { classifyIncome, INCOME_TYPE_OPTIONS, TAXABLE_STATUS_OPTIONS, MODE_OPTIONS, NON_EARNING_TYPES } from '@/lib/income-classifier';
-import { normalizeDescription } from '@/lib/normalizer';
+import { normalizeDescription, parseDate } from '@/lib/normalizer';
 import { trimToTransactionHeader } from '@/lib/csv-parser';
+import { fetchAllRows } from '@/lib/fetch-all';
 import { toast } from 'sonner';
 import Papa from 'papaparse';
 import { Button } from '@/components/ui/button';
@@ -80,6 +81,8 @@ export default function Income() {
   const [showManualEntry, setShowManualEntry] = useState(false);
   const [showUploader, setShowUploader] = useState(false);
   const [csvImportMode, setCsvImportMode] = useState<'personal' | 'business'>('personal');
+  const [importing, setImporting] = useState(false);
+  const importingRef = useRef(false);
   const [dateFrom, setDateFrom] = useState<string | null>(null);
   const [dateTo, setDateTo] = useState<string | null>(null);
   const [dateLabel, setDateLabel] = useState<string>('All Dates');
@@ -93,6 +96,7 @@ export default function Income() {
   const [manualMode, setManualMode] = useState<'personal' | 'business'>('personal');
   const [manualAccount, setManualAccount] = useState('');
   const [manualNotes, setManualNotes] = useState('');
+  const [savingManual, setSavingManual] = useState(false);
 
   const fetchTransactions = useCallback(async () => {
     if (!user || !ownerId) return;
@@ -263,102 +267,129 @@ export default function Income() {
   // CSV upload handler with duplicate detection
   const handleCsvFiles = async (files: File[]) => {
     if (!user) return;
-    for (const file of files) {
-      const rawText = await file.text();
-      const text = trimToTransactionHeader(rawText);
-      const parsed = Papa.parse(text, { header: false, skipEmptyLines: true });
-      const allRows = parsed.data as string[][];
-      if (allRows.length < 2) { toast.error(`${file.name}: No data rows`); continue; }
+    if (importingRef.current) return;
+    importingRef.current = true;
+    setImporting(true);
+    try {
+      for (const file of files) {
+        if (file.size > 15 * 1024 * 1024) { toast.error(`${file.name}: File too large (max 15 MB)`); continue; }
+        const rawText = await file.text();
+        const text = trimToTransactionHeader(rawText);
+        const parsed = Papa.parse(text, { header: false, skipEmptyLines: true });
+        const allRows = parsed.data as string[][];
+        if (allRows.length < 2) { toast.error(`${file.name}: No data rows`); continue; }
 
-      const headers = allRows[0].map(h => (h || '').trim().toLowerCase());
-      const dateIdx = headers.findIndex(h => /date/i.test(h));
-      const descIdx = headers.findIndex(h => /desc|memo|narr|detail/i.test(h));
-      const amtIdx = headers.findIndex(h => /amount|credit|deposit/i.test(h));
+        const headers = allRows[0].map(h => (h || '').trim().toLowerCase());
+        const dateIdx = headers.findIndex(h => /date/i.test(h));
+        const descIdx = headers.findIndex(h => /desc|memo|narr|detail/i.test(h));
+        const amtIdx = headers.findIndex(h => /amount|credit|deposit/i.test(h));
 
-      if (amtIdx === -1) { toast.error(`${file.name}: No amount column found`); continue; }
+        if (amtIdx === -1) { toast.error(`${file.name}: No amount column found`); continue; }
 
-      // Load existing income for dedup
-      const existingFingerprints = new Set<string>();
-      const { data: existingTxs } = await supabase
-        .from('income_transactions')
-        .select('date, amount, description_normalized')
-        .eq('owner_id', ownerId!);
-      for (const ex of (existingTxs || [])) {
-        const fp = `income|${ex.date || ''}|${ex.amount || 0}|${(ex.description_normalized || '').toLowerCase()}`;
-        existingFingerprints.add(fp);
+        // Load existing income for dedup (paginated — a single select silently caps at 1000 rows).
+        // DB dates are already ISO (YYYY-MM-DD), so fingerprints match the parsed dates below.
+        const existingFingerprints = new Set<string>();
+        try {
+          const existingTxs = await fetchAllRows((from, to) =>
+            supabase
+              .from('income_transactions')
+              .select('date, amount, description_normalized')
+              .eq('owner_id', ownerId!)
+              .order('id')
+              .range(from, to),
+          );
+          for (const ex of existingTxs) {
+            const fp = `income|${ex.date || ''}|${ex.amount || 0}|${(ex.description_normalized || '').toLowerCase()}`;
+            existingFingerprints.add(fp);
+          }
+        } catch (err) {
+          toast.error(`${file.name}: Could not check for duplicates — import skipped`);
+          console.error(err);
+          continue;
+        }
+
+        const rows: any[] = [];
+        let skippedDupes = 0;
+        for (let i = 1; i < allRows.length; i++) {
+          const cols = allRows[i];
+          const rawDesc = descIdx >= 0 ? cols[descIdx] : '';
+          const rawAmount = parseFloat((cols[amtIdx] || '0').replace(/[$,]/g, ''));
+          if (isNaN(rawAmount) || rawAmount === 0) continue;
+          // Accept negative amounts (some banks represent credits as negative)
+          const normalizedAmount = Math.abs(rawAmount);
+
+          const classification = classifyIncome(rawDesc);
+          const normalized = normalizeDescription(rawDesc);
+          const dateVal = dateIdx >= 0 ? cols[dateIdx] : null;
+          // Normalize to ISO (YYYY-MM-DD) so the fingerprint matches DB rows on re-import
+          const isoDate = dateVal ? parseDate(dateVal) : null;
+
+          // Fingerprint-based dedup
+          const fp = `income|${isoDate || ''}|${normalizedAmount}|${(normalized || '').toLowerCase()}`;
+          if (existingFingerprints.has(fp)) { skippedDupes++; continue; }
+          existingFingerprints.add(fp);
+
+          rows.push({
+            owner_id: user.id,
+            date: isoDate,
+            description_raw: rawDesc || null,
+            description_normalized: normalized || null,
+            amount: normalizedAmount,
+            income_type: classification.income_type,
+            taxable_status: classification.taxable_status,
+            // Honor user-selected mode for the import; the classifier's suggested_mode is a fallback hint
+            mode: csvImportMode,
+            status: classification.confidence >= 80 ? 'auto_classified' : 'needs_review',
+            source_file_name: file.name,
+          });
+        }
+
+        if (rows.length === 0 && skippedDupes > 0) { toast.info(`${file.name}: All ${skippedDupes} rows are duplicates`); continue; }
+        if (rows.length === 0) { toast.error(`${file.name}: No valid income rows`); continue; }
+
+        const { error } = await supabase.from('income_transactions').insert(rows);
+        if (error) { toast.error(`${file.name}: Import failed`); console.error(error); }
+        else toast.success(`${file.name}: ${rows.length} imported${skippedDupes > 0 ? `, ${skippedDupes} duplicates skipped` : ''}`);
       }
-
-      const rows: any[] = [];
-      let skippedDupes = 0;
-      for (let i = 1; i < allRows.length; i++) {
-        const cols = allRows[i];
-        const rawDesc = descIdx >= 0 ? cols[descIdx] : '';
-        const rawAmount = parseFloat((cols[amtIdx] || '0').replace(/[$,]/g, ''));
-        if (isNaN(rawAmount) || rawAmount === 0) continue;
-        // Accept negative amounts (some banks represent credits as negative)
-        const normalizedAmount = Math.abs(rawAmount);
-
-        const classification = classifyIncome(rawDesc);
-        const normalized = normalizeDescription(rawDesc);
-        const dateVal = dateIdx >= 0 ? cols[dateIdx] : null;
-
-        // Fingerprint-based dedup
-        const fp = `income|${dateVal || ''}|${normalizedAmount}|${(normalized || '').toLowerCase()}`;
-        if (existingFingerprints.has(fp)) { skippedDupes++; continue; }
-        existingFingerprints.add(fp);
-
-        rows.push({
-          owner_id: user.id,
-          date: dateVal,
-          description_raw: rawDesc || null,
-          description_normalized: normalized || null,
-          amount: normalizedAmount,
-          income_type: classification.income_type,
-          taxable_status: classification.taxable_status,
-          // Honor user-selected mode for the import; the classifier's suggested_mode is a fallback hint
-          mode: csvImportMode,
-          status: classification.confidence >= 80 ? 'auto_classified' : 'needs_review',
-          source_file_name: file.name,
-        });
-      }
-
-      if (rows.length === 0 && skippedDupes > 0) { toast.info(`${file.name}: All ${skippedDupes} rows are duplicates`); continue; }
-      if (rows.length === 0) { toast.error(`${file.name}: No valid income rows`); continue; }
-
-      const { error } = await supabase.from('income_transactions').insert(rows);
-      if (error) { toast.error(`${file.name}: Import failed`); console.error(error); }
-      else toast.success(`${file.name}: ${rows.length} imported${skippedDupes > 0 ? `, ${skippedDupes} duplicates skipped` : ''}`);
+      setShowUploader(false);
+      fetchTransactions();
+    } finally {
+      importingRef.current = false;
+      setImporting(false);
     }
-    setShowUploader(false);
-    fetchTransactions();
   };
 
   // Manual entry
   const handleManualSave = async () => {
-    if (!user || !manualAmount) return;
+    if (!user || !manualAmount || savingManual) return;
     const amt = parseFloat(manualAmount);
     if (isNaN(amt)) { toast.error('Invalid amount'); return; }
 
-    const { error } = await supabase.from('income_transactions').insert({
-      owner_id: user.id,
-      date: manualDate || null,
-      description_raw: manualDesc || null,
-      description_normalized: manualDesc ? normalizeDescription(manualDesc) : null,
-      amount: amt,
-      income_type: manualType,
-      taxable_status: manualTaxable,
-      mode: manualMode,
-      source_account_name: manualAccount || null,
-      notes: manualNotes || null,
-      status: 'approved',
-    });
-    if (error) { toast.error('Failed to save'); console.error(error); }
-    else {
-      toast.success('Income entry added');
-      setShowManualEntry(false);
-      setManualDate(''); setManualDesc(''); setManualAmount(''); setManualType('other');
-      setManualTaxable('unknown'); setManualMode('personal'); setManualAccount(''); setManualNotes('');
-      fetchTransactions();
+    setSavingManual(true);
+    try {
+      const { error } = await supabase.from('income_transactions').insert({
+        owner_id: user.id,
+        date: manualDate || null,
+        description_raw: manualDesc || null,
+        description_normalized: manualDesc ? normalizeDescription(manualDesc) : null,
+        amount: amt,
+        income_type: manualType,
+        taxable_status: manualTaxable,
+        mode: manualMode,
+        source_account_name: manualAccount || null,
+        notes: manualNotes || null,
+        status: 'approved',
+      });
+      if (error) { toast.error('Failed to save'); console.error(error); }
+      else {
+        toast.success('Income entry added');
+        setShowManualEntry(false);
+        setManualDate(''); setManualDesc(''); setManualAmount(''); setManualType('other');
+        setManualTaxable('unknown'); setManualMode('personal'); setManualAccount(''); setManualNotes('');
+        fetchTransactions();
+      }
+    } finally {
+      setSavingManual(false);
     }
   };
 
@@ -549,7 +580,7 @@ export default function Income() {
               </div>
               <span className="text-muted-foreground/70">All rows in this CSV will be tagged as {csvImportMode}.</span>
             </div>
-            <CsvUploader onFilesSelect={handleCsvFiles} disabled={false} />
+            <CsvUploader onFilesSelect={handleCsvFiles} disabled={importing} />
           </div>
         )}
 
@@ -811,7 +842,7 @@ export default function Income() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowManualEntry(false)}>Cancel</Button>
-            <Button onClick={handleManualSave}>Save Entry</Button>
+            <Button onClick={handleManualSave} disabled={savingManual}>{savingManual ? 'Saving…' : 'Save Entry'}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

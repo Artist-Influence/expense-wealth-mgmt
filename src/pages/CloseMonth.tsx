@@ -59,6 +59,24 @@ export default function CloseMonth() {
     if (typeof window !== 'undefined') localStorage.setItem('close_scope', scope);
   }, [scope]);
 
+  // Checklist progress persists per owner+month+scope — previously it was
+  // plain state, so "closing" a month silently un-did itself on every reload.
+  const stepsKey = (owner: string | null, month: string, sc: string) =>
+    `close_steps:${owner || 'anon'}:${month}:${sc}`;
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const raw = localStorage.getItem(stepsKey(ownerId, selectedMonth, scope));
+      setCompletedSteps(raw ? new Set(JSON.parse(raw) as number[]) : new Set());
+    } catch {
+      setCompletedSteps(new Set());
+    }
+  }, [ownerId, selectedMonth, scope]);
+  useEffect(() => {
+    if (typeof window === 'undefined' || !ownerId) return;
+    localStorage.setItem(stepsKey(ownerId, selectedMonth, scope), JSON.stringify([...completedSteps]));
+  }, [completedSteps, ownerId, selectedMonth, scope]);
+
   const monthOptions = useMemo(getMonthOptions, []);
   const dateRange = useMemo(() => getDateRange(selectedMonth), [selectedMonth]);
 

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { useUsageProfile } from '@/hooks/useUsageProfile';
 import { supabase } from '@/integrations/supabase/client';
@@ -177,13 +177,18 @@ export default function Insights() {
     if (user && ownerId) loadData();
   }, [user, ownerId, mode]);
 
+  // Discard slow responses from a previous mode so quick tab-switching can
+  // never leave Personal data rendered under the Business label.
+  const loadSeqRef = useRef(0);
   const loadData = async () => {
+    const seq = ++loadSeqRef.current;
     setLoading(true);
     const [expenseResult, incomeResult, taxResult] = await Promise.all([
       loadExpenses(),
       loadIncome(),
       supabase.from('tax_profiles').select('default_federal_reserve_percent, default_nys_reserve_percent, default_nyc_reserve_percent').eq('owner_id', ownerId!).maybeSingle(),
     ]);
+    if (seq !== loadSeqRef.current) return;
     setTransactions(expenseResult);
     setIncomeData(incomeResult);
     if (taxResult.data) {
@@ -218,6 +223,7 @@ export default function Insights() {
         .from('income_transactions')
         .select('date, amount, income_type, taxable_status, status, mode')
         .eq('owner_id', ownerId!)
+        .is('deleted_at', null)
         .eq('mode', mode)
         .range(from, from + pageSize - 1);
       if (data) allData = [...allData, ...(data as IncomeTransaction[])];
@@ -316,9 +322,11 @@ export default function Insights() {
     const lastMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
     const lastMonth = `${lastMonthDate.getFullYear()}-${String(lastMonthDate.getMonth() + 1).padStart(2, '0')}`;
 
-    // Calendar-month cards always reflect actual current/prior calendar month (momentum context)
-    const thisMonthTxns = allExpenses.filter(t => t.date?.startsWith(thisMonth));
-    const lastMonthTxns = allExpenses.filter(t => t.date?.startsWith(lastMonth));
+    // Calendar-month cards always reflect actual current/prior calendar month
+    // (momentum context) — and honor the review-mode filter like every other
+    // number on this page, so cards can't contradict the charts beside them.
+    const thisMonthTxns = allExpenses.filter(t => t.date?.startsWith(thisMonth) && isCounted(t.review_status));
+    const lastMonthTxns = allExpenses.filter(t => t.date?.startsWith(lastMonth) && isCounted(t.review_status));
     const thisMonthSpend = thisMonthTxns.reduce((s, t) => s + Math.abs(t.amount || 0), 0);
     const lastMonthSpend = lastMonthTxns.reduce((s, t) => s + Math.abs(t.amount || 0), 0);
     const momChange = lastMonthSpend > 0 ? ((thisMonthSpend - lastMonthSpend) / lastMonthSpend) * 100 : 0;
@@ -345,13 +353,17 @@ export default function Insights() {
       .reduce((s, t) => s + Math.abs(t.amount || 0), 0);
 
     // Period total (drives clarity when filter != "this month")
-    const periodSpend = expenses.reduce((s, t) => s + Math.abs(t.amount || 0), 0);
+    const periodSpend = approvedScoped.reduce((s, t) => s + Math.abs(t.amount || 0), 0);
 
     return { thisMonthSpend, lastMonthSpend, momChange, topCategory, topMerchant, transfersExcluded, periodSpend };
-  }, [expenses, allExpenses, transactions, dateFrom, dateTo]);
+  }, [expenses, allExpenses, transactions, dateFrom, dateTo, COUNTED_STATUSES]);
 
   // Only approved/edited data in charts
   const approvedExpenses = useMemo(() => expenses.filter(t => isCounted(t.review_status)), [expenses, COUNTED_STATUSES]);
+  // Same review-mode filter over the UNSCOPED set, for calendar-window math
+  // (savings rate, YoY, prior-period comparisons). Headline money numbers and
+  // charts must count the same rows or the page contradicts itself.
+  const countedAllExpenses = useMemo(() => allExpenses.filter(t => isCounted(t.review_status)), [allExpenses, COUNTED_STATUSES]);
 
   const categoryData = useMemo(() => {
     const catMap = new Map<string, number>();
@@ -443,7 +455,7 @@ export default function Insights() {
     const calcRate = (months: string[]) => {
       let inc = 0, exp = 0;
       earnedIncomeAll.forEach(t => { if (t.date && months.includes(t.date.substring(0, 7))) inc += Math.abs(t.amount || 0); });
-      allExpenses.forEach(t => { if (t.date && months.includes(t.date.substring(0, 7))) exp += Math.abs(t.amount || 0); });
+      countedAllExpenses.forEach(t => { if (t.date && months.includes(t.date.substring(0, 7))) exp += Math.abs(t.amount || 0); });
       return inc > 0 ? ((inc - exp) / inc) * 100 : 0;
     };
 
@@ -452,10 +464,10 @@ export default function Insights() {
 
     // Totals reflect the active date filter
     const totalIncome = earnedIncome.reduce((s, t) => s + Math.abs(t.amount || 0), 0);
-    const totalExpenses = expenses.reduce((s, t) => s + Math.abs(t.amount || 0), 0);
+    const totalExpenses = approvedExpenses.reduce((s, t) => s + Math.abs(t.amount || 0), 0);
 
     return { currentRate, trailing3, totalIncome, totalExpenses };
-  }, [expenses, earnedIncome, allExpenses, earnedIncomeAll]);
+  }, [approvedExpenses, earnedIncome, countedAllExpenses, earnedIncomeAll]);
 
   // YoY uses calendar-year math, independent of active filter
   const yoyComparison = useMemo(() => {
@@ -469,7 +481,7 @@ export default function Insights() {
       if (t.date.startsWith(thisYear)) thisYearIncome += Math.abs(t.amount || 0);
       if (t.date.startsWith(lastYear)) lastYearIncome += Math.abs(t.amount || 0);
     });
-    allExpenses.forEach(t => {
+    countedAllExpenses.forEach(t => {
       if (!t.date) return;
       if (t.date.startsWith(thisYear)) thisYearExpenses += Math.abs(t.amount || 0);
       if (t.date.startsWith(lastYear)) lastYearExpenses += Math.abs(t.amount || 0);
@@ -510,7 +522,7 @@ export default function Insights() {
         lastYear: lastYearIncome > 0 ? (lastYearSaved / lastYearIncome) * 100 : 0,
       },
     };
-  }, [allExpenses, earnedIncomeAll, transactions]);
+  }, [countedAllExpenses, earnedIncomeAll, transactions]);
 
   // ─── TRENDS TAB DATA ───
   const categoryTrends = useMemo(() => {
@@ -585,7 +597,7 @@ export default function Insights() {
   // Respects active date filter. Falls back to "all dates" if no filter is active.
   const cashFlow = useMemo(() => {
     const moneyIn = earnedIncome.reduce((s, t) => s + Math.abs(t.amount || 0), 0);
-    const moneyOut = expenses.reduce((s, t) => s + Math.abs(t.amount || 0), 0);
+    const moneyOut = approvedExpenses.reduce((s, t) => s + Math.abs(t.amount || 0), 0);
     const net = moneyIn - moneyOut;
     const savingsPct = moneyIn > 0 ? (net / moneyIn) * 100 : 0;
 
@@ -600,23 +612,23 @@ export default function Insights() {
       const pf = priorFrom.toISOString().slice(0, 10);
       const pt = priorTo.toISOString().slice(0, 10);
       earnedIncomeAll.forEach(t => { if (t.date && t.date >= pf && t.date <= pt) priorMoneyIn += Math.abs(t.amount || 0); });
-      allExpenses.forEach(t => { if (t.date && t.date >= pf && t.date <= pt) priorMoneyOut += Math.abs(t.amount || 0); });
+      countedAllExpenses.forEach(t => { if (t.date && t.date >= pf && t.date <= pt) priorMoneyOut += Math.abs(t.amount || 0); });
     }
     const inChange = priorMoneyIn > 0 ? ((moneyIn - priorMoneyIn) / priorMoneyIn) * 100 : null;
     const outChange = priorMoneyOut > 0 ? ((moneyOut - priorMoneyOut) / priorMoneyOut) * 100 : null;
 
     // Months covered (for monthly averaging in suggestions)
     const monthSet = new Set<string>();
-    [...expenses, ...earnedIncome].forEach(t => { if (t.date) monthSet.add(t.date.slice(0, 7)); });
+    [...approvedExpenses, ...earnedIncome].forEach(t => { if (t.date) monthSet.add(t.date.slice(0, 7)); });
     const monthsCovered = Math.max(1, monthSet.size);
 
     return { moneyIn, moneyOut, net, savingsPct, priorMoneyIn, priorMoneyOut, inChange, outChange, monthsCovered };
-  }, [expenses, earnedIncome, earnedIncomeAll, allExpenses, dateActive, dateFrom, dateTo]);
+  }, [approvedExpenses, earnedIncome, earnedIncomeAll, countedAllExpenses, dateActive, dateFrom, dateTo]);
 
   // Filter-aware Income vs Expenses chart (separate from the 12-month one in Income tab)
   const incomeVsExpensesScoped = useMemo(() => {
     const monthMap = new Map<string, { income: number; expenses: number }>();
-    expenses.forEach(t => {
+    approvedExpenses.forEach(t => {
       if (!t.date) return;
       const m = t.date.substring(0, 7);
       const e = monthMap.get(m) || { income: 0, expenses: 0 };
@@ -638,7 +650,7 @@ export default function Insights() {
         expenses: Math.round(d.expenses * 100) / 100,
         net: Math.round((d.income - d.expenses) * 100) / 100,
       }));
-  }, [expenses, earnedIncome]);
+  }, [approvedExpenses, earnedIncome]);
 
   // ─── WHERE TO SAVE (Suggestions) ───
   type Suggestion = {

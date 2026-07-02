@@ -11,7 +11,9 @@ import {
 
 type Mode = 'personal' | 'business';
 const SCOPE_KEY = 'subscriptions_scope';
-const COUNTED = new Set(['approved', 'auto_categorized', 'edited']);
+// Includes not-yet-reviewed suggested rows so this page sees the same
+// candidates as the Insights recurring section (its default review mode).
+const COUNTED = new Set(['approved', 'auto_categorized', 'edited', 'suggested', 'ai_suggested']);
 
 interface ExpenseRow {
   date: string | null;

@@ -69,6 +69,7 @@ export default function Assistant() {
   };
 
   const handleDelete = async (id: string) => {
+    if (!confirm('Delete this conversation? This cannot be undone.')) return;
     await deleteThread(id);
     if (id === threadId) {
       const next = threads.find((t) => t.id !== id);

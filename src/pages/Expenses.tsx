@@ -23,6 +23,7 @@ import { routeTransaction } from '@/lib/transaction-router';
 import { classifyIncome } from '@/lib/income-classifier';
 import { generateFingerprint, isNearDuplicate, findExactClusters, findNearClusters, type DuplicateCluster } from '@/lib/duplicate-detector';
 import { generateMerchantKey, normalizeDescription } from '@/lib/normalizer';
+import { fetchAllRows } from '@/lib/fetch-all';
 import { backfillRecurringForOwner } from '@/lib/recurrence-detector';
 import { isStatementArtifact } from '@/lib/csv-parser';
 import { toast } from 'sonner';
@@ -149,6 +150,9 @@ export default function Expenses() {
   // Upload state
   const [fileQueue, setFileQueue] = useState<FileQueueItem[]>([]);
   const processingRef = useRef(false);
+  // Monotonic token so a slow response for a previous mode can never
+  // overwrite the state of the mode the user is looking at now.
+  const loadSeqRef = useRef(0);
   const [filePreviews, setFilePreviews] = useState<FilePreviewInfo[]>([]);
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [showPreview, setShowPreview] = useState(false);
@@ -168,7 +172,10 @@ export default function Expenses() {
   const categoryMode = mode === 'reimbursable_work' ? 'personal' : mode;
 
   useEffect(() => {
-    if (user && ownerId) { loadTransactions(); loadCategories(); loadAllModeTransactions(); }
+    // Clear row selection on tab change — bulk actions must never touch rows
+    // selected under another mode that are no longer visible.
+    setSelectedIds(new Set());
+    if (user && ownerId) { loadTransactions(); loadCategories(); }
   }, [user, ownerId, mode]);
 
   // Show the setup walkthrough on the owner's first visit
@@ -281,6 +288,7 @@ export default function Expenses() {
 
   const loadTransactions = async () => {
     if (!ownerId) return;
+    const seq = ++loadSeqRef.current;
     setLoading(true);
     let from = 0;
     const pageSize = 1000;
@@ -299,8 +307,13 @@ export default function Expenses() {
       hasMore = (data?.length ?? 0) === pageSize;
       from += pageSize;
     }
+    // A newer load started while this one was in flight — discard this result.
+    if (seq !== loadSeqRef.current) return;
     setTransactions(allData);
     setLoading(false);
+    // The cross-mode summary strip derives from its own snapshot; refresh it
+    // whenever the table refreshes so mutations show up there too.
+    void loadAllModeTransactions();
   };
 
   /**
@@ -326,6 +339,7 @@ export default function Expenses() {
           .from('transactions_uploaded')
           .select('id, date, description_normalized, description_raw, amount, duplicate_fingerprint, mode, created_at, final_category, predicted_category, final_method, predicted_method, source_file_name, source_account_name, duplicate_status, is_transfer, is_split_parent, parent_transaction_id, review_status, recurring_group_id')
           .eq('owner_id', ownerId!)
+          .is('deleted_at', null)
           .range(from, from + pageSize - 1);
         if (data) rows.push(...(data as any));
         hasMore = (data?.length ?? 0) === pageSize;
@@ -703,7 +717,19 @@ export default function Expenses() {
     else setSelectedIds(new Set(filtered.map(t => t.id)));
   };
 
-  // Drawer save
+  // merchant_memory rows exist only under base modes; reimbursable work is
+  // personal cash. Keying off the SAVED row's mode (not the active tab)
+  // prevents business categories from polluting personal memory when an edit
+  // also moves the row across modes.
+  const memoryModeFor = (txMode?: string | null): 'personal' | 'business' =>
+    txMode === 'business'
+      ? 'business'
+      : txMode === 'personal' || txMode === 'reimbursable_work'
+        ? 'personal'
+        : (categoryMode as 'personal' | 'business');
+
+  // Drawer save — returns whether the save persisted so approve flows can
+  // stop instead of approving a rejected value.
   const handleDrawerSave = async (id: string, values: {
     category: string; method: string; notes: string;
     transaction_mode?: string; economic_owner?: string; treatment_type?: string;
@@ -713,12 +739,12 @@ export default function Expenses() {
     counts_as_tax_deduction?: boolean;
     client_or_project_tag?: string;
     _keepNeedsReview?: boolean;
-  }) => {
+  }): Promise<boolean> => {
     if (values.category && categories.length > 0) {
       const isAllowed = categories.some(c => c.toLowerCase() === values.category.toLowerCase());
       if (!isAllowed) {
         toast.error(`"${values.category}" is not in your approved category list for ${categoryMode} mode`);
-        return;
+        return false;
       }
       const canonical = categories.find(c => c.toLowerCase() === values.category.toLowerCase());
       if (canonical) values.category = canonical;
@@ -757,19 +783,23 @@ export default function Expenses() {
       .update(updatePayload as never)
       .eq('id', id);
 
-    if (!error) {
-      const tx = transactions.find(t => t.id === id);
-      if (tx && tx.parse_status === 'ok' && !tx.is_transfer && !tx.is_split_parent && !tx.parent_transaction_id && tx.duplicate_status !== 'possible_duplicate') {
-        const desc = tx.description_raw || '';
-        if (!isStatementArtifact(desc, tx.amount || 0)) {
-          const merchantKey = generateMerchantKey(normalizeDescription(desc));
-          await updateMerchantMemory(merchantKey, categoryMode as 'personal' | 'business', values.category, values.method || null, values.notes || null, desc, user!.id, tx.match_source);
-        }
-      }
-      await loadTransactions();
-      toast.success('Saved');
-      setDetailTx(null);
+    if (error) {
+      toast.error(`Save failed: ${error.message}`);
+      return false;
     }
+
+    const tx = transactions.find(t => t.id === id);
+    if (tx && tx.parse_status === 'ok' && !tx.is_transfer && !tx.is_split_parent && !tx.parent_transaction_id && tx.duplicate_status !== 'possible_duplicate') {
+      const desc = tx.description_raw || '';
+      if (!isStatementArtifact(desc, tx.amount || 0) && values.category) {
+        const merchantKey = generateMerchantKey(normalizeDescription(desc));
+        await updateMerchantMemory(merchantKey, memoryModeFor(values.transaction_mode ?? tx.transaction_mode), values.category, values.method || null, values.notes || null, desc, user!.id, tx.match_source);
+      }
+    }
+    await loadTransactions();
+    toast.success('Saved');
+    setDetailTx(null);
+    return true;
   };
 
   const approveRow = async (tx: Transaction) => {
@@ -785,17 +815,19 @@ export default function Expenses() {
         counts_as_tax_deduction: isDeductibleCategory(tx.transaction_mode as any, category),
       })
       .eq('id', tx.id);
-    if (!error) {
-      if (tx.parse_status === 'ok' && !tx.is_transfer && !tx.is_split_parent && !tx.parent_transaction_id && tx.duplicate_status !== 'possible_duplicate') {
-        const desc = tx.description_raw || '';
-        if (!isStatementArtifact(desc, tx.amount || 0)) {
-          const merchantKey = generateMerchantKey(normalizeDescription(desc));
-          await updateMerchantMemory(merchantKey, categoryMode as 'personal' | 'business', category, tx.final_method || tx.predicted_method || null, tx.final_notes || tx.predicted_notes || null, desc, user!.id, tx.match_source);
-        }
-      }
-      await loadTransactions();
-      setDetailTx(null);
+    if (error) {
+      toast.error(`Approve failed: ${error.message}`);
+      return;
     }
+    if (tx.parse_status === 'ok' && !tx.is_transfer && !tx.is_split_parent && !tx.parent_transaction_id && tx.duplicate_status !== 'possible_duplicate') {
+      const desc = tx.description_raw || '';
+      if (!isStatementArtifact(desc, tx.amount || 0)) {
+        const merchantKey = generateMerchantKey(normalizeDescription(desc));
+        await updateMerchantMemory(merchantKey, memoryModeFor(tx.transaction_mode), category, tx.final_method || tx.predicted_method || null, tx.final_notes || tx.predicted_notes || null, desc, user!.id, tx.match_source);
+      }
+    }
+    await loadTransactions();
+    setDetailTx(null);
   };
 
   /**
@@ -803,10 +835,10 @@ export default function Expenses() {
    * Silently skips rows that have no category or are split parents (no per-row toast spam).
    * Returns counts so the caller can show a single summary toast.
    */
-  const bulkApproveRows = async (txs: Transaction[]): Promise<{ approved: number; skipped: number }> => {
+  const bulkApproveRows = async (txs: Transaction[]): Promise<{ approved: number; skipped: number; failed: number }> => {
     const eligible = txs.filter(t => !t.is_split_parent && (t.final_category || t.predicted_category));
     const skipped = txs.length - eligible.length;
-    if (eligible.length === 0) return { approved: 0, skipped };
+    if (eligible.length === 0) return { approved: 0, skipped, failed: 0 };
 
     // Issue all updates in parallel.
     const updates = eligible.map(tx => {
@@ -835,7 +867,7 @@ export default function Expenses() {
         const merchantKey = generateMerchantKey(normalizeDescription(desc));
         return updateMerchantMemory(
           merchantKey,
-          categoryMode as 'personal' | 'business',
+          memoryModeFor(tx.transaction_mode),
           category,
           tx.final_method || tx.predicted_method || null,
           tx.final_notes || tx.predicted_notes || null,
@@ -848,7 +880,7 @@ export default function Expenses() {
     if (memoryTasks.length > 0) await Promise.all(memoryTasks);
 
     await loadTransactions();
-    return { approved, skipped };
+    return { approved, skipped, failed: eligible.length - approved };
   };
 
   // Inline cell edit — update a single field directly from the table.
@@ -921,7 +953,7 @@ export default function Expenses() {
         if (finalCategory) {
           await updateMerchantMemory(
             merchantKey,
-            categoryMode as 'personal' | 'business',
+            memoryModeFor(tx.transaction_mode),
             finalCategory,
             finalMethod,
             tx.final_notes || tx.predicted_notes || null,
@@ -938,15 +970,24 @@ export default function Expenses() {
 
   const bulkApprove = async () => {
     const selected = filtered.filter(t => selectedIds.has(t.id));
-    const { approved, skipped } = await bulkApproveRows(selected);
+    const { approved, skipped, failed } = await bulkApproveRows(selected);
     setSelectedIds(new Set());
-    toast.success(`Approved ${approved} row${approved === 1 ? '' : 's'}${skipped > 0 ? ` · ${skipped} skipped (no category)` : ''}`);
+    if (failed > 0) {
+      toast.error(`Approved ${approved}, but ${failed} row${failed === 1 ? '' : 's'} failed to save`);
+    } else {
+      toast.success(`Approved ${approved} row${approved === 1 ? '' : 's'}${skipped > 0 ? ` · ${skipped} skipped (no category)` : ''}`);
+    }
   };
 
+  // Bulk actions operate strictly on VISIBLE selected rows — a stale selection
+  // from another filter must never be mutated invisibly.
+  const visibleSelectedIds = () => filtered.filter(t => selectedIds.has(t.id)).map(t => t.id);
+
   const bulkMarkTransfer = async () => {
-    const ids = [...selectedIds];
+    const ids = visibleSelectedIds();
+    if (ids.length === 0) return;
     const transferCategory = categories.find(c => c.toLowerCase() === 'transfer') || null;
-    await supabase.from('transactions_uploaded').update({
+    const { error } = await supabase.from('transactions_uploaded').update({
       is_transfer: true, exclude_from_expense_totals: true, transfer_type: 'unknown_transfer',
       is_non_expense_cash_movement: true,
       counts_toward_true_personal_spend: false,
@@ -956,13 +997,15 @@ export default function Expenses() {
       final_category: transferCategory,
       review_status: transferCategory ? 'edited' : 'needs_review',
     }).in('id', ids);
+    if (error) { toast.error(`Failed to mark transfers: ${error.message}`); return; }
     setSelectedIds(new Set());
     await loadTransactions();
     toast.success(`Marked ${ids.length} rows as transfer`);
   };
 
   const bulkSwitchMode = async (targetMode: TransactionMode) => {
-    const ids = [...selectedIds];
+    const ids = visibleSelectedIds();
+    if (ids.length === 0) return;
     const updates: Record<string, any> = {
       transaction_mode: targetMode,
       mode: targetMode === 'reimbursable_work' ? 'personal' : targetMode,
@@ -984,17 +1027,20 @@ export default function Expenses() {
       updates.is_reimbursable = true;
       updates.reimbursement_status = 'pending';
     }
-    await supabase.from('transactions_uploaded').update(updates as never).in('id', ids);
+    const { error } = await supabase.from('transactions_uploaded').update(updates as never).in('id', ids);
+    if (error) { toast.error(`Failed to switch mode: ${error.message}`); return; }
     setSelectedIds(new Set());
     await loadTransactions();
     toast.success(`Switched ${ids.length} rows to ${MODE_CONFIG[targetMode].label}`);
   };
 
   const bulkDelete = async () => {
-    const ids = [...selectedIds];
+    const ids = visibleSelectedIds();
+    if (ids.length === 0) return;
     if (!confirm(`Delete ${ids.length} selected transaction(s)? This cannot be undone.`)) return;
 
-    const affectedTxs = transactions.filter(t => selectedIds.has(t.id));
+    const idSet = new Set(ids);
+    const affectedTxs = transactions.filter(t => idSet.has(t.id));
     const affectedBatchIds = [...new Set(
       affectedTxs.map(t => t.upload_batch_id).filter(Boolean) as string[]
     )];
@@ -1021,7 +1067,7 @@ export default function Expenses() {
 
   const toggleTransfer = async (tx: Transaction) => {
     const newIsTransfer = !tx.is_transfer;
-    await supabase.from('transactions_uploaded').update({
+    const { error } = await supabase.from('transactions_uploaded').update({
       is_transfer: newIsTransfer, exclude_from_expense_totals: newIsTransfer,
       transfer_type: newIsTransfer ? 'unknown_transfer' : null,
       is_non_expense_cash_movement: newIsTransfer,
@@ -1029,6 +1075,7 @@ export default function Expenses() {
       counts_toward_true_personal_spend: newIsTransfer ? false : (tx.transaction_mode === 'personal'),
       counts_toward_true_business_spend: newIsTransfer ? false : (tx.transaction_mode === 'business'),
     }).eq('id', tx.id);
+    if (error) { toast.error(`Failed to update transfer flag: ${error.message}`); return; }
     await loadTransactions();
     setDetailTx(null);
     toast.success(newIsTransfer ? 'Marked as transfer' : 'Restored to expense');
@@ -1037,21 +1084,19 @@ export default function Expenses() {
   const handleSplit = async (parentId: string, children: Array<{
     amount: number; mode: string; category: string; notes: string;
     is_reimbursable: boolean; reimbursable_to: string; tax_treatment: string;
-  }>) => {
-    if (!user) return;
-    // Mark parent as split
-    await supabase.from('transactions_uploaded').update({
-      is_split_parent: true,
-      exclude_from_expense_totals: true,
-      counts_toward_true_personal_spend: false,
-      counts_toward_true_business_spend: false,
-      review_status: 'edited',
-    }).eq('id', parentId);
+  }>): Promise<boolean> => {
+    if (!user) return false;
 
     const parent = transactions.find(t => t.id === parentId);
-    if (!parent) return;
+    if (!parent) {
+      toast.error('Could not find the transaction to split. Refresh and try again.');
+      return false;
+    }
 
-    // Create child rows
+    // Create child rows FIRST — if this fails the parent is untouched and no
+    // money disappears from totals. (The old order marked the parent excluded
+    // before inserting children; an insert failure then erased the amount
+    // from every report.)
     const childRows = children.map(c => ({
       owner_id: user.id,
       parent_transaction_id: parentId,
@@ -1082,13 +1127,28 @@ export default function Expenses() {
     const { error } = await supabase.from('transactions_uploaded').insert(childRows);
     if (error) {
       toast.error(`Split failed: ${error.message}`);
-      return;
+      return false;
+    }
+
+    // Children exist — now exclude the parent from totals.
+    const { error: parentErr } = await supabase.from('transactions_uploaded').update({
+      is_split_parent: true,
+      exclude_from_expense_totals: true,
+      counts_toward_true_personal_spend: false,
+      counts_toward_true_business_spend: false,
+      review_status: 'edited',
+    }).eq('id', parentId);
+    if (parentErr) {
+      toast.error(`Split children created, but the parent could not be marked (totals may double-count until you retry): ${parentErr.message}`);
+      await loadTransactions();
+      return false;
     }
 
     await loadTransactions();
     setDetailTx(null);
     setSplitTx(null);
     toast.success(`Split into ${children.length} rows`);
+    return true;
   };
 
   const exportCsv = () => {
@@ -1209,26 +1269,68 @@ export default function Expenses() {
       const incomeMode: 'personal' | 'business' =
         categoryMode === 'business' ? 'business' : 'personal';
       let incomeInsertedCount = 0;
+      let incomeSkippedDupes = 0;
       if (incomeRows.length > 0) {
-        const incomePayload = incomeRows.map(tx => {
-          const cls = classifyIncome(tx.description_raw || '');
-          return {
-            owner_id: user.id,
-            date: tx.date,
-            amount: Math.abs(tx.amount),
-            description_raw: tx.description_raw,
-            description_normalized: tx.description_normalized,
-            income_type: cls.income_type,
-            taxable_status: cls.taxable_status,
-            mode: incomeMode,
-            source_account_name: method || null,
-            source_file_name: file.name,
-            status: 'needs_review',
+        // Dedupe against existing income using the SAME fingerprint scheme as
+        // the Income page's CSV import — without this, re-importing a checking
+        // statement double-counts every deposit.
+        const incomeFps = new Set<string>();
+        let incomeDedupeOk = true;
+        try {
+          const existingIncome = await fetchAllRows<{ date: string | null; amount: number | null; description_normalized: string | null }>(
+            (from, to) => supabase
+              .from('income_transactions')
+              .select('date, amount, description_normalized')
+              .eq('owner_id', ownerId!)
+              .order('id')
+              .range(from, to),
+          );
+          for (const ex of existingIncome) {
+            incomeFps.add(`income|${ex.date || ''}|${ex.amount || 0}|${(ex.description_normalized || '').toLowerCase()}`);
+          }
+        } catch (e) {
+          incomeDedupeOk = false;
+          console.error('Income dedupe check failed:', e);
+          toast.error(`${file.name}: could not check income duplicates; ${incomeRows.length} inflow row(s) were NOT imported`);
+        }
+
+        if (incomeDedupeOk) {
+          type IncomeInsertRow = {
+            owner_id: string; date: string | null; amount: number;
+            description_raw: string | null; description_normalized: string | null;
+            income_type: string; taxable_status: string; mode: 'personal' | 'business';
+            source_account_name: string | null; source_file_name: string; status: string;
           };
-        });
-        const { error: incomeErr } = await supabase.from('income_transactions').insert(incomePayload);
-        if (!incomeErr) incomeInsertedCount = incomePayload.length;
-        else console.error('Income insert failed:', incomeErr);
+          const incomePayload: IncomeInsertRow[] = [];
+          for (const tx of incomeRows) {
+            const fp = `income|${tx.date || ''}|${Math.abs(tx.amount)}|${(tx.description_normalized || '').toLowerCase()}`;
+            if (incomeFps.has(fp)) { incomeSkippedDupes++; continue; }
+            incomeFps.add(fp);
+            const cls = classifyIncome(tx.description_raw || '');
+            incomePayload.push({
+              owner_id: ownerId!,
+              date: tx.date,
+              amount: Math.abs(tx.amount),
+              description_raw: tx.description_raw,
+              description_normalized: tx.description_normalized,
+              income_type: cls.income_type,
+              taxable_status: cls.taxable_status,
+              mode: incomeMode,
+              source_account_name: method || null,
+              source_file_name: file.name,
+              status: 'needs_review',
+            });
+          }
+          if (incomePayload.length > 0) {
+            const { error: incomeErr } = await supabase.from('income_transactions').insert(incomePayload as never);
+            if (!incomeErr) {
+              incomeInsertedCount = incomePayload.length;
+            } else {
+              console.error('Income insert failed:', incomeErr);
+              toast.error(`${file.name}: ${incomePayload.length} income row(s) FAILED to save: ${incomeErr.message}`);
+            }
+          }
+        }
       }
 
       if (validRows.length === 0) {
@@ -1262,13 +1364,16 @@ export default function Expenses() {
         return d.toISOString().slice(0, 10);
       };
 
-      const existingFingerprints = new Set<string>();
+      // Occurrence-COUNTED fingerprints: a bare set would treat two legitimate
+      // identical same-day charges (two coffees) as duplicates and silently
+      // drop the second, while counts let re-imports skip row-for-row.
+      const existingFpCounts = new Map<string, number>();
       const existingForNearDup: { date: string | null; amount: number; description_normalized: string; id: string; fingerprint: string }[] = [];
 
       const ingestExisting = (rows: { id: string; date: string | null; description_normalized: string | null; amount: number | null; duplicate_fingerprint: string | null }[]) => {
         for (const row of rows) {
           const fp = row.duplicate_fingerprint || generateFingerprint(categoryMode, row.date, row.amount ?? 0, row.description_normalized || '');
-          existingFingerprints.add(fp);
+          existingFpCounts.set(fp, (existingFpCounts.get(fp) || 0) + 1);
           existingForNearDup.push({ date: row.date, amount: row.amount ?? 0, description_normalized: row.description_normalized || '', id: row.id, fingerprint: fp });
         }
       };
@@ -1309,9 +1414,14 @@ export default function Expenses() {
       // In-file dedup: track signatures already seen in THIS import (amount + merchant key).
       const inFileNearSeen = new Map<string, number>();
 
+      const seenInFile = new Map<string, number>();
       for (const tx of validRows) {
         const fp = generateFingerprint(categoryMode, tx.date, tx.amount, tx.description_normalized);
-        if (appSettings.preventExactDuplicates && existingFingerprints.has(fp)) {
+        // The Nth occurrence of a fingerprint in this file is a duplicate only
+        // if the DB already holds at least N copies.
+        const priorOccurrences = seenInFile.get(fp) || 0;
+        seenInFile.set(fp, priorOccurrences + 1);
+        if (appSettings.preventExactDuplicates && priorOccurrences < (existingFpCounts.get(fp) || 0)) {
           exactDupCount++;
           const matched = existingForNearDup.find(e => e.fingerprint === fp);
           if (exactSkippedDetail.length < 50) {
@@ -1331,10 +1441,12 @@ export default function Expenses() {
             if (isNearDuplicate(tx, existing)) { nearDupMatch = existing.id; possibleDupCount++; break; }
           }
         }
-        // In-file near-duplicate sweep (against rows already queued for insert this batch).
+        // In-file near-duplicate sweep (against rows already queued for insert
+        // this batch). Date is part of the key — without it every subsequent
+        // month of the same subscription in one statement got flagged.
         if (!nearDupMatch && appSettings.flagPossibleDuplicates) {
           const mk = generateMerchantKey(tx.description_normalized || '');
-          const inFileKey = `${Math.round(tx.amount * 100)}|${mk}`;
+          const inFileKey = `${tx.date || ''}|${Math.round(tx.amount * 100)}|${mk}`;
           if (mk && inFileNearSeen.has(inFileKey)) {
             // Mark THIS row as a possible duplicate of the earlier one in the same file.
             const earlierIdx = inFileNearSeen.get(inFileKey)!;
@@ -1349,7 +1461,6 @@ export default function Expenses() {
         }
         dupStatuses.set(rowsToInsert.length, { status: nearDupMatch ? 'possible_duplicate' : 'unique', matchId: nearDupMatch === '__in_file__' ? null : nearDupMatch });
         rowsToInsert.push(tx);
-        existingFingerprints.add(fp);
       }
 
       if (rowsToInsert.length === 0) {
@@ -1548,12 +1659,13 @@ export default function Expenses() {
         status: 'done',
         result: { batchId: batch.id, total: rowsToInsert.length, auto: autoCount, suggested: suggestedCount, review: reviewCount, skipped: exactDupCount, possibleDuplicates: possibleDupCount, transfers: transferCount, parseErrors: parseErrorRows.length, incomeRouted: incomeInsertedCount, refunds: refundCount, ccPayments: ccPaymentCount } as any,
       });
-      if (incomeInsertedCount || refundCount || ccPaymentCount) {
+      if (incomeInsertedCount || incomeSkippedDupes || refundCount || ccPaymentCount) {
         toast.success(
           `${file.name}: ${rowsToInsert.length} expenses` +
           (refundCount ? `, ${refundCount} refunds` : '') +
           (ccPaymentCount ? `, ${ccPaymentCount} card payments (transfers)` : '') +
-          (incomeInsertedCount ? `, ${incomeInsertedCount} routed to Income` : '')
+          (incomeInsertedCount ? `, ${incomeInsertedCount} routed to Income` : '') +
+          (incomeSkippedDupes ? `, ${incomeSkippedDupes} income duplicates skipped` : '')
         );
       }
     } catch (err: any) {
@@ -1561,15 +1673,24 @@ export default function Expenses() {
     }
   };
 
+  // Items land in a ref-backed queue that the single active drain loop keeps
+  // consuming — a call while busy ENQUEUES instead of being dropped, so no
+  // file can get stuck in 'queued' forever.
+  const pendingQueueRef = useRef<(FileQueueItem & { mapping: ColumnMapping; detectedHeaders?: string[] })[]>([]);
   const processQueue = useCallback(async (items: (FileQueueItem & { mapping: ColumnMapping; detectedHeaders?: string[] })[]) => {
+    pendingQueueRef.current.push(...items);
     if (processingRef.current) return;
     processingRef.current = true;
-    for (const item of items) {
-      if (item.status === 'error') continue;
-      await processFile(item);
+    try {
+      while (pendingQueueRef.current.length > 0) {
+        const item = pendingQueueRef.current.shift()!;
+        if (item.status === 'error') continue;
+        await processFile(item);
+      }
+      await loadTransactions();
+    } finally {
+      processingRef.current = false;
     }
-    await loadTransactions();
-    processingRef.current = false;
   }, [user, mode]);
 
   const handleFilesSelect = async (files: File[]) => {
@@ -1584,11 +1705,17 @@ export default function Expenses() {
     }
     setFilePreviews(previews);
     setPendingFiles(files);
+    previewConfirmedRef.current = false;
     setShowPreview(true);
   };
 
+  // Guards a double-click on the Import button: the second click would build a
+  // second set of queue items for the same files (double import UI entries).
+  const previewConfirmedRef = useRef(false);
   const handlePreviewConfirm = (validIndexes: number[]) => {
     if (validIndexes.length === 0) return;
+    if (previewConfirmedRef.current) return;
+    previewConfirmedRef.current = true;
     setShowPreview(false);
     const newItems: (FileQueueItem & { mapping: ColumnMapping; detectedHeaders?: string[] })[] = validIndexes.map(i => {
       const fp = filePreviews[i];

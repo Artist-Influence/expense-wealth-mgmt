@@ -17,6 +17,7 @@ import { format, parseISO } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { useState } from 'react';
 import { toast } from 'sonner';
+import { fetchAllRows } from '@/lib/fetch-all';
 import { ModeScopeToggle, readPersistedScope, type ModeScope } from '@/components/ModeScopeToggle';
 import { useUsageProfile } from '@/hooks/useUsageProfile';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
@@ -125,11 +126,13 @@ function SnapshotEditor({
   snapshots,
   onSave,
   onDelete,
+  deleting,
 }: {
   account: { id: string; account_name: string };
   snapshots: Array<{ as_of_date: string; balance: number }>;
   onSave: (date: string, balance: number) => void;
   onDelete: (date: string) => void;
+  deleting?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [date, setDate] = useState<Date>(new Date());
@@ -172,7 +175,11 @@ function SnapshotEditor({
                   variant="ghost"
                   size="icon"
                   className="h-4 w-4 text-muted-foreground hover:text-destructive"
-                  onClick={() => onDelete(s.as_of_date)}
+                  onClick={() => {
+                    if (!confirm('Delete this balance snapshot? This cannot be undone.')) return;
+                    onDelete(s.as_of_date);
+                  }}
+                  disabled={deleting}
                   title="Remove"
                 >
                   <X className="h-3 w-3" />
@@ -293,10 +300,11 @@ function BulkBalanceUpdateDialog({
           );
         if (snapErr) { toast.error(`${acc.account_name}: ${snapErr.message}`); continue; }
 
-        await supabase
+        const { error: accErr } = await supabase
           .from('investment_accounts')
           .update({ current_balance: newVal })
           .eq('id', acc.id);
+        if (accErr) { toast.error(`${acc.account_name}: ${accErr.message}`); continue; }
 
         updated++;
       }
@@ -386,7 +394,7 @@ function BulkBalanceUpdateDialog({
 }
 
 export default function Wealth() {
-  const { user, ownerId, isAccountant } = useAuth();
+  const { user, ownerId, isOwner, isAccountant } = useAuth();
   const qc = useQueryClient();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -414,19 +422,23 @@ export default function Wealth() {
   const { data: snapshots = [] } = useQuery({
     queryKey: ['account_balance_snapshots', user?.id],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('account_balance_snapshots')
-        .select('account_id, as_of_date, balance')
-        .is('deleted_at', null)
-        .order('as_of_date', { ascending: true });
-      if (error) throw error;
-      return (data || []).map(s => ({
+      const rows = await fetchAllRows((from, to) =>
+        supabase
+          .from('account_balance_snapshots')
+          .select('account_id, as_of_date, balance')
+          .eq('owner_id', ownerId!)
+          .is('deleted_at', null)
+          .order('as_of_date', { ascending: true })
+          .order('id')
+          .range(from, to),
+      );
+      return rows.map(s => ({
         account_id: s.account_id,
         as_of_date: s.as_of_date,
         balance: Number(s.balance),
       })) as Snapshot[];
     },
-    enabled: !!user,
+    enabled: !!user && !!ownerId,
   });
 
   // ---------------------------------------------------------------
@@ -442,32 +454,40 @@ export default function Wealth() {
       const yearEnd = `${currentYear}-12-31`;
 
       // Auto-seed missing default accounts. Match by pattern overlap OR name to avoid duplicates.
-      const existingPatterns = accounts.map(a => (a.auto_track_pattern || '').toLowerCase()).filter(Boolean);
-      const existingNames = new Set(accounts.map(a => a.account_name.toLowerCase()));
-      const seeds: any[] = [];
-      for (const def of DEFAULT_AUTO_ACCOUNTS) {
-        if (existingNames.has(def.name.toLowerCase())) continue;
-        // Check if any existing account already tracks the same pattern tokens
-        const defTokens = def.pattern.split('|').map(t => t.trim().toLowerCase()).filter(Boolean);
-        const patternOverlap = existingPatterns.some(ep =>
-          defTokens.some(dt => ep.includes(dt) || dt.includes(ep.split('|')[0]))
-        );
-        if (patternOverlap) continue;
-        seeds.push({
-          owner_id: user!.id,
-          account_name: def.name,
-          account_type: def.account_type,
-          platform: def.platform,
-          auto_track_pattern: def.pattern,
-          mode: 'personal',
-          current_balance: 0,
-          contributions_ytd: 0,
-          starting_balance_year: 0,
-        });
-      }
-      if (seeds.length > 0) {
-        await supabase.from('investment_accounts').insert(seeds);
-        qc.invalidateQueries({ queryKey: ['investment_accounts'] });
+      // Owner-only: delegates (accountant/investor) are read-only and must never seed.
+      if (isOwner) {
+        const existingPatterns = accounts.map(a => (a.auto_track_pattern || '').toLowerCase()).filter(Boolean);
+        const existingNames = new Set(accounts.map(a => a.account_name.toLowerCase()));
+        const seeds: any[] = [];
+        for (const def of DEFAULT_AUTO_ACCOUNTS) {
+          if (existingNames.has(def.name.toLowerCase())) continue;
+          // Check if any existing account already tracks the same pattern tokens
+          const defTokens = def.pattern.split('|').map(t => t.trim().toLowerCase()).filter(Boolean);
+          const patternOverlap = existingPatterns.some(ep =>
+            defTokens.some(dt => ep.includes(dt) || dt.includes(ep.split('|')[0]))
+          );
+          if (patternOverlap) continue;
+          seeds.push({
+            owner_id: ownerId!,
+            account_name: def.name,
+            account_type: def.account_type,
+            platform: def.platform,
+            auto_track_pattern: def.pattern,
+            mode: 'personal',
+            current_balance: 0,
+            contributions_ytd: 0,
+            starting_balance_year: 0,
+          });
+        }
+        if (seeds.length > 0) {
+          const { error: seedErr } = await supabase.from('investment_accounts').insert(seeds);
+          if (seedErr) {
+            console.warn('Failed to seed default accounts:', seedErr.message);
+            toast.error(`Failed to seed default accounts: ${seedErr.message}`, { id: 'seed-default-accounts' });
+          } else {
+            qc.invalidateQueries({ queryKey: ['investment_accounts'] });
+          }
+        }
       }
 
       // Re-fetch all accounts (including newly seeded ones)
@@ -545,7 +565,7 @@ export default function Wealth() {
   });
 
   const syncCurrentBalance = async (account_id: string) => {
-    const { data: latest } = await supabase
+    const { data: latest, error: latestErr } = await supabase
       .from('account_balance_snapshots')
       .select('balance')
       .eq('account_id', account_id)
@@ -553,11 +573,16 @@ export default function Wealth() {
       .order('as_of_date', { ascending: false })
       .limit(1)
       .maybeSingle();
+    if (latestErr) {
+      toast.error(`Failed to sync current balance: ${latestErr.message}`);
+      return;
+    }
     if (latest) {
-      await supabase
+      const { error: updErr } = await supabase
         .from('investment_accounts')
         .update({ current_balance: Number(latest.balance) })
         .eq('id', account_id);
+      if (updErr) toast.error(`Failed to sync current balance: ${updErr.message}`);
     }
   };
 
@@ -626,12 +651,13 @@ export default function Wealth() {
       // Auto-snapshot today's balance so the chart's "Today" point and history stay in sync.
       if (savedId && Number(payload.current_balance) > 0) {
         const today = new Date().toISOString().slice(0, 10);
-        await supabase
+        const { error: snapErr } = await supabase
           .from('account_balance_snapshots')
           .upsert(
             { owner_id: user!.id, account_id: savedId, as_of_date: today, balance: Number(payload.current_balance) },
             { onConflict: 'account_id,as_of_date' }
           );
+        if (snapErr) toast.error(`Account saved, but auto-snapshot failed: ${snapErr.message}`);
       }
     },
     onSuccess: () => {
@@ -1036,6 +1062,7 @@ export default function Wealth() {
                                   snapshots={accSnaps}
                                   onSave={(date, balance) => upsertSnapshot.mutate({ account_id: a.id, as_of_date: date, balance })}
                                   onDelete={(date) => deleteSnapshot.mutate({ account_id: a.id, as_of_date: date })}
+                                  deleting={deleteSnapshot.isPending}
                                 />
                               </div>
                             </div>

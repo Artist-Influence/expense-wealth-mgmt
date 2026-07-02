@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
+import { toast } from 'sonner';
 import {
   Dialog,
   DialogContent,
@@ -134,17 +135,19 @@ export function OnboardingWizard({ open, onClose, persistOnComplete = true }: On
 
   const markComplete = async () => {
     if (!persistOnComplete || !ownerId) return;
-    try {
-      await supabase
-        .from('app_settings')
-        .update({
+    // Fresh accounts have no app_settings row yet, so a plain UPDATE would
+    // match 0 rows and silently drop the usage profile. owner_id is UNIQUE.
+    const { error } = await supabase
+      .from('app_settings')
+      .upsert(
+        {
+          owner_id: ownerId,
           onboarding_completed: true,
           ...(usageProfile ? { usage_profile: usageProfile } : {}),
-        })
-        .eq('owner_id', ownerId);
-    } catch {
-      /* non-blocking */
-    }
+        },
+        { onConflict: 'owner_id' },
+      );
+    if (error) toast.error(`Could not save your onboarding choices: ${error.message}`);
   };
 
   const finish = async () => {

@@ -21,7 +21,10 @@ const HIGH_CONFIDENCE_PATTERNS: [RegExp, string][] = [
   [/SAVE\s*AS\s*YOU\s*GO/i, 'account_transfer'],
   [/SAVINGS\s*TRANSFER/i, 'account_transfer'],
   [/ONLINE\s*BANKING\s*TRANSFER\s*(?:TO|FROM)/i, 'account_transfer'],
-  [/TRANSFER\s*(?:TO|FROM)\s*(?:SAVINGS|CHECKING|CHK|SAV|(?:X|XXXX?\d{4}))/i, 'account_transfer'],
+  // Masked accounts must be X's followed by digits (X1234), and SAV/CHK need a
+  // word boundary — otherwise "TRANSFER TO XFINITY MOBILE" or "TO SAVANNAH..."
+  // classify a real bill as an internal transfer and hide it from spend.
+  [/TRANSFER\s*(?:TO|FROM)\s*(?:SAVINGS|CHECKING|CHK\b|SAV\b|X{1,4}\d{2,4}\b)/i, 'account_transfer'],
 
   // Brokerage / investment transfers — money movement into wealth, not spend
   [/\bWEALTHFRONT\b/i, 'brokerage_transfer'],

@@ -47,12 +47,15 @@ Deno.serve(async (req) => {
     auth: { autoRefreshToken: false, persistSession: false },
   });
 
-  // 1. Validate invite code (case-insensitive, must be active).
+  // 1. Validate invite code (case-insensitive EXACT match). The user input is
+  // escaped so %/_ cannot act as ILIKE wildcards — previously submitting "%"
+  // matched any active invite and defeated the gate entirely.
   const normalized = inviteCode.trim().toUpperCase();
+  const escaped = normalized.replace(/[\\%_]/g, '\\$&');
   const { data: codeRow, error: codeErr } = await admin
     .from('invite_codes')
     .select('id, is_active')
-    .ilike('code', normalized)
+    .ilike('code', escaped)
     .maybeSingle();
 
   if (codeErr) {
@@ -64,7 +67,20 @@ Deno.serve(async (req) => {
     return json({ error: 'Invalid or inactive invite code.' }, 403);
   }
 
-  // 2. Create the account (email auto-confirmed for instant access).
+  // 2. Claim the code atomically BEFORE creating the account: the conditional
+  // update only succeeds for one concurrent caller, making codes single-use.
+  const { data: claimed, error: claimErr } = await admin
+    .from('invite_codes')
+    .update({ is_active: false })
+    .eq('id', codeRow.id)
+    .eq('is_active', true)
+    .select('id');
+
+  if (claimErr || !claimed || claimed.length === 0) {
+    return json({ error: 'Invalid or inactive invite code.' }, 403);
+  }
+
+  // 3. Create the account (email auto-confirmed for instant access).
   const { error: createErr } = await admin.auth.admin.createUser({
     email,
     password,
@@ -73,6 +89,8 @@ Deno.serve(async (req) => {
   });
 
   if (createErr) {
+    // Give the unused code back — the signup failed, so it wasn't consumed.
+    await admin.from('invite_codes').update({ is_active: true }).eq('id', codeRow.id);
     const msg = (createErr.message ?? '').toLowerCase();
     if (msg.includes('already') || msg.includes('registered') || msg.includes('exists')) {
       return json({ error: 'An account with this email already exists.' }, 409);

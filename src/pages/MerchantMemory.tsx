@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
 import { AppNav } from '@/components/AppNav';
@@ -27,6 +27,7 @@ export default function MerchantMemory() {
   const [search, setSearch] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValues, setEditValues] = useState({ category: '', method: '', notes: '' });
+  const [savingEdit, setSavingEdit] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>('times_seen');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 
@@ -43,6 +44,46 @@ export default function MerchantMemory() {
       .limit(200);
     setMerchants((data || []) as MerchantRecord[]);
   };
+
+  // Server-side search: only the top-200 records are loaded, so filtering
+  // locally misses merchants outside that window. Terms of 2+ chars query the
+  // server directly (debounced); clearing the search restores the top-200 view.
+  const searchMerchants = async (term: string) => {
+    // Strip chars that break PostgREST .or() syntax inside quoted patterns.
+    const pattern = `%${term.replace(/[\\"]/g, '')}%`;
+    const { data, error } = await supabase
+      .from('merchant_memory')
+      .select('*')
+      .eq('owner_id', ownerId!)
+      .or(`merchant_key.ilike."${pattern}",raw_example.ilike."${pattern}"`)
+      .order('times_seen', { ascending: false })
+      .limit(500);
+    if (error) { toast.error(`Search failed: ${error.message}`); return; }
+    setMerchants((data || []) as MerchantRecord[]);
+  };
+
+  const isServerSearch = search.trim().length >= 2;
+  const serverSearchActive = useRef(false);
+  useEffect(() => {
+    if (!user || !ownerId) return;
+    const term = search.trim();
+    if (term.length < 2) {
+      // Back below the server-search threshold — restore the top-200 view once.
+      if (serverSearchActive.current) {
+        serverSearchActive.current = false;
+        loadMerchants();
+      }
+      return;
+    }
+    const t = setTimeout(() => {
+      serverSearchActive.current = true;
+      searchMerchants(term);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [search, user, ownerId]);
+
+  /** Reload respecting the active search so edits don't yank the user back to the top-200. */
+  const refresh = () => (isServerSearch ? searchMerchants(search.trim()) : loadMerchants());
 
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -86,20 +127,28 @@ export default function MerchantMemory() {
   };
 
   const saveEdit = async (id: string) => {
-    await supabase.from('merchant_memory').update({
-      most_common_category: editValues.category || null,
-      most_common_method: editValues.method || null,
-      default_note_template: editValues.notes || null,
-    }).eq('id', id);
-    setEditingId(null);
-    await loadMerchants();
-    toast.success('Merchant memory updated');
+    if (savingEdit) return;
+    setSavingEdit(true);
+    try {
+      const { error } = await supabase.from('merchant_memory').update({
+        most_common_category: editValues.category || null,
+        most_common_method: editValues.method || null,
+        default_note_template: editValues.notes || null,
+      }).eq('id', id);
+      if (error) { toast.error(`Failed to update merchant memory: ${error.message}`); return; }
+      setEditingId(null);
+      await refresh();
+      toast.success('Merchant memory updated');
+    } finally {
+      setSavingEdit(false);
+    }
   };
 
   const deleteMemory = async (id: string) => {
     if (!confirm('Delete this merchant memory record? This cannot be undone.')) return;
-    await supabase.from('merchant_memory').delete().eq('id', id);
-    await loadMerchants();
+    const { error } = await supabase.from('merchant_memory').delete().eq('id', id);
+    if (error) { toast.error(`Failed to delete memory record: ${error.message}`); return; }
+    await refresh();
     toast.success('Memory record deleted');
   };
 
@@ -140,8 +189,11 @@ export default function MerchantMemory() {
           </div>
         </div>
 
-        {merchants.length >= 200 && (
-          <p className="text-xs text-muted-foreground mb-2">Showing first 200 records. Some merchants may not be listed.</p>
+        {!isServerSearch && merchants.length >= 200 && (
+          <p className="text-xs text-muted-foreground mb-2">Showing first 200 records. Search to find merchants that aren't listed.</p>
+        )}
+        {isServerSearch && merchants.length >= 500 && (
+          <p className="text-xs text-muted-foreground mb-2">Showing first 500 matches. Refine your search to narrow the results.</p>
         )}
         <p className="text-xs text-muted-foreground mb-2">{filtered.length} merchant{filtered.length !== 1 ? 's' : ''} {search ? 'matching' : 'total'}</p>
         <div className="glass-panel overflow-hidden">
@@ -196,7 +248,7 @@ export default function MerchantMemory() {
                     </td>
                     <td className="px-3 py-2 text-right">
                       {editingId === m.id ? (
-                        <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => saveEdit(m.id)}>
+                        <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => saveEdit(m.id)} disabled={savingEdit}>
                           <Save className="h-3.5 w-3.5 text-success" />
                         </Button>
                       ) : (

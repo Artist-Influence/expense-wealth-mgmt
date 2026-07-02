@@ -89,6 +89,10 @@ export function computeRecurringCharges(
           ? avg * 4.3
           : frequency === 'biweekly'
           ? avg * 2.15
+          : frequency === 'quarterly'
+          ? avg / 3
+          : frequency === 'annual'
+          ? avg / 12
           : avg;
       return {
         merchantKey: name,

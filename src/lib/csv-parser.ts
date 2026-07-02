@@ -18,6 +18,9 @@ export interface ParsedTransaction {
 export interface ColumnMapping {
   description: string | null;
   amount: string | null;
+  /** Set when the CSV splits money into Debit + Credit twin columns; `amount`
+   *  then holds the debit (outflow) column and this the credit (inflow) one. */
+  credit?: string | null;
   date: string | null;
   category: string | null;
   method: string | null;
@@ -172,6 +175,15 @@ export function previewCsvFile(file: File): Promise<ParsePreview> {
             method: findColumn(rawHeaders, METHOD_CANDIDATES),
             notes: findColumn(rawHeaders, NOTES_CANDIDATES),
           };
+          // Twin Debit/Credit columns (no single Amount/Total): read both, or
+          // every credit-side row imports as $0.
+          const debitCol = findColumn(rawHeaders, ['debit']);
+          const creditCol = findColumn(rawHeaders, ['credit']);
+          const singleAmountCol = findColumn(rawHeaders, ['total', 'amount', 'value', 'sum', 'transaction amount']);
+          if (!singleAmountCol && debitCol && creditCol && debitCol !== creditCol) {
+            mapping.amount = debitCol;
+            mapping.credit = creditCol;
+          }
           const unmappedRequired: string[] = [];
           if (!mapping.description) unmappedRequired.push('Description');
           if (!mapping.amount) unmappedRequired.push('Amount');
@@ -210,17 +222,35 @@ export function parseCsvFileWithMapping(file: File, mapping: ColumnMapping): Pro
               const errors: string[] = [];
               const rawDesc = mapping.description ? (row[mapping.description] || '').trim() : '';
               const rawAmount = mapping.amount ? (row[mapping.amount] || '').trim() : '';
+              const rawCredit = mapping.credit ? (row[mapping.credit] || '').trim() : '';
               const rawDate = mapping.date ? (row[mapping.date] || '').trim() : '';
 
+              // Date problems are warnings, not quarantine: a row with a valid
+              // amount is real money and must still import (with a null date)
+              // rather than be dropped from totals.
+              const warnings: string[] = [];
               if (!rawDesc) errors.push('Missing description');
-              if (!rawAmount) errors.push('Missing amount');
+              if (!rawAmount && !rawCredit) errors.push('Missing amount');
+              if (!rawDate) warnings.push('Missing date');
 
               const parsedDate = rawDate ? parseDate(rawDate) : null;
-              if (rawDate && !parsedDate) errors.push(`Unparseable date: ${rawDate}`);
+              if (rawDate && !parsedDate) warnings.push(`Unparseable date: ${rawDate}`);
 
-              const amount = rawAmount ? parseAmount(rawAmount) : 0;
-              if (rawAmount && amount === 0 && rawAmount !== '0' && rawAmount !== '$0.00') {
-                errors.push(`Unparseable amount: ${rawAmount}`);
+              // Twin-column files: debit = outflow (negative), credit = inflow
+              // (positive), matching the checking-CSV sign convention.
+              let amount: number;
+              if (mapping.credit) {
+                amount = rawAmount
+                  ? -Math.abs(parseAmount(rawAmount))
+                  : rawCredit
+                    ? Math.abs(parseAmount(rawCredit))
+                    : 0;
+              } else {
+                amount = rawAmount ? parseAmount(rawAmount) : 0;
+              }
+              const amountSource = rawAmount || rawCredit;
+              if (amountSource && amount === 0 && amountSource !== '0' && amountSource !== '$0.00') {
+                errors.push(`Unparseable amount: ${amountSource}`);
               }
 
               const normalized = normalizeDescription(rawDesc);
@@ -233,7 +263,12 @@ export function parseCsvFileWithMapping(file: File, mapping: ColumnMapping): Pro
                 return null; // will be filtered out
               }
 
-              const hasErrors = errors.length > 0 && !rawDesc && !rawAmount;
+              // Amount/description problems quarantine the row — the old
+              // `&& !rawDesc && !rawAmount` condition was unreachable (such
+              // rows are filtered above), so unparseable amounts imported as
+              // "ok" $0 rows. Date-only problems import with a warning note.
+              const hasErrors = errors.length > 0;
+              const allNotes = [...errors, ...warnings];
 
               return {
                 date: parsedDate,
@@ -246,7 +281,7 @@ export function parseCsvFileWithMapping(file: File, mapping: ColumnMapping): Pro
                 notes: mapping.notes ? (row[mapping.notes] || '').trim() || null : null,
                 source_row_json: { ...row },
                 parse_status: (hasErrors ? 'parse_error' : 'ok') as 'ok' | 'parse_error',
-                parse_error: errors.length > 0 ? errors.join('; ') : null,
+                parse_error: allNotes.length > 0 ? allNotes.join('; ') : null,
               };
             })
             .filter((tx): tx is ParsedTransaction => tx !== null);

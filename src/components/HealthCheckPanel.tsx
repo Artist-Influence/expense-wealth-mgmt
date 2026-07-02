@@ -29,7 +29,7 @@ function fmtRelative(iso: string | null | undefined) {
 }
 
 export function HealthCheckPanel({ open, onClose, initialSummary, onSummaryChange }: HealthCheckPanelProps) {
-  const { user } = useAuth();
+  const { user, ownerId } = useAuth();
   const [summary, setSummary] = useState<HealthCheckSummary | null>(initialSummary || null);
   const [running, setRunning] = useState(false);
   const [resolverOpen, setResolverOpen] = useState(false);
@@ -39,10 +39,12 @@ export function HealthCheckPanel({ open, onClose, initialSummary, onSummaryChang
   }, [initialSummary]);
 
   async function refresh() {
-    if (!user) return;
+    // Scan the WORKSPACE owner's data — a delegate scanning their own empty
+    // tenant would report "healthy" no matter what.
+    if (!user || !ownerId) return;
     setRunning(true);
     try {
-      const s = await runHealthCheck(user.id);
+      const s = await runHealthCheck(ownerId);
       setSummary(s);
       onSummaryChange?.(s);
       toast.success(s.totalIssues === 0 ? 'All clean — no issues found.' : `Health check complete · ${s.totalIssues} issue${s.totalIssues > 1 ? 's' : ''}`);

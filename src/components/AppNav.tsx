@@ -79,9 +79,9 @@ export function AppNav() {
             totalIssues: (data.last_health_check_summary as any)?.totalIssues || 0,
           } as HealthCheckSummary);
         }
-        const due = await shouldAutoRun(user.id);
+        const due = await shouldAutoRun(ownerId!);
         if (due && !cancelled) {
-          const fresh = await runHealthCheck(user.id);
+          const fresh = await runHealthCheck(ownerId!);
           if (!cancelled) setHealthSummary(fresh);
         }
       } catch {/* silent */}

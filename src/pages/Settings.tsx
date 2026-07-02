@@ -13,6 +13,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { Plus, Trash2, ChevronDown, Zap, Save, Wand2, HelpCircle, CheckCircle2, Circle, CreditCard, Database, ArrowRight } from 'lucide-react';
 import { previewCsvFile, parseCsvFileWithMapping, type ColumnMapping, type ParsePreview } from '@/lib/csv-parser';
+import { fetchAllRows } from '@/lib/fetch-all';
 import { updateMerchantMemory } from '@/lib/categorization-engine';
 import { SeedMappingDialog } from '@/components/SeedMappingDialog';
 import { OnboardingWizard } from '@/components/OnboardingWizard';
@@ -20,6 +21,8 @@ import { MfaCard } from '@/components/MfaCard';
 import type { PaymentMethod } from '@/hooks/usePaymentMethods';
 
 const STOP_WORDS = new Set(['THE', 'AND', 'INC', 'LLC', 'LTD', 'FOR', 'FROM', 'WITH', 'COM', 'WWW', 'HTTP', 'HTTPS', 'NET', 'ORG', 'CO', 'USA', 'TST', 'SQ', 'POS', 'DES', 'ACH', 'REF', 'TXN', 'PMT', 'CKS', 'INT', 'FEE', 'TAX', 'PRE', 'ATM', 'WEB', 'TEL', 'PPD', 'CCD']);
+
+const MAX_SEED_FILE_BYTES = 15 * 1024 * 1024; // 15 MB
 
 async function generateRulesFromMerchants(
   merchants: { key: string; category: string | null; method: string | null }[],
@@ -83,7 +86,8 @@ async function generateRulesFromMerchants(
   if (newRules.length > 0) {
     // Insert in batches of 50
     for (let i = 0; i < newRules.length; i += 50) {
-      await supabase.from('categorization_rules').insert(newRules.slice(i, i + 50));
+      const { error } = await supabase.from('categorization_rules').insert(newRules.slice(i, i + 50));
+      if (error) throw new Error(`Failed to insert auto-rules: ${error.message}`);
     }
   }
 
@@ -160,6 +164,7 @@ export default function SettingsPage() {
   const [businessCats, setBusinessCats] = useState<CategoryOption[]>([]);
   const [newCatPersonal, setNewCatPersonal] = useState('');
   const [newCatBusiness, setNewCatBusiness] = useState('');
+  const [addingCategory, setAddingCategory] = useState(false);
   const [settings, setSettings] = useState<AppSettingsData>({
     personal_auto_threshold: 90, business_auto_threshold: 90,
     personal_suggest_threshold: 70, business_suggest_threshold: 70,
@@ -172,6 +177,7 @@ export default function SettingsPage() {
     report_basis: 'cash',
     usage_profile: 'both',
   });
+  const [savingSettings, setSavingSettings] = useState(false);
   const [seedingPersonal, setSeedingPersonal] = useState(false);
   const [seedingBusiness, setSeedingBusiness] = useState(false);
   const [seedingPersonalIncome, setSeedingPersonalIncome] = useState(false);
@@ -188,6 +194,7 @@ export default function SettingsPage() {
   const [rules, setRules] = useState<Rule[]>([]);
   const [isAddingRule, setIsAddingRule] = useState(false);
   const [newRule, setNewRule] = useState(emptyRule);
+  const [savingRule, setSavingRule] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);
   const [testInput, setTestInput] = useState('');
   const [testResult, setTestResult] = useState<string | null>(null);
@@ -197,6 +204,7 @@ export default function SettingsPage() {
   const [newMethod, setNewMethod] = useState<{ name: string; mode: string; account_type: string; match_pattern: string }>({
     name: '', mode: 'personal', account_type: 'credit_card', match_pattern: '',
   });
+  const [addingMethod, setAddingMethod] = useState(false);
 
   useEffect(() => {
     if (user && ownerId) { loadCategories(); loadSettings(); loadRules(); loadMethods(); }
@@ -244,63 +252,90 @@ export default function SettingsPage() {
   };
 
   const addMethod = async () => {
+    if (addingMethod) return;
     const name = newMethod.name.trim();
     if (!name) { toast.error('Method name is required'); return; }
     const duplicate = methods.find(m => m.name.toLowerCase() === name.toLowerCase());
     if (duplicate) { toast.error(`Method "${name}" already exists`); return; }
-    await supabase.from('payment_methods').insert({
-      name,
-      mode: newMethod.mode,
-      account_type: newMethod.account_type,
-      match_pattern: newMethod.match_pattern.trim() || null,
-      sort_order: methods.length,
-      owner_id: user!.id,
-    });
-    setNewMethod({ name: '', mode: 'personal', account_type: 'credit_card', match_pattern: '' });
-    await loadMethods();
-    setup.reload();
-    toast.success(`Method "${name}" added`);
+    setAddingMethod(true);
+    try {
+      const { error } = await supabase.from('payment_methods').insert({
+        name,
+        mode: newMethod.mode,
+        account_type: newMethod.account_type,
+        match_pattern: newMethod.match_pattern.trim() || null,
+        sort_order: methods.length,
+        owner_id: user!.id,
+      });
+      if (error) { toast.error(`Failed to add method: ${error.message}`); return; }
+      setNewMethod({ name: '', mode: 'personal', account_type: 'credit_card', match_pattern: '' });
+      await loadMethods();
+      setup.reload();
+      toast.success(`Method "${name}" added`);
+    } finally {
+      setAddingMethod(false);
+    }
   };
 
   const updateMethod = async (id: string, patch: Partial<PaymentMethod>) => {
-    await supabase.from('payment_methods').update(patch).eq('id', id);
+    const { error } = await supabase.from('payment_methods').update(patch).eq('id', id);
+    if (error) { toast.error(`Failed to update method: ${error.message}`); return; }
     await loadMethods();
   };
 
   const deleteMethod = async (id: string) => {
-    await supabase.from('payment_methods').delete().eq('id', id);
+    const { error } = await supabase.from('payment_methods').delete().eq('id', id);
+    if (error) { toast.error(`Failed to delete method: ${error.message}`); return; }
     await loadMethods();
     toast.success('Method deleted');
   };
 
   const addCategory = async (mode: 'personal' | 'business', name: string) => {
-    if (!name.trim()) return;
+    if (!name.trim() || addingCategory) return;
     const cats = mode === 'personal' ? personalCats : businessCats;
     const duplicate = cats.find(c => c.category_name.toLowerCase() === name.trim().toLowerCase());
     if (duplicate) {
       toast.error(`Category "${duplicate.category_name}" already exists`);
       return;
     }
-    await supabase.from('category_options').insert({ mode, category_name: name.trim(), sort_order: cats.length, owner_id: user!.id });
-    if (mode === 'personal') setNewCatPersonal(''); else setNewCatBusiness('');
-    await loadCategories();
-    toast.success(`Category "${name}" added`);
+    setAddingCategory(true);
+    try {
+      const { error } = await supabase.from('category_options').insert({ mode, category_name: name.trim(), sort_order: cats.length, owner_id: user!.id });
+      if (error) { toast.error(`Failed to add category: ${error.message}`); return; }
+      if (mode === 'personal') setNewCatPersonal(''); else setNewCatBusiness('');
+      await loadCategories();
+      toast.success(`Category "${name}" added`);
+    } finally {
+      setAddingCategory(false);
+    }
   };
 
   const deleteCategory = async (id: string) => {
-    await supabase.from('category_options').delete().eq('id', id);
+    const { error } = await supabase.from('category_options').delete().eq('id', id);
+    if (error) { toast.error(`Failed to delete category: ${error.message}`); return; }
     await loadCategories();
   };
 
   const saveSettings = async () => {
-    const { data: existing } = await supabase.from('app_settings').select('id').eq('owner_id', ownerId!).maybeSingle();
-    const payload = { ...settings };
-    if (existing) await supabase.from('app_settings').update(payload).eq('id', existing.id);
-    else await supabase.from('app_settings').insert({ ...payload, owner_id: user!.id });
-    toast.success('Settings saved');
+    if (savingSettings) return;
+    setSavingSettings(true);
+    try {
+      // app_settings.owner_id is UNIQUE — upsert can't double-insert on rapid clicks.
+      const { error } = await supabase
+        .from('app_settings')
+        .upsert({ ...settings, owner_id: ownerId! }, { onConflict: 'owner_id' });
+      if (error) { toast.error(`Failed to save settings: ${error.message}`); return; }
+      toast.success('Settings saved');
+    } finally {
+      setSavingSettings(false);
+    }
   };
 
   const handleSeedFileSelected = async (file: File, mode: 'personal' | 'business', label: string) => {
+    if (file.size > MAX_SEED_FILE_BYTES) {
+      toast.error(`File is too large (max ${MAX_SEED_FILE_BYTES / (1024 * 1024)} MB). Split the CSV and try again.`);
+      return;
+    }
     try {
       const preview = await previewCsvFile(file);
       setSeedPreview(preview);
@@ -340,7 +375,8 @@ export default function SettingsPage() {
         const newCategories = [...categorySet].filter(c => !existingNames.has(c));
         newCatCount = newCategories.length;
         if (newCategories.length > 0) {
-          await supabase.from('category_options').insert(newCategories.map((name, i) => ({ mode, category_name: name, sort_order: existingCats.length + i, owner_id: user!.id })));
+          const { error: catError } = await supabase.from('category_options').insert(newCategories.map((name, i) => ({ mode, category_name: name, sort_order: existingCats.length + i, owner_id: user!.id })));
+          if (catError) throw new Error(`Failed to add categories: ${catError.message}`);
         }
       }
       for (const [key, data] of merchantMap) {
@@ -369,16 +405,16 @@ export default function SettingsPage() {
   };
 
   const clearSeededData = async (mode: 'personal' | 'business') => {
-    try {
-      await supabase.from('merchant_memory').delete().eq('owner_id', ownerId!).eq('mode', mode);
-      await supabase.from('category_options').delete().eq('owner_id', ownerId!).eq('mode', mode);
-      await supabase.from('categorization_rules').delete().eq('owner_id', ownerId!).eq('mode', mode).eq('priority', 200);
-      await loadCategories();
-      await loadRules();
-      toast.success(`Cleared all ${mode} merchant memory, categories, and auto-generated rules`);
-    } catch (err: any) {
-      toast.error(`Failed to clear: ${err.message}`);
-    }
+    // supabase-js returns { error } instead of throwing — check each delete explicitly.
+    const { error: memError } = await supabase.from('merchant_memory').delete().eq('owner_id', ownerId!).eq('mode', mode);
+    if (memError) { toast.error(`Failed to clear: ${memError.message}`); return; }
+    const { error: catError } = await supabase.from('category_options').delete().eq('owner_id', ownerId!).eq('mode', mode);
+    if (catError) { toast.error(`Failed to clear: ${catError.message}`); return; }
+    const { error: ruleError } = await supabase.from('categorization_rules').delete().eq('owner_id', ownerId!).eq('mode', mode).eq('priority', 200);
+    if (ruleError) { toast.error(`Failed to clear: ${ruleError.message}`); return; }
+    await loadCategories();
+    await loadRules();
+    toast.success(`Cleared all ${mode} merchant memory, categories, and auto-generated rules`);
   };
 
   const [generatingRules, setGeneratingRules] = useState(false);
@@ -386,12 +422,16 @@ export default function SettingsPage() {
   const handleGenerateRulesFromMemory = async (mode: 'personal' | 'business') => {
     setGeneratingRules(true);
     try {
-      const { data: merchants } = await supabase
-        .from('merchant_memory')
-        .select('merchant_key, most_common_category, most_common_method')
-        .eq('owner_id', ownerId!)
-        .eq('mode', mode);
-      if (!merchants || merchants.length === 0) {
+      const merchants = await fetchAllRows((from, to) =>
+        supabase
+          .from('merchant_memory')
+          .select('merchant_key, most_common_category, most_common_method')
+          .eq('owner_id', ownerId!)
+          .eq('mode', mode)
+          .order('id')
+          .range(from, to),
+      );
+      if (merchants.length === 0) {
         toast.error(`No ${mode} merchant memory found. Seed historical data first.`);
         return;
       }
@@ -412,21 +452,34 @@ export default function SettingsPage() {
 
   // Rules functions
   const addRule = async () => {
-    const { error } = await supabase.from('categorization_rules').insert({
-      ...newRule, category_output: newRule.category_output || null,
-      method_output: newRule.method_output || null, notes_output: newRule.notes_output || null,
-      owner_id: user!.id,
-    });
-    if (!error) { setIsAddingRule(false); setNewRule(emptyRule); await loadRules(); toast.success('Rule added'); }
+    if (savingRule) return;
+    const pattern = newRule.pattern.trim().toUpperCase();
+    const exists = rules.some(r => r.is_active && r.mode === newRule.mode && r.pattern.trim().toUpperCase() === pattern);
+    if (exists) { toast.error('Rule already exists'); return; }
+    setSavingRule(true);
+    try {
+      const { error } = await supabase.from('categorization_rules').insert({
+        ...newRule, category_output: newRule.category_output || null,
+        method_output: newRule.method_output || null, notes_output: newRule.notes_output || null,
+        owner_id: user!.id,
+      });
+      if (error) { toast.error(`Failed to add rule: ${error.message}`); return; }
+      setIsAddingRule(false); setNewRule(emptyRule); await loadRules(); toast.success('Rule added');
+    } finally {
+      setSavingRule(false);
+    }
   };
 
   const deleteRule = async (id: string) => {
-    await supabase.from('categorization_rules').delete().eq('id', id);
+    if (!confirm('Delete this rule? This cannot be undone.')) return;
+    const { error } = await supabase.from('categorization_rules').delete().eq('id', id);
+    if (error) { toast.error(`Failed to delete rule: ${error.message}`); return; }
     await loadRules(); toast.success('Rule deleted');
   };
 
   const toggleRuleActive = async (id: string, active: boolean) => {
-    await supabase.from('categorization_rules').update({ is_active: active }).eq('id', id);
+    const { error } = await supabase.from('categorization_rules').update({ is_active: active }).eq('id', id);
+    if (error) { toast.error(`Failed to update rule: ${error.message}`); return; }
     await loadRules();
   };
 
@@ -472,7 +525,7 @@ export default function SettingsPage() {
       </div>
       <div className="flex gap-2">
         <Input placeholder="New category..." value={newVal} onChange={e => setNewVal(e.target.value)} className="glass-input h-8 text-xs" onKeyDown={e => e.key === 'Enter' && addCategory(mode, newVal)} />
-        <Button size="sm" className="h-8" onClick={() => addCategory(mode, newVal)}>
+        <Button size="sm" className="h-8" onClick={() => addCategory(mode, newVal)} disabled={addingCategory}>
           <Plus className="h-3.5 w-3.5" />
         </Button>
       </div>
@@ -637,7 +690,7 @@ export default function SettingsPage() {
                 onKeyDown={e => e.key === 'Enter' && addMethod()}
                 className="glass-input h-8 text-xs col-span-3"
               />
-              <Button size="sm" className="h-8 col-span-1" onClick={addMethod}>
+              <Button size="sm" className="h-8 col-span-1" onClick={addMethod} disabled={addingMethod}>
                 <Plus className="h-3.5 w-3.5" />
               </Button>
             </div>
@@ -761,7 +814,7 @@ export default function SettingsPage() {
             </div>
           </div>
 
-          <Button size="sm" onClick={saveSettings}>Save Settings</Button>
+          <Button size="sm" onClick={saveSettings} disabled={savingSettings}>{savingSettings ? 'Saving…' : 'Save Settings'}</Button>
 
 
           {/* Historical Seed Import */}
@@ -912,7 +965,7 @@ export default function SettingsPage() {
                     <Input placeholder="Notes" value={newRule.notes_output} onChange={e => setNewRule(v => ({ ...v, notes_output: e.target.value }))} className="glass-input h-8 text-xs" />
                   </div>
                   <div className="flex gap-2">
-                    <Button size="sm" onClick={addRule} className="h-8 text-xs">Save</Button>
+                    <Button size="sm" onClick={addRule} className="h-8 text-xs" disabled={savingRule}>Save</Button>
                     <Button size="sm" variant="ghost" onClick={() => { setIsAddingRule(false); setNewRule(emptyRule); }} className="h-8 text-xs">Cancel</Button>
                   </div>
                 </div>

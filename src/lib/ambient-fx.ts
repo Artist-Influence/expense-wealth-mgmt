@@ -11,9 +11,15 @@ const PANEL_SELECTOR = '.glass-panel, .glass-panel-sm';
 
 /** Panels that must never tilt: sticky nav, portaled overlays, opt-outs. */
 function tiltEligible(el: HTMLElement): boolean {
-  return !el.closest(
-    'nav, [role="dialog"], [role="alertdialog"], [data-radix-popper-content-wrapper], [data-no-tilt]',
-  );
+  if (
+    el.closest(
+      'nav, [role="dialog"], [role="alertdialog"], [data-radix-popper-content-wrapper], [data-no-tilt]',
+    )
+  ) {
+    return false;
+  }
+  // Data tables are work surfaces; they must stay still under the cursor.
+  return !el.querySelector('table');
 }
 
 function initAmbientLayer() {
@@ -89,11 +95,23 @@ function initReveal() {
   );
 
   const process = (root: ParentNode) => {
+    // If a table mounted into a panel that is still entering, snap it static
+    // so the table never moves.
+    for (const panel of root.querySelectorAll<HTMLElement>('.reveal')) {
+      if (panel.querySelector('table')) {
+        panel.classList.remove('reveal', 'shown');
+        panel.style.removeProperty('--rd');
+        io.unobserve(panel);
+      }
+    }
+
     const panels = root.querySelectorAll<HTMLElement>(PANEL_SELECTOR);
     let batchIndex = 0;
     for (const panel of panels) {
       if (revealed.has(panel) || panel.closest('nav, [role="dialog"], [role="alertdialog"]')) continue;
       revealed.add(panel);
+      // Panels holding data tables render in place with no entrance motion.
+      if (panel.querySelector('table')) continue;
       panel.classList.add('reveal');
       panel.style.setProperty('--rd', `${Math.min(batchIndex, 8) * 60}ms`);
       batchIndex += 1;

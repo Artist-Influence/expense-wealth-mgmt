@@ -137,15 +137,27 @@ export function findNearClusters(
     if (ra !== rb) parent.set(ra, rb);
   };
 
-  for (const list of buckets.values()) {
-    if (list.length < 2) continue;
+  const compare = (a: ClusterRow, b: ClusterRow) => {
+    if (isNearDuplicate(a, b, dayRange)) {
+      parent.set(a.id, parent.get(a.id) || a.id);
+      parent.set(b.id, parent.get(b.id) || b.id);
+      union(a.id, b.id);
+    }
+  };
+
+  for (const [cents, list] of buckets.entries()) {
     for (let i = 0; i < list.length; i++) {
       for (let j = i + 1; j < list.length; j++) {
-        const a = list[i], b = list[j];
-        if (isNearDuplicate(a, b, dayRange)) {
-          parent.set(a.id, parent.get(a.id) || a.id);
-          parent.set(b.id, parent.get(b.id) || b.id);
-          union(a.id, b.id);
+        compare(list[i], list[j]);
+      }
+    }
+    // isNearDuplicate tolerates a 1-cent difference, which always lands in the
+    // neighboring bucket — probe it or 12.00 vs 12.01 never get compared.
+    const next = buckets.get(cents + 1);
+    if (next) {
+      for (const a of list) {
+        for (const b of next) {
+          compare(a, b);
         }
       }
     }

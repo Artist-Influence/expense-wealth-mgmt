@@ -1,5 +1,6 @@
 import { supabase } from '@/integrations/supabase/client';
 import type { ParsedTransaction } from './csv-parser';
+import { fetchAllRows } from './fetch-all';
 import { generateMerchantKey, remapCategory } from './normalizer';
 import { detectRecurrence } from './recurrence-detector';
 
@@ -269,28 +270,35 @@ export async function categorizeTransactions(
 ): Promise<CategorizationResult[]> {
   const allowedSet = new Set(allowedCategories);
 
-  // Load merchant memory for this mode
-  const { data: memoryData } = await supabase
-    .from('merchant_memory')
-    .select('merchant_key, most_common_category, most_common_method, default_note_template, confidence_weight, times_seen')
-    .eq('mode', mode)
-    .eq('owner_id', ownerId);
+  // Load merchant memory for this mode — paginated, or merchants past the
+  // 1000-row PostgREST cap silently stop matching.
+  const memoryData = await fetchAllRows<MerchantMemoryRecord & { merchant_key: string }>(
+    (from, to) => supabase
+      .from('merchant_memory')
+      .select('merchant_key, most_common_category, most_common_method, default_note_template, confidence_weight, times_seen')
+      .eq('mode', mode)
+      .eq('owner_id', ownerId)
+      .order('merchant_key')
+      .range(from, to),
+  );
 
   const memoryMap = new Map<string, MerchantMemoryRecord>();
-  (memoryData || []).forEach(m => {
+  memoryData.forEach(m => {
     memoryMap.set(m.merchant_key, m as MerchantMemoryRecord);
   });
 
-  // Load rules
-  const { data: rulesData } = await supabase
+  // Load rules — same cap risk once auto-generated rules accumulate.
+  const rulesData = await fetchAllRows<RuleRecord>((from, to) => supabase
     .from('categorization_rules')
     .select('match_type, pattern, category_output, method_output, notes_output, priority')
     .or(`mode.eq.${mode},mode.eq.both`)
     .eq('is_active', true)
     .eq('owner_id', ownerId)
-    .order('priority', { ascending: true });
+    .order('priority', { ascending: true })
+    .order('id')
+    .range(from, to));
 
-  const rules = (rulesData || []) as RuleRecord[];
+  const rules = rulesData as RuleRecord[];
 
   return transactions.map(tx => {
     const merchantKey = tx.merchant_key || generateMerchantKey(tx.description_normalized);
@@ -508,6 +516,8 @@ export async function categorizeWithAI(
 
 /**
  * Update merchant memory after a transaction is approved.
+ * Returns false when the write failed (RLS/network) so callers can surface it
+ * instead of silently losing the learning signal.
  */
 export async function updateMerchantMemory(
   merchantKey: string,
@@ -518,10 +528,10 @@ export async function updateMerchantMemory(
   rawExample: string,
   ownerId: string,
   matchSource?: string | null,
-): Promise<void> {
+): Promise<boolean> {
   const isRecurring = matchSource === 'recurring_pattern';
 
-  const { data: existing } = await supabase
+  const { data: existing, error: readError } = await supabase
     .from('merchant_memory')
     .select('id, times_seen, confidence_weight')
     .eq('merchant_key', merchantKey)
@@ -529,11 +539,16 @@ export async function updateMerchantMemory(
     .eq('owner_id', ownerId)
     .maybeSingle();
 
+  if (readError) {
+    console.warn('merchant_memory read failed:', readError.message);
+    return false;
+  }
+
   if (existing) {
     // Boost confidence more aggressively on manual approval; recurring gets +5 instead of +3
     const bump = isRecurring ? 5 : 3;
     const newWeight = Math.min((existing.confidence_weight || 80) + bump, 99);
-    await supabase
+    const { error } = await supabase
       .from('merchant_memory')
       .update({
         most_common_category: category,
@@ -544,8 +559,12 @@ export async function updateMerchantMemory(
         confidence_weight: newWeight,
       })
       .eq('id', existing.id);
+    if (error) {
+      console.warn('merchant_memory update failed:', error.message);
+      return false;
+    }
   } else {
-    await supabase
+    const { error } = await supabase
       .from('merchant_memory')
       .insert({
         merchant_key: merchantKey,
@@ -559,5 +578,10 @@ export async function updateMerchantMemory(
         confidence_weight: isRecurring ? 90 : 82,
         owner_id: ownerId,
       });
+    if (error) {
+      console.warn('merchant_memory insert failed:', error.message);
+      return false;
+    }
   }
+  return true;
 }

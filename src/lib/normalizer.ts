@@ -43,20 +43,24 @@ export function normalizeDescription(raw: string): string {
   normalized = normalized.replace(/IND NAME:\s*[A-Z][\w\s&'./-]*?(?=\s+(?:ORIG|TRACE|EED|TRN|SEC|CO ENTRY|DESC DATE|IND ID|\d{6,})|$)/gi, '');
   normalized = normalized.replace(/DESC DATE:\s*\d+/gi, '');
 
-  // Remove common bank transport words
-  normalized = normalized.replace(/\b(ONLINE|ACH|PENDING|VIA|CREDIT|DEBIT)\b/gi, '');
+  // Remove common bank transport words. CREDIT/DEBIT only strip as part of
+  // card/txn-type phrases or at the end — merchants like CREDIT KARMA keep theirs.
+  normalized = normalized.replace(/\b(ONLINE|ACH|PENDING|VIA)\b/gi, '');
+  normalized = normalized.replace(/\b(CREDIT|DEBIT)\s+(CARD|PURCHASE|PAYMENT|MEMO|PIN)\b/gi, '');
+  normalized = normalized.replace(/\s+(CREDIT|DEBIT)\s*$/gi, '');
 
   // Remove long numeric strings (transaction IDs)
   normalized = normalized.replace(/\b\d{8,}\b/g, '');
-  // Remove alphanumeric IDs like JPM99bfmb9ru
-  normalized = normalized.replace(/\b[A-Z0-9]{8,}[A-Z]{2}\b/g, '');
+  // Remove alphanumeric IDs like JPM99bfmb9ru — must contain a digit, or real
+  // merchant words (SQUARESPACE, CRUNCHYROLL) get erased and fingerprints collide.
+  normalized = normalized.replace(/\b(?=[A-Z0-9]*\d)[A-Z0-9]{8,}[A-Z]{2}\b/g, '');
   // Remove hash IDs
   normalized = normalized.replace(/#\w+/g, '');
-  // Remove star-prefixed random suffixes but keep short ones (FACEBK *type)
-  normalized = normalized.replace(/\*\w+/g, match => {
-    if (match.length > 6) return '';
-    return match;
-  });
+  // Star suffixes: random ids (contain digits) are noise; alpha suffixes are the
+  // seller's actual name (SQ *COFFEEHOUSE) and must survive as words.
+  normalized = normalized.replace(/\*(\w+)/g, (_m, word: string) =>
+    /\d/.test(word) ? '' : ` ${word}`,
+  );
 
   // Remove masked account numbers
   normalized = normalized.replace(/\bXXXXX\w*/g, '');
@@ -88,6 +92,13 @@ export function normalizeDescription(raw: string): string {
     if (!normalized.includes(entity)) {
       return `${entity} ${normalized}`.trim();
     }
+  }
+
+  // Never return empty for a non-empty input: an empty key would collide
+  // fingerprints across totally different merchants. Fall back to the raw
+  // description, minimally cleaned.
+  if (!normalized) {
+    return raw.toUpperCase().replace(/\s+/g, ' ').trim();
   }
 
   return normalized;
@@ -155,15 +166,16 @@ const MERCHANT_ALIASES: [((key: string) => boolean), ((key: string) => string)][
   // Amazon
   [k => k.includes('AMAZON') || k.includes('AMZN'), () => 'AMAZON'],
 
-  // Apple
-  [k => k.includes('APPLE') && k.includes('STORAGE'), () => 'APPLE STORAGE'],
-  [k => k.includes('APPLE'), () => 'APPLE'],
+  // Apple — token-bounded so APPLEBEES et al. keep their own identity
+  [k => /\bAPPLE\b/.test(k) && k.includes('STORAGE'), () => 'APPLE STORAGE'],
+  [k => /\bAPPLE\b/.test(k), () => 'APPLE'],
 
   // Stripe
   [k => k.includes('STRIPE'), () => 'STRIPE'],
 
-  // Square
-  [k => k.includes('SQUARE') || k.includes('SQ *'), () => 'SQUARE'],
+  // Square the processor only (leading token). TIMES SQUARE PARKING and
+  // individual SQ sellers keep their own keys.
+  [k => /^SQUARE\b/.test(k), () => 'SQUARE'],
 
   // Shopify
   [k => k.includes('SHOPIFY'), () => 'SHOPIFY'],
@@ -221,35 +233,77 @@ export function remapCategory(category: string, description: string): string {
 }
 
 /**
- * Parse amount from CSV, handling negative signs and dollar signs.
+ * Parse amount from CSV, handling dollar signs, accounting negatives
+ * "(123.45)", trailing minus "123.45-", and European "1.234,56".
  */
 export function parseAmount(value: string): number {
   if (!value) return 0;
-  const cleaned = value.replace(/[$,]/g, '').trim();
-  const num = parseFloat(cleaned);
-  return isNaN(num) ? 0 : num;
+  let cleaned = value.trim();
+  let negative = false;
+
+  const paren = cleaned.match(/^\((.*)\)$/);
+  if (paren) {
+    negative = true;
+    cleaned = paren[1];
+  }
+  if (/-\s*$/.test(cleaned)) {
+    negative = true;
+    cleaned = cleaned.replace(/-\s*$/, '');
+  }
+
+  // European decimal comma (dot thousands + comma cents) — unambiguous shape only.
+  const bare = cleaned.replace(/[$\s]/g, '');
+  if (/^-?\d{1,3}(\.\d{3})+,\d{1,2}$/.test(bare)) {
+    cleaned = bare.replace(/\./g, '').replace(',', '.');
+  }
+
+  const num = parseFloat(cleaned.replace(/[$,\s]/g, ''));
+  if (isNaN(num)) return 0;
+  return negative ? -Math.abs(num) : num;
 }
 
 /**
- * Parse date from various formats.
+ * Parse date from various formats to a local YYYY-MM-DD string.
+ * Never round-trips through UTC (toISOString shifts a day in negative-offset
+ * timezones) and strips time-of-day suffixes before parsing.
  */
 export function parseDate(value: string): string | null {
   if (!value) return null;
+  let v = value.trim();
 
-  // Handle M/D/YYYY or MM/DD/YYYY
-  const parts = value.split('/');
+  // Drop a trailing time component: "6/15/2024 3:45 PM", "2024-06-15 23:30:00"
+  v = v.replace(/[T\s]+\d{1,2}:\d{2}(:\d{2})?(\s*[AP]M)?$/i, '').trim();
+
+  // M/D/YYYY or MM/DD/YY — validated numerically
+  const parts = v.split('/');
   if (parts.length === 3) {
-    const month = parts[0].padStart(2, '0');
-    const day = parts[1].padStart(2, '0');
-    let year = parts[2];
-    if (year.length === 2) year = '20' + year;
-    return `${year}-${month}-${day}`;
+    const month = parseInt(parts[0], 10);
+    const day = parseInt(parts[1], 10);
+    let yearStr = parts[2].trim();
+    if (/^\d{2}$/.test(yearStr)) yearStr = '20' + yearStr;
+    const year = parseInt(yearStr, 10);
+    if (
+      month >= 1 && month <= 12 &&
+      day >= 1 && day <= 31 &&
+      year >= 1970 && year <= 2100
+    ) {
+      return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    }
+    return null;
   }
 
-  // Try ISO format
-  const d = new Date(value);
+  // Already ISO — take as-is
+  const iso = v.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (iso) {
+    const m = parseInt(iso[2], 10);
+    const d = parseInt(iso[3], 10);
+    return m >= 1 && m <= 12 && d >= 1 && d <= 31 ? v : null;
+  }
+
+  // Word dates ("June 15, 2024", "15-Jun-2024") — format from LOCAL components.
+  const d = new Date(v);
   if (!isNaN(d.getTime())) {
-    return d.toISOString().split('T')[0];
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   }
 
   return null;

@@ -33,7 +33,7 @@ interface SplitTransactionDialogProps {
     source_file_name: string | null;
   } | null;
   categories: string[];
-  onSplit: (parentId: string, children: SplitRow[]) => Promise<void>;
+  onSplit: (parentId: string, children: SplitRow[]) => Promise<boolean>;
   onAddCategory?: (rowId: string) => void;
   /** When set, this row gets the new category applied, then parent clears via onPendingCategoryConsumed. */
   pendingCategoryToSelect?: { rowId: string; name: string } | null;
@@ -123,8 +123,10 @@ export function SplitTransactionDialog({ open, onClose, transaction, categories,
     if (!transaction || !isBalanced || hasEmptyAmounts) return;
     setSaving(true);
     try {
-      await onSplit(transaction.id, rows);
-      onClose();
+      // Only close when the split actually persisted — closing on failure
+      // left the toast as the only trace of a half-applied split.
+      const ok = await onSplit(transaction.id, rows);
+      if (ok) onClose();
     } finally {
       setSaving(false);
     }
@@ -132,8 +134,18 @@ export function SplitTransactionDialog({ open, onClose, transaction, categories,
 
   if (!transaction) return null;
 
+  const hasEdits = rows.some(r => r.category || r.notes) || rows.length > 2;
+
   return (
-    <Dialog open={open} onOpenChange={v => !v && onClose()}>
+    <Dialog
+      open={open}
+      onOpenChange={v => {
+        if (v) return;
+        if (saving) return;
+        if (hasEdits && !confirm('Discard this split? Your entered rows will be lost.')) return;
+        onClose();
+      }}
+    >
       <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="text-foreground">Split Transaction</DialogTitle>

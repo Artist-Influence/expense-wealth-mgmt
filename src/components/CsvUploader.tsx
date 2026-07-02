@@ -1,6 +1,7 @@
 import { useCallback } from 'react';
-import { useDropzone } from 'react-dropzone';
+import { useDropzone, type FileRejection } from 'react-dropzone';
 import { Upload } from 'lucide-react';
+import { toast } from 'sonner';
 
 interface CsvUploaderProps {
   onFilesSelect: (files: File[]) => void;
@@ -14,9 +15,20 @@ export function CsvUploader({ onFilesSelect, disabled }: CsvUploaderProps) {
     }
   }, [onFilesSelect]);
 
+  const onDropRejected = useCallback((rejections: FileRejection[]) => {
+    rejections.forEach((r) => {
+      const reason = r.errors.some((e) => e.code === 'file-too-large')
+        ? 'File too large (max 15 MB)'
+        : r.errors[0]?.message || 'File rejected';
+      toast.error(`${r.file.name}: ${reason}`);
+    });
+  }, []);
+
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
+    onDropRejected,
     accept: { 'text/csv': ['.csv'] },
+    maxSize: 15 * 1024 * 1024,
     multiple: true,
     disabled,
   });

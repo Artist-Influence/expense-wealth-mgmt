@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { ModeScopeToggle, readPersistedScope, type ModeScope } from '@/components/ModeScopeToggle';
 import { useUsageProfile } from '@/hooks/useUsageProfile';
+import { fetchAllRows } from '@/lib/fetch-all';
 
 interface ReimbursableTransaction {
   id: string;
@@ -112,6 +113,7 @@ export default function Reimbursements() {
   const [newGroupTitle, setNewGroupTitle] = useState('');
   const [newGroupTo, setNewGroupTo] = useState('employer');
   const [newGroupNotes, setNewGroupNotes] = useState('');
+  const [creatingGroup, setCreatingGroup] = useState(false);
 
   // Group detail dialog
   const [selectedGroup, setSelectedGroup] = useState<ReimbursementGroup | null>(null);
@@ -134,24 +136,33 @@ export default function Reimbursements() {
 
   const loadData = async () => {
     setLoading(true);
-    const [txResult, grpResult] = await Promise.all([
-      supabase
-        .from('transactions_uploaded')
-        .select('*')
-        .eq('owner_id', ownerId!)
-        .eq('is_reimbursable', true)
-        .is('deleted_at', null)
-        .order('date', { ascending: false }),
-      (supabase as any)
-        .from('reimbursement_groups')
-        .select('*')
-        .eq('owner_id', ownerId!)
-        .is('deleted_at', null)
-        .order('created_at', { ascending: false }),
-    ]);
-    setTransactions((txResult.data || []) as unknown as ReimbursableTransaction[]);
-    setGroups((grpResult.data || []) as unknown as ReimbursementGroup[]);
-    setLoading(false);
+    try {
+      const [txRows, grpResult] = await Promise.all([
+        fetchAllRows((from, to) =>
+          supabase
+            .from('transactions_uploaded')
+            .select('*')
+            .eq('owner_id', ownerId!)
+            .eq('is_reimbursable', true)
+            .is('deleted_at', null)
+            .order('date', { ascending: false })
+            .order('id')
+            .range(from, to),
+        ),
+        (supabase as any)
+          .from('reimbursement_groups')
+          .select('*')
+          .eq('owner_id', ownerId!)
+          .is('deleted_at', null)
+          .order('created_at', { ascending: false }),
+      ]);
+      setTransactions(txRows as unknown as ReimbursableTransaction[]);
+      setGroups((grpResult.data || []) as unknown as ReimbursementGroup[]);
+    } catch (e: any) {
+      toast.error(`Failed to load reimbursements: ${e.message}`);
+    } finally {
+      setLoading(false);
+    }
   };
 
   // Scope-filter once; everything (filtered list + stats) flows from this.
@@ -217,43 +228,54 @@ export default function Reimbursements() {
 
   const bulkUpdateStatus = async (status: string) => {
     const ids = [...selectedIds];
-    await supabase.from('transactions_uploaded').update({ reimbursement_status: status }).in('id', ids);
+    const { error } = await supabase.from('transactions_uploaded').update({ reimbursement_status: status }).in('id', ids);
+    if (error) { toast.error(`Failed to update: ${error.message}`); return; }
     setSelectedIds(new Set());
     await loadData();
     toast.success(`Updated ${ids.length} items to ${status}`);
   };
 
   const createReportGroup = async () => {
+    if (creatingGroup) return; // in-flight guard — double-click would create duplicate groups
     if (!newGroupTitle.trim()) { toast.error('Title required'); return; }
-    const ids = [...selectedIds];
-    const selectedTxs = transactions.filter(t => ids.includes(t.id));
-    const totalExpected = selectedTxs.reduce((s, t) => s + Math.abs(t.amount || 0), 0);
+    setCreatingGroup(true);
+    try {
+      const ids = [...selectedIds];
+      const selectedTxs = transactions.filter(t => ids.includes(t.id));
+      const totalExpected = selectedTxs.reduce((s, t) => s + Math.abs(t.amount || 0), 0);
 
-    const { data: group, error } = await (supabase as any)
-      .from('reimbursement_groups')
-      .insert({
-        owner_id: user!.id,
-        title: newGroupTitle.trim(),
-        reimbursable_to: newGroupTo,
-        notes: newGroupNotes || null,
-        total_expected: totalExpected,
-        status: 'pending',
-      })
-      .select()
-      .single();
+      const { data: group, error } = await (supabase as any)
+        .from('reimbursement_groups')
+        .insert({
+          owner_id: user!.id,
+          title: newGroupTitle.trim(),
+          reimbursable_to: newGroupTo,
+          notes: newGroupNotes || null,
+          total_expected: totalExpected,
+          status: 'pending',
+        })
+        .select()
+        .single();
 
-    if (error || !group) { toast.error('Failed to create group'); return; }
+      if (error || !group) { toast.error(`Failed to create group${error ? `: ${error.message}` : ''}`); return; }
 
-    await (supabase as any).from('transactions_uploaded')
-      .update({ linked_reimbursement_group_id: (group as any).id })
-      .in('id', ids);
+      const { error: linkError } = await (supabase as any).from('transactions_uploaded')
+        .update({ linked_reimbursement_group_id: (group as any).id })
+        .in('id', ids);
 
-    setShowCreateGroup(false);
-    setNewGroupTitle('');
-    setNewGroupNotes('');
-    setSelectedIds(new Set());
-    await loadData();
-    toast.success(`Report "${newGroupTitle.trim()}" created with ${ids.length} items`);
+      setShowCreateGroup(false);
+      setNewGroupTitle('');
+      setNewGroupNotes('');
+      setSelectedIds(new Set());
+      await loadData();
+      if (linkError) {
+        toast.error(`Report created but failed to link expenses: ${linkError.message}`);
+      } else {
+        toast.success(`Report "${newGroupTitle.trim()}" created with ${ids.length} items`);
+      }
+    } finally {
+      setCreatingGroup(false);
+    }
   };
 
   const openGroupDetail = async (group: ReimbursementGroup) => {
@@ -272,20 +294,25 @@ export default function Reimbursements() {
     if (status === 'submitted') updates.submitted_date = new Date().toISOString().split('T')[0];
     if (status === 'reimbursed') updates.received_date = new Date().toISOString().split('T')[0];
 
-    await (supabase as any).from('reimbursement_groups').update(updates).eq('id', groupId);
+    const { error: grpError } = await (supabase as any).from('reimbursement_groups').update(updates).eq('id', groupId);
+    if (grpError) { toast.error(`Failed to update report: ${grpError.message}`); return; }
 
     // Cascade to linked transactions with proper status
     const txStatus = status === 'submitted' ? 'submitted'
       : status === 'reimbursed' ? 'reimbursed'
       : status === 'partially_reimbursed' ? 'partially_reimbursed'
       : status;
-    await supabase.from('transactions_uploaded')
+    const { error: txError } = await supabase.from('transactions_uploaded')
       .update({ reimbursement_status: txStatus })
       .eq('linked_reimbursement_group_id', groupId);
 
     setSelectedGroup(null);
     await loadData();
-    toast.success(`Report marked as ${status.replace(/_/g, ' ')}`);
+    if (txError) {
+      toast.error(`Report updated but failed to update linked expenses: ${txError.message}`);
+    } else {
+      toast.success(`Report marked as ${status.replace(/_/g, ' ')}`);
+    }
   };
 
   const exportCsv = () => {
@@ -323,8 +350,8 @@ export default function Reimbursements() {
     return `${days}d`;
   };
 
-  const handleDrawerSave = async (id: string, values: any) => {
-    await supabase.from('transactions_uploaded').update({
+  const handleDrawerSave = async (id: string, values: any): Promise<boolean> => {
+    const { error } = await supabase.from('transactions_uploaded').update({
       final_category: values.category,
       final_method: values.method,
       final_notes: values.notes,
@@ -341,32 +368,40 @@ export default function Reimbursements() {
       client_or_project_tag: values.client_or_project_tag,
       review_status: 'edited',
     }).eq('id', id);
+    if (error) { toast.error(`Failed to save: ${error.message}`); return false; }
     await loadData();
     toast.success('Saved');
     setDetailTx(null);
+    return true;
   };
 
   const handleDrawerApprove = async (tx: ReimbursableTransaction) => {
-    await supabase.from('transactions_uploaded').update({
+    const { error } = await supabase.from('transactions_uploaded').update({
       final_category: tx.final_category,
       final_method: tx.final_method,
       final_notes: tx.final_notes,
       review_status: 'approved',
     }).eq('id', tx.id);
+    if (error) { toast.error(`Failed to approve: ${error.message}`); return; }
     await loadData();
     setDetailTx(null);
   };
 
+  // Mirrors Expenses.tsx toggleTransfer so a transfer flip sets the exact same field set.
   const handleToggleTransfer = async (tx: ReimbursableTransaction) => {
     const newVal = !tx.is_transfer;
-    await supabase.from('transactions_uploaded').update({
-      is_transfer: newVal,
-      exclude_from_expense_totals: newVal,
+    const { error } = await supabase.from('transactions_uploaded').update({
+      is_transfer: newVal, exclude_from_expense_totals: newVal,
+      transfer_type: newVal ? 'unknown_transfer' : null,
       is_non_expense_cash_movement: newVal,
       treatment_type: newVal ? 'transfer' : 'expense',
+      counts_toward_true_personal_spend: newVal ? false : (tx.transaction_mode === 'personal'),
+      counts_toward_true_business_spend: newVal ? false : (tx.transaction_mode === 'business'),
     }).eq('id', tx.id);
+    if (error) { toast.error(`Failed to update: ${error.message}`); return; }
     await loadData();
     setDetailTx(null);
+    toast.success(newVal ? 'Marked as transfer' : 'Restored to expense');
   };
 
   const TABS: { value: TabFilter; label: string; icon: React.ElementType }[] = [
@@ -620,7 +655,7 @@ export default function Reimbursements() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowCreateGroup(false)}>Cancel</Button>
-            <Button onClick={createReportGroup}>Create Report</Button>
+            <Button onClick={createReportGroup} disabled={creatingGroup}>{creatingGroup ? 'Creating…' : 'Create Report'}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

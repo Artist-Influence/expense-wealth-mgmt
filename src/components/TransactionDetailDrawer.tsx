@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -71,7 +71,7 @@ interface TransactionDetailDrawerProps {
   onClose: () => void;
   categories: string[];
   paymentMethods?: PaymentMethod[];
-  onSave: (id: string, values: any) => Promise<void>;
+  onSave: (id: string, values: any) => Promise<boolean>;
   onApprove: (tx: Transaction) => Promise<void>;
   onToggleTransfer: (tx: Transaction) => Promise<void>;
   onSplit?: (tx: Transaction) => void;
@@ -128,10 +128,13 @@ export function TransactionDetailDrawer({
     client_or_project_tag: '',
   });
   const [saving, setSaving] = useState(false);
+  // Snapshot of the values as loaded — used to detect unsaved edits so an
+  // accidental outside-click can't silently discard work.
+  const initialValuesRef = useRef<string>('');
 
   useEffect(() => {
     if (tx) {
-      setEditValues({
+      const initial = {
         category: tx.final_category || tx.predicted_category || '',
         method: tx.final_method || tx.predicted_method || '',
         notes: tx.final_notes || tx.predicted_notes || '',
@@ -146,7 +149,9 @@ export function TransactionDetailDrawer({
         counts_toward_true_personal_spend: tx.counts_toward_true_personal_spend ?? true,
         counts_toward_true_business_spend: tx.counts_toward_true_business_spend ?? false,
         client_or_project_tag: tx.client_or_project_tag || '',
-      });
+      };
+      setEditValues(initial);
+      initialValuesRef.current = JSON.stringify(initial);
     }
   }, [tx?.id]);
 
@@ -188,7 +193,11 @@ export function TransactionDetailDrawer({
   const handleApprove = async () => {
     setSaving(true);
     try {
-      await onSave(tx.id, editValues);
+      // If the save was rejected (category not in the whitelist, RLS, network),
+      // approving anyway would persist the rejected value with an 'approved'
+      // status — stop instead.
+      const saved = await onSave(tx.id, editValues);
+      if (!saved) return;
       await onApprove({ ...tx, final_category: editValues.category, final_method: editValues.method, final_notes: editValues.notes });
     } finally {
       setSaving(false);
@@ -226,7 +235,16 @@ export function TransactionDetailDrawer({
   const statusLabel = tx.review_status.replace(/_/g, ' ');
 
   return (
-    <Sheet open={open} onOpenChange={v => !v && onClose()}>
+    <Sheet
+      open={open}
+      onOpenChange={v => {
+        if (v) return;
+        if (saving) return;
+        const dirty = JSON.stringify(editValues) !== initialValuesRef.current;
+        if (dirty && !readOnly && !confirm('Discard unsaved changes to this transaction?')) return;
+        onClose();
+      }}
+    >
       <SheetContent side="right" className="w-full sm:max-w-lg bg-background border-border overflow-y-auto">
         <SheetHeader className="pb-2">
           <SheetTitle className="text-foreground text-base">Transaction Detail</SheetTitle>

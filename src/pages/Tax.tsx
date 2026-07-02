@@ -13,6 +13,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
 import { DollarSign, TrendingUp, Shield, AlertTriangle, Settings, Landmark, Building2, Building } from 'lucide-react';
+import { fetchAllRows } from '@/lib/fetch-all';
 import { effectiveCategory, deductibilityHint, type DeductibilityHint } from '@/lib/categorization-engine';
 
 interface TaxProfile {
@@ -115,8 +116,13 @@ export default function Tax() {
 
   async function loadAll() {
     setLoading(true);
-    await Promise.all([loadProfile(), loadIncome(), loadDeductions(), loadTaxPayments(), loadProjection()]);
-    setLoading(false);
+    try {
+      await Promise.all([loadProfile(), loadIncome(), loadDeductions(), loadTaxPayments(), loadProjection()]);
+    } catch (e: any) {
+      toast.error(`Failed to load tax data: ${e.message}`);
+    } finally {
+      setLoading(false);
+    }
   }
 
   // Projection always pulls personal+business splits independent of `scope` so the
@@ -154,9 +160,13 @@ export default function Tax() {
       }
       return all;
     };
+    const fetchAllIncome = (m: 'personal' | 'business') =>
+      fetchAllRows((from, to) =>
+        supabase.from('income_transactions').select('amount, taxable_status').eq('owner_id', ownerId!).eq('mode', m).gte('date', yearStart).lte('date', yearEnd).is('deleted_at', null).order('id').range(from, to),
+      );
     const [incPersonal, incBusiness, txPersonal, txBusiness] = await Promise.all([
-      supabase.from('income_transactions').select('amount, taxable_status').eq('owner_id', ownerId!).eq('mode', 'personal').gte('date', yearStart).lte('date', yearEnd).is('deleted_at', null).then(r => r.data),
-      supabase.from('income_transactions').select('amount, taxable_status').eq('owner_id', ownerId!).eq('mode', 'business').gte('date', yearStart).lte('date', yearEnd).is('deleted_at', null).then(r => r.data),
+      fetchAllIncome('personal'),
+      fetchAllIncome('business'),
       fetchAll('personal'),
       fetchAll('business'),
     ]);
@@ -196,16 +206,18 @@ export default function Tax() {
   }
 
   async function loadIncome() {
-    let q = supabase
-      .from('income_transactions')
-      .select('income_type, taxable_status, amount')
-      .eq('owner_id', ownerId!)
-      .gte('date', yearStart)
-      .lte('date', yearEnd)
-      .is('deleted_at', null);
-    if (scope !== 'all') q = q.eq('mode', scope);
-    const { data } = await q;
-    setIncomeRows((data as IncomeRow[]) || []);
+    const rows = await fetchAllRows((from, to) => {
+      let q = supabase
+        .from('income_transactions')
+        .select('income_type, taxable_status, amount')
+        .eq('owner_id', ownerId!)
+        .gte('date', yearStart)
+        .lte('date', yearEnd)
+        .is('deleted_at', null);
+      if (scope !== 'all') q = q.eq('mode', scope);
+      return q.order('id').range(from, to);
+    });
+    setIncomeRows(rows as IncomeRow[]);
   }
 
   async function loadDeductions() {
@@ -244,41 +256,48 @@ export default function Tax() {
     setDeductionRows(filtered);
 
     // Count + sum truly unreviewed business spend (still un-categorized).
-    let cq = supabase
-      .from('transactions_uploaded')
-      .select('amount', { count: 'exact' })
-      .eq('owner_id', ownerId!)
-      .eq('is_split_parent', false)
-      .eq('is_transfer', false)
-      .eq('review_status', 'needs_review')
-      .gte('date', yearStart)
-      .lte('date', yearEnd)
-      .is('deleted_at', null);
-    if (scope === 'business' || scope === 'all') {
-      cq = cq.eq('transaction_mode', 'business');
-    } else {
-      cq = cq.eq('transaction_mode', 'personal');
-    }
-    const { data: unreviewedRows, count } = await cq;
-    setUnreviewedDeductionCount(count || 0);
-    const total = (unreviewedRows || []).reduce(
+    // Paginated so the dollar total covers ALL rows, not just the first 1000.
+    const unreviewedRows = await fetchAllRows((from, to) => {
+      let cq = supabase
+        .from('transactions_uploaded')
+        .select('amount')
+        .eq('owner_id', ownerId!)
+        .eq('is_split_parent', false)
+        .eq('is_transfer', false)
+        .eq('review_status', 'needs_review')
+        .gte('date', yearStart)
+        .lte('date', yearEnd)
+        .is('deleted_at', null);
+      if (scope === 'business' || scope === 'all') {
+        cq = cq.eq('transaction_mode', 'business');
+      } else {
+        cq = cq.eq('transaction_mode', 'personal');
+      }
+      return cq.order('id').range(from, to);
+    });
+    setUnreviewedDeductionCount(unreviewedRows.length);
+    const total = unreviewedRows.reduce(
       (s: number, r: any) => s + Math.abs(Number(r.amount || 0)),
       0,
     );
-    setPotentialDeductions({ count: count || 0, total });
+    setPotentialDeductions({ count: unreviewedRows.length, total });
   }
 
   async function loadTaxPayments() {
-    const { data } = await supabase
-      .from('transactions_uploaded')
-      .select('date, description_normalized, amount, treatment_type')
-      .eq('owner_id', ownerId!)
-      .in('treatment_type', ['tax_payment', 'estimated_tax_payment'])
-      .gte('date', yearStart)
-      .lte('date', yearEnd)
-      .is('deleted_at', null)
-      .order('date', { ascending: false });
-    setTaxPayments((data as TaxPaymentRow[]) || []);
+    const rows = await fetchAllRows((from, to) =>
+      supabase
+        .from('transactions_uploaded')
+        .select('date, description_normalized, amount, treatment_type')
+        .eq('owner_id', ownerId!)
+        .in('treatment_type', ['tax_payment', 'estimated_tax_payment'])
+        .gte('date', yearStart)
+        .lte('date', yearEnd)
+        .is('deleted_at', null)
+        .order('date', { ascending: false })
+        .order('id')
+        .range(from, to),
+    );
+    setTaxPayments(rows as TaxPaymentRow[]);
   }
 
   async function saveProfile() {

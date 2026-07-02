@@ -112,7 +112,8 @@ Deno.serve(async (req) => {
         const [s, w] = p.split(":");
         return { symbol: s.trim(), weight: Number(w) || 0 };
       }).filter((p) => p.symbol && p.weight > 0);
-      if (parts.length === 0) {
+      // Each symbol is an outbound fetch — cap the fan-out.
+      if (parts.length === 0 || parts.length > 20) {
         return new Response(JSON.stringify({ error: "invalid basket" }), {
           status: 400,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -143,8 +144,10 @@ Deno.serve(async (req) => {
       },
     });
   } catch (e: any) {
+    // Log the detail server-side; never echo upstream response bodies to callers.
+    console.error("market-rates error:", e?.message || e);
     return new Response(
-      JSON.stringify({ error: e?.message || "unknown error" }),
+      JSON.stringify({ error: "Market data is temporarily unavailable" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }

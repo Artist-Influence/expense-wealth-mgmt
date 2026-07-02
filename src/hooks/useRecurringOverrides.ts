@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
+import { toast } from 'sonner';
 
 export type OverrideStatus = 'confirmed' | 'dismissed';
 type RowMode = 'personal' | 'business';
@@ -67,16 +68,23 @@ export function useRecurringOverrides(mode: 'personal' | 'business' | 'all') {
   const setStatus = useCallback(
     async (merchantKey: string, status: OverrideStatus, rowMode: RowMode) => {
       if (!ownerId || !isOwner) return;
+      // Optimistic update — roll back if the write fails.
+      const prev = rows;
       applyRows([
         ...rows.filter((r) => !(r.merchant_key === merchantKey && r.mode === rowMode)),
         { merchant_key: merchantKey, mode: rowMode, status },
       ]);
-      await supabase
+      const { error } = await supabase
         .from('recurring_overrides')
         .upsert(
           { owner_id: ownerId, mode: rowMode, merchant_key: merchantKey, status },
           { onConflict: 'owner_id,mode,merchant_key' },
         );
+      if (error) {
+        applyRows(prev);
+        toast.error('Failed to save decision');
+        console.error(error);
+      }
     },
     [ownerId, isOwner, rows, applyRows],
   );
@@ -85,13 +93,20 @@ export function useRecurringOverrides(mode: 'personal' | 'business' | 'all') {
   const clearStatus = useCallback(
     async (merchantKey: string, rowMode: RowMode) => {
       if (!ownerId || !isOwner) return;
+      // Optimistic update — roll back if the write fails.
+      const prev = rows;
       applyRows(rows.filter((r) => !(r.merchant_key === merchantKey && r.mode === rowMode)));
-      await supabase
+      const { error } = await supabase
         .from('recurring_overrides')
         .delete()
         .eq('owner_id', ownerId)
         .eq('mode', rowMode)
         .eq('merchant_key', merchantKey);
+      if (error) {
+        applyRows(prev);
+        toast.error('Failed to undo decision');
+        console.error(error);
+      }
     },
     [ownerId, isOwner, rows, applyRows],
   );

@@ -30,21 +30,26 @@ serve(async (req) => {
     const { data: claimsData, error: claimsError } = await authClient.auth.getClaims(
       authHeader.replace("Bearer ", ""),
     );
-    if (claimsError || !claimsData?.claims) {
+    // Require a real signed-in user (sub claim). The public anon key is also a
+    // valid project JWT but carries no sub — without this check anyone could
+    // burn paid AI credits unauthenticated.
+    const subject = claimsData?.claims?.sub;
+    const role = claimsData?.claims?.role;
+    if (claimsError || !subject || role !== "authenticated") {
       return new Response(JSON.stringify({ error: "Unauthorized" }), {
         status: 401,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    // Best-effort per-user throttle. The platform has no first-class rate-limit
-    // primitive, so this is an ad-hoc guard backed by a DB counter.
+    // Per-user throttle backed by a DB counter. Fails CLOSED: if the counter
+    // errors we refuse the request rather than serving unmetered AI calls.
     const { data: rlAllowed, error: rlError } = await authClient.rpc("check_ai_rate_limit", {
       _fn: "categorize-ai",
       _max: 15,
       _window_seconds: 60,
     });
-    if (!rlError && rlAllowed === false) {
+    if (rlError || rlAllowed === false) {
       return new Response(
         JSON.stringify({ error: "Rate limit exceeded. Please try again in a minute." }),
         { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } },

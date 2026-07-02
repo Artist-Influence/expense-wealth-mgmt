@@ -121,10 +121,17 @@ export function DuplicateResolverDialog({
         .in('id', loserIds);
       if (error) throw error;
       // Mark keeper as resolved
-      await supabase
+      const { error: keeperError } = await supabase
         .from('transactions_uploaded')
         .update({ duplicate_status: 'unique', duplicate_of_transaction_id: null })
         .eq('id', keeperId);
+      if (keeperError) {
+        // Losers were archived, but the keeper is still flagged — keep the
+        // cluster visible (no optimistic dismissal) so the user can retry.
+        toast.error(`Could not mark the kept row as resolved: ${keeperError.message}`);
+        onResolved();
+        return;
+      }
       setDismissedIds(prev => new Set([...prev, keeperId, ...loserIds]));
       toast.success(`Archived ${loserIds.length} duplicate${loserIds.length > 1 ? 's' : ''}`);
       onResolved();

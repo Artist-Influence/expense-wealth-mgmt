@@ -187,6 +187,7 @@ export default function Allocations() {
   const savePlan = useMutation({
     mutationFn: async () => {
       let planId = plan?.id;
+      let oldItemIds: string[] = [];
       if (!planId) {
         const { data, error } = await supabase.from('allocation_plans').insert({
           owner_id: user!.id,
@@ -201,15 +202,22 @@ export default function Allocations() {
         if (error) throw error;
         planId = data.id;
       } else {
-        await supabase.from('allocation_plans').update({
+        const { error: updateError } = await supabase.from('allocation_plans').update({
           total_income: monthIncome,
           total_expenses: monthExpenses,
           tax_reserve_amount: taxReserve,
           emergency_fund_amount: emergencyFund,
           free_cash: freeCash,
         }).eq('id', planId);
-        // Delete old line items
-        await supabase.from('allocation_line_items').delete().eq('allocation_plan_id', planId);
+        if (updateError) throw updateError;
+        // Capture existing line-item ids so they can be removed AFTER the new
+        // ones insert successfully (never delete first and risk losing the plan).
+        const { data: existingItems, error: existingError } = await supabase
+          .from('allocation_line_items')
+          .select('id')
+          .eq('allocation_plan_id', planId);
+        if (existingError) throw existingError;
+        oldItemIds = (existingItems || []).map(i => i.id);
       }
 
       const items = Object.entries(localAmounts)
@@ -226,6 +234,12 @@ export default function Allocations() {
         const { error } = await supabase.from('allocation_line_items').insert(items);
         if (error) throw error;
       }
+
+      // Remove the superseded line items last; the new ones are already safe.
+      if (oldItemIds.length > 0) {
+        const { error: deleteError } = await supabase.from('allocation_line_items').delete().in('id', oldItemIds);
+        if (deleteError) toast.warning('Plan saved, but old line items could not be removed — duplicated lines may remain. Try saving again.');
+      }
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['allocation_plan', selectedMonth] });
@@ -238,21 +252,25 @@ export default function Allocations() {
   const finalizePlan = useMutation({
     mutationFn: async () => {
       if (!plan) return;
-      await supabase.from('allocation_plans').update({ status: 'finalized' }).eq('id', plan.id);
+      const { error } = await supabase.from('allocation_plans').update({ status: 'finalized' }).eq('id', plan.id);
+      if (error) throw error;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['allocation_plan', selectedMonth] });
       toast.success('Plan finalized');
     },
+    onError: (e: any) => toast.error(e.message),
   });
 
   const toggleExecuted = useMutation({
     mutationFn: async ({ id, executed }: { id: string; executed: boolean }) => {
-      await supabase.from('allocation_line_items').update({ executed }).eq('id', id);
+      const { error } = await supabase.from('allocation_line_items').update({ executed }).eq('id', id);
+      if (error) throw error;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['allocation_line_items'] });
     },
+    onError: (e: any) => toast.error(e.message),
   });
 
   const autoDistribute = () => {

@@ -162,22 +162,27 @@ Deno.serve(async (req) => {
 
     const token = authHeader.replace("Bearer ", "");
     const { data: claimsData, error: claimsError } = await supabase.auth.getClaims(token);
-    if (claimsError || !claimsData?.claims) {
+    // Require a real signed-in user (sub claim + authenticated role). The
+    // public anon key is a valid project JWT with no sub — without this check
+    // anyone could drive paid LLM calls unauthenticated.
+    const subject = claimsData?.claims?.sub;
+    const claimsRole = claimsData?.claims?.role;
+    if (claimsError || !subject || claimsRole !== "authenticated") {
       return new Response(JSON.stringify({ error: "Unauthorized" }), {
         status: 401,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-    const userId = claimsData.claims.sub as string;
+    const userId = subject as string;
 
-    // Best-effort per-user throttle. The platform has no first-class rate-limit
-    // primitive, so this is an ad-hoc guard backed by a DB counter.
+    // Per-user throttle backed by a DB counter. Fails CLOSED: a counter error
+    // refuses the request instead of serving unmetered LLM calls.
     const { data: rlAllowed, error: rlError } = await supabase.rpc("check_ai_rate_limit", {
       _fn: "assistant-chat",
       _max: 30,
       _window_seconds: 300,
     });
-    if (!rlError && rlAllowed === false) {
+    if (rlError || rlAllowed === false) {
       return new Response(
         JSON.stringify({ error: "Rate limit exceeded. Please slow down and try again shortly." }),
         { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } },
@@ -448,6 +453,15 @@ Deno.serve(async (req) => {
       onFinish: async ({ responseMessage }) => {
         try {
           if (!threadId) return;
+          // threadId is client-supplied: verify it belongs to this owner (the
+          // read runs under the caller's RLS) before attaching messages.
+          const { data: threadRow } = await supabase
+            .from("chat_threads")
+            .select("id")
+            .eq("id", threadId)
+            .eq("owner_id", ownerId)
+            .maybeSingle();
+          if (!threadRow) return;
           const lastUser = [...messages].reverse().find((m) => m.role === "user");
           const textOf = (m: UIMessage) =>
             (m.parts ?? [])

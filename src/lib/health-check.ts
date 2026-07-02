@@ -1,4 +1,5 @@
 import { supabase } from '@/integrations/supabase/client';
+import { fetchAllRows } from './fetch-all';
 import {
   findExactClusters,
   findNearClusters,
@@ -35,12 +36,16 @@ function staleCutoffISO(days = 7): string {
 
 export async function runHealthCheck(userId: string): Promise<HealthCheckSummary> {
   // ---- INCOME ----
-  const { data: incomeRows = [] } = await supabase
+  // Paginated: an unpaginated select caps at 1000 rows and the duplicate scan
+  // silently goes blind past that.
+  const incomeRows = await fetchAllRows<any>((from, to) => supabase
     .from('income_transactions')
     .select('id, date, amount, description_raw, description_normalized, mode, source_file_name, source_account_name, income_type, taxable_status, status, duplicate_status, created_at')
     .eq('owner_id', userId)
     .is('deleted_at', null)
-    .neq('duplicate_status', 'not_duplicate'); // honor user "not duplicates" marker
+    .neq('duplicate_status', 'not_duplicate') // honor user "not duplicates" marker
+    .order('id')
+    .range(from, to));
 
   const incomeRowsTyped = (incomeRows || []).map((r: any) => ({
     id: r.id,
@@ -71,12 +76,14 @@ export async function runHealthCheck(userId: string): Promise<HealthCheckSummary
   }
 
   // ---- EXPENSES ----
-  const { data: expRows = [] } = await supabase
+  const expRows = await fetchAllRows<any>((from, to) => supabase
     .from('transactions_uploaded')
     .select('id, date, amount, description_raw, description_normalized, mode, source_file_name, final_category, predicted_category, final_method, predicted_method, duplicate_status, duplicate_fingerprint, created_at, review_status')
     .eq('owner_id', userId)
     .is('deleted_at', null)
-    .neq('review_status', 'archived');
+    .neq('review_status', 'archived')
+    .order('id')
+    .range(from, to));
 
   // Honor the user's "not duplicates" marker everywhere — dismissed rows must
   // never resurface as exact, near, or cross-mode duplicates.
@@ -140,23 +147,35 @@ export async function runHealthCheck(userId: string): Promise<HealthCheckSummary
   ]);
 
   // ---- STALE REVIEWS (>7 days old still in needs_review) ----
+  // Exact count (the old limit(1000) capped the reported number) + oldest date.
   const cutoff = staleCutoffISO(7);
-  const { data: staleRows = [] } = await supabase
-    .from('transactions_uploaded')
-    .select('date')
-    .eq('owner_id', userId)
-    .in('review_status', ['needs_review', 'suggested', 'ai_suggested'])
-    .lt('date', cutoff)
-    .is('deleted_at', null)
-    .order('date', { ascending: true })
-    .limit(1000);
+  const [{ count: staleCount }, { data: oldestStale }] = await Promise.all([
+    supabase
+      .from('transactions_uploaded')
+      .select('id', { count: 'exact', head: true })
+      .eq('owner_id', userId)
+      .in('review_status', ['needs_review', 'suggested', 'ai_suggested'])
+      .lt('date', cutoff)
+      .is('deleted_at', null),
+    supabase
+      .from('transactions_uploaded')
+      .select('date')
+      .eq('owner_id', userId)
+      .in('review_status', ['needs_review', 'suggested', 'ai_suggested'])
+      .lt('date', cutoff)
+      .is('deleted_at', null)
+      .order('date', { ascending: true })
+      .limit(1),
+  ]);
 
   // ---- PARSE ERRORS ----
+  // The writer stores 'parse_error' (never 'error') — the old literal made
+  // this counter permanently zero.
   const { count: parseErrCount } = await supabase
     .from('transactions_uploaded')
     .select('id', { count: 'exact', head: true })
     .eq('owner_id', userId)
-    .eq('parse_status', 'error')
+    .eq('parse_status', 'parse_error')
     .is('deleted_at', null);
 
   const totalIssues =
@@ -164,7 +183,7 @@ export async function runHealthCheck(userId: string): Promise<HealthCheckSummary
     expExact.length +
     expNear.length +
     crossModePairs.length +
-    (staleRows?.length || 0) +
+    (staleCount || 0) +
     (parseErrCount || 0);
 
   const summary: HealthCheckSummary = {
@@ -172,7 +191,7 @@ export async function runHealthCheck(userId: string): Promise<HealthCheckSummary
     income: { exactClusters: incomeExact, rowIndex: incomeRowIndex },
     expenses: { exactClusters: expExact, nearClusters: expNear, crossModePairs, rowIndex: expRowIndex },
     needsReview: { incomeCount: incomeReviewCount || 0, expenseCount: expReviewCount || 0 },
-    staleReviews: { count: staleRows?.length || 0, oldestDate: staleRows?.[0]?.date || null },
+    staleReviews: { count: staleCount || 0, oldestDate: oldestStale?.[0]?.date || null },
     parseErrors: { count: parseErrCount || 0 },
     totalIssues,
   };
