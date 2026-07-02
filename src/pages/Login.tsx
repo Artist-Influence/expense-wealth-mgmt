@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
@@ -24,32 +24,6 @@ export default function Login() {
   const [mfaCode, setMfaCode] = useState('');
 
   const navigate = useNavigate();
-
-  // A session may already exist when landing here (direct visit while signed
-  // in, or the AuthGuard MFA step-up redirect). Route it: fully-authenticated
-  // sessions go home; aal1 sessions with a verified TOTP factor get the MFA
-  // form — they must never linger on the password screen with app access.
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (cancelled || !session) return;
-      const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
-      if (cancelled) return;
-      if (aal?.currentLevel === 'aal1' && aal?.nextLevel === 'aal2') {
-        const { data: factors } = await supabase.auth.mfa.listFactors();
-        const totp = factors?.totp?.find((f) => f.status === 'verified');
-        if (totp && !cancelled) {
-          setMfaFactorId(totp.id);
-          setMfaRequired(true);
-        }
-        return;
-      }
-      navigate('/', { replace: true });
-    })();
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const finish = () => {
     navigate('/', { replace: true });

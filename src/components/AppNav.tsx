@@ -5,11 +5,14 @@ import { supabase } from '@/integrations/supabase/client';
 import { useQuery } from '@tanstack/react-query';
 import {
   Receipt, BarChart3, Brain, Settings, LogOut, Database,
-  DollarSign, TrendingUp, Landmark, FileSpreadsheet, Target, CalendarCheck,
-  Activity, MessageCircle, CreditCard,
+  DollarSign, TrendingUp, Landmark, FileSpreadsheet, CalendarCheck,
+  Activity, MessageCircle, CreditCard, MoreHorizontal,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { HealthCheckPanel } from './HealthCheckPanel';
 import { runHealthCheck, shouldAutoRun, type HealthCheckSummary } from '@/lib/health-check';
 import { useUsageProfile } from '@/hooks/useUsageProfile';
@@ -19,20 +22,28 @@ const BUSINESS_ONLY_NAV = ['/accountant'];
 
 const INVESTOR_NAV = ['/', '/income', '/insights'];
 
-const navItems = [
-  { to: '/', label: 'Expenses', icon: Receipt, active: true, showBadge: true },
-  { to: '/income', label: 'Income', icon: DollarSign, active: true },
-  { to: '/insights', label: 'Insights', icon: BarChart3, active: true },
-  { to: '/subscriptions', label: 'Subscriptions', icon: CreditCard, active: true },
-  { to: '/wealth', label: 'Wealth', icon: TrendingUp, active: true },
-  { to: '/allocations', label: 'Allocate', icon: Target, active: true },
-  { to: '/tax', label: 'Tax', icon: Landmark, active: true },
-  { to: '/merchants', label: 'Memory', icon: Brain, active: true },
-  { to: '/accountant', label: 'Accountant', icon: FileSpreadsheet, active: true },
-  { to: '/close-month', label: 'Close', icon: CalendarCheck, active: true },
-  { to: '/assistant', label: 'Assistant', icon: MessageCircle, active: true },
-  { to: '/settings', label: 'Settings', icon: Settings, active: true },
+type NavItem = { to: string; label: string; icon: typeof Receipt; showBadge?: boolean };
+
+// The five destinations used most often sit in the bar; everything else lives
+// under "More" so the header reads as a short, scannable row.
+const PRIMARY_NAV: NavItem[] = [
+  { to: '/', label: 'Expenses', icon: Receipt, showBadge: true },
+  { to: '/income', label: 'Income', icon: DollarSign },
+  { to: '/insights', label: 'Insights', icon: BarChart3 },
+  { to: '/wealth', label: 'Wealth', icon: TrendingUp },
+  { to: '/tax', label: 'Tax', icon: Landmark },
 ];
+
+const MORE_NAV: NavItem[] = [
+  { to: '/subscriptions', label: 'Subscriptions', icon: CreditCard },
+  { to: '/assistant', label: 'Assistant', icon: MessageCircle },
+  { to: '/close-month', label: 'Close Month', icon: CalendarCheck },
+  { to: '/accountant', label: 'Accountant', icon: FileSpreadsheet },
+  { to: '/merchants', label: 'Merchant Memory', icon: Brain },
+];
+
+const isRouteActive = (pathname: string, to: string) =>
+  to === '/' ? pathname === '/' : pathname.startsWith(to);
 
 export function AppNav() {
   const location = useLocation();
@@ -96,69 +107,86 @@ export function AppNav() {
       ? 'text-warning border-warning/40 bg-warning/10 hover:bg-warning/15'
       : 'text-destructive border-destructive/40 bg-destructive/10 hover:bg-destructive/15';
 
+  // Investors see only their whitelisted destinations, and never the More menu.
+  const visiblePrimary = PRIMARY_NAV.filter(({ to }) => !isInvestor || INVESTOR_NAV.includes(to));
+  const visibleMore = isInvestor
+    ? []
+    : MORE_NAV.filter(({ to }) => isAccountant || profile !== 'personal' || !BUSINESS_ONLY_NAV.includes(to));
+  const moreActive = visibleMore.some(({ to }) => isRouteActive(location.pathname, to));
+
   return (
     <nav className="sticky top-0 z-50 glass-panel rounded-none border-x-0 border-t-0">
-      <div className="container flex h-12 items-center justify-between">
-        <div className="flex items-center gap-1 overflow-x-auto scrollbar-thin">
-          <Link to="/" className="flex items-center gap-2 mr-4">
+      <div className="container flex h-14 items-center justify-between gap-2">
+        <div className="flex items-center gap-1">
+          <Link to="/" className="flex items-center gap-2 mr-3 shrink-0">
             <Database className="h-4 w-4 text-primary" />
-            <span className="font-bold italic tracking-tight text-foreground text-xs">Expense Memory</span>
+            <span className="font-bold italic tracking-tight text-foreground text-sm hidden sm:inline">Expense Memory</span>
           </Link>
-          
-          {navItems
-            .filter(({ to }) => !isInvestor || INVESTOR_NAV.includes(to))
-            .filter(({ to }) => isInvestor || isAccountant || profile !== 'personal' || !BUSINESS_ONLY_NAV.includes(to))
-            .map(({ to, label, icon: Icon, active, showBadge }) => {
-            const isActive = to === '/' ? location.pathname === '/' : location.pathname.startsWith(to);
-            
-            if (!active) {
-              return (
-                <Tooltip key={to}>
-                  <TooltipTrigger asChild>
-                    <Link
-                      to={to}
-                      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-muted-foreground/40 cursor-pointer hover:text-muted-foreground/60 transition-colors"
-                    >
-                      <Icon className="h-3.5 w-3.5" />
-                      <span className="hidden lg:inline">{label}</span>
-                    </Link>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom" className="text-xs">
-                    {label} — Coming Soon
-                  </TooltipContent>
-                </Tooltip>
-              );
-            }
 
+          {visiblePrimary.map(({ to, label, icon: Icon, showBadge }) => {
+            const active = isRouteActive(location.pathname, to);
             return (
               <Link
                 key={to}
                 to={to}
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all relative ${
-                  isActive
-                    ? 'bg-primary/15 text-primary border border-primary/20'
+                className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all relative ${
+                  active
+                    ? 'bg-primary/15 text-primary'
                     : 'text-muted-foreground hover:text-foreground hover:bg-secondary/50'
                 }`}
               >
-                <Icon className="h-3.5 w-3.5" />
-                <span className="hidden lg:inline">{label}</span>
+                <Icon className="h-4 w-4 shrink-0" />
+                <span className="hidden md:inline">{label}</span>
                 {showBadge && !isInvestor && reviewCount > 0 && (
-                  <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-destructive text-destructive-foreground text-[9px] font-bold flex items-center justify-center">
+                  <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-full bg-destructive text-destructive-foreground text-[9px] font-bold flex items-center justify-center">
                     {reviewCount > 99 ? '99+' : reviewCount}
                   </span>
                 )}
               </Link>
             );
           })}
+
+          {visibleMore.length > 0 && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all outline-none ${
+                    moreActive
+                      ? 'bg-primary/15 text-primary'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-secondary/50'
+                  }`}
+                >
+                  <MoreHorizontal className="h-4 w-4" />
+                  <span className="hidden md:inline">More</span>
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="glass-panel min-w-[200px]">
+                {visibleMore.map(({ to, label, icon: Icon }) => {
+                  const active = isRouteActive(location.pathname, to);
+                  return (
+                    <DropdownMenuItem key={to} asChild>
+                      <Link
+                        to={to}
+                        className={`flex items-center gap-2.5 cursor-pointer ${active ? 'text-primary' : ''}`}
+                      >
+                        <Icon className="h-4 w-4" />
+                        {label}
+                      </Link>
+                    </DropdownMenuItem>
+                  );
+                })}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
         </div>
 
-        <div className="flex items-center gap-1.5 shrink-0">
+        <div className="flex items-center gap-1 shrink-0">
           {!isInvestor && (
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
                   onClick={() => setHealthOpen(true)}
-                  className={`flex items-center gap-1.5 h-7 px-2 rounded-lg border text-xs font-medium transition-colors ${healthTone}`}
+                  className={`flex items-center gap-1.5 h-8 px-2.5 rounded-lg border text-xs font-medium transition-colors ${healthTone}`}
                 >
                   <Activity className="h-3.5 w-3.5" />
                   <span className="hidden md:inline">
@@ -175,16 +203,33 @@ export function AppNav() {
           {isInvestor && (
             <span className="text-[10px] text-muted-foreground/60 hidden md:inline">Investor View</span>
           )}
-
           {isAccountant && (
             <span className="text-[10px] text-muted-foreground/60 hidden md:inline">Accountant View</span>
+          )}
+
+          {!isInvestor && !isAccountant && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Link
+                  to="/settings"
+                  className={`flex items-center justify-center h-8 w-8 rounded-lg transition-colors ${
+                    isRouteActive(location.pathname, '/settings')
+                      ? 'bg-primary/15 text-primary'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-secondary/50'
+                  }`}
+                >
+                  <Settings className="h-4 w-4" />
+                </Link>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="text-xs">Settings</TooltipContent>
+            </Tooltip>
           )}
 
           <Button
             variant="ghost"
             size="sm"
             onClick={signOut}
-            className="text-muted-foreground hover:text-foreground text-xs gap-1.5"
+            className="text-muted-foreground hover:text-foreground text-xs gap-1.5 h-8"
           >
             <LogOut className="h-3.5 w-3.5" />
             <span className="hidden sm:inline">Sign Out</span>

@@ -40,14 +40,32 @@ const BUSINESS_DEDUCTIBLE_FULL = new Set<string>([
 // 50% under §274). We still surface the full amount but tag it as 'partial'
 // so the Tax page can apply the haircut.
 const BUSINESS_DEDUCTIBLE_PARTIAL = new Set<string>([
-  'dining', 'meals', 'entertainment',
+  'dining', 'meals', 'food', 'food & drink', 'restaurants', 'coffee', 'bars',
+  'business meals', 'client meals',
 ]);
+
+// Business-mode philosophy: if the owner has already tagged a transaction as
+// BUSINESS, they are asserting it is an ordinary-and-necessary business
+// expense. So in business mode we deduct by DEFAULT (full) and only exclude
+// the things that are genuinely NOT expenses — transfers, capital movements,
+// owner draws, refunds, tax payments (all in NEVER_DEDUCTIBLE) — or that carry
+// a statutory haircut (PARTIAL) or need review (charity → Schedule A).
+// This makes the deduction net robust to the user's own category names instead
+// of a brittle allowlist. BUSINESS_DEDUCTIBLE_FULL is kept only as
+// documentation of the canonical Schedule C lines.
 
 // Charity paid by an LLC/sole-prop is generally NOT a Sch C deduction (it
 // flows to the owner's Schedule A). We still flag it as deductible-with-review
 // so it's not silently dropped.
 const BUSINESS_DEDUCTIBLE_REVIEW = new Set<string>([
   'charity', 'charitable',
+  // Post-TCJA (2018+) client entertainment is ~0% deductible — flag, don't
+  // auto-deduct at 50% like meals.
+  'entertainment',
+  // A category literally named "taxes" must not deduct at 100%: income tax and
+  // SE tax aren't deductible; only payroll/property/sales tax is. Flag for
+  // review instead of silently writing off tax payments.
+  'taxes',
 ]);
 
 // Personal categories that are commonly itemizable on Schedule A (subject to
@@ -65,9 +83,15 @@ const PERSONAL_DEDUCTIBLE_REVIEW = new Set<string>([
 // Categories that should NEVER be auto-flagged regardless of mode (they are
 // transfers / capital movements / refunds / tax payments themselves).
 const NEVER_DEDUCTIBLE = new Set<string>([
-  'cc payment', 'transfer', 'investment', 'tax payment', 'owner draw',
-  'distribution', 'capital contribution', 'loan payment',
-  'refund', 'debit',
+  'cc payment', 'credit card payment', 'transfer', 'transfers',
+  'investment', 'investments', 'savings', 'tax payment', 'taxes paid',
+  'income tax', 'estimated taxes', 'estimated tax', 'federal tax',
+  // Owner equity movements — NOT expenses. (Bare "distribution" is deliberately
+  // NOT here: for a music company "Distribution" = DistroKid/CD Baby, a real
+  // deductible cost. Only OWNER/equity distributions are excluded.)
+  'owner draw', 'owner draws', 'draw', 'owner distribution', 'equity distribution',
+  'capital contribution', 'loan payment', 'loan', 'loan repayment',
+  'principal', 'refund', 'refunds', 'reimbursement received', 'debit',
 ]);
 
 export type DeductibilityHint = 'full' | 'partial' | 'requires_review' | 'none';
@@ -80,10 +104,11 @@ export function deductibilityHint(
   const c = category.trim().toLowerCase();
   if (!c || NEVER_DEDUCTIBLE.has(c)) return 'none';
   if (mode === 'business') {
-    if (BUSINESS_DEDUCTIBLE_FULL.has(c)) return 'full';
     if (BUSINESS_DEDUCTIBLE_PARTIAL.has(c)) return 'partial';
     if (BUSINESS_DEDUCTIBLE_REVIEW.has(c)) return 'requires_review';
-    return 'none';
+    // Deduct-by-default: anything tagged business that isn't a non-expense is
+    // treated as a full Schedule C deduction.
+    return 'full';
   }
   if (mode === 'personal') {
     if (PERSONAL_DEDUCTIBLE_REVIEW.has(c)) return 'requires_review';

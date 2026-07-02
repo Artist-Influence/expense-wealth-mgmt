@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
-import { DollarSign, TrendingUp, Shield, AlertTriangle, Settings, Landmark, Building2, Building } from 'lucide-react';
+import { DollarSign, TrendingUp, Shield, AlertTriangle, Settings, Landmark, Building2, Building, Briefcase } from 'lucide-react';
 import { fetchAllRows } from '@/lib/fetch-all';
 import { effectiveCategory, deductibilityHint, type DeductibilityHint } from '@/lib/categorization-engine';
 
@@ -153,6 +153,7 @@ export default function Tax() {
           .gte('date', yearStart)
           .lte('date', yearEnd)
           .is('deleted_at', null)
+          .order('id')
           .range(from, from + pageSize - 1);
         if (data) all = [...all, ...data];
         hasMore = (data?.length ?? 0) === pageSize;
@@ -239,6 +240,7 @@ export default function Tax() {
         .gte('date', yearStart)
         .lte('date', yearEnd)
         .is('deleted_at', null)
+        .order('id')
         .range(from, from + pageSize - 1);
       if (scope !== 'all') q = q.eq('transaction_mode', scope);
       const { data } = await q;
@@ -386,7 +388,22 @@ export default function Tax() {
   const federalReserve = adjustedIncome * (federalPercent / 100);
   const nysReserve = adjustedIncome * (nysPercent / 100);
   const nycReserve = cityEnabled ? adjustedIncome * (nycPercent / 100) : 0;
-  const totalReserve = federalReserve + nysReserve + nycReserve;
+
+  // Self-employment tax (Schedule SE): a sole prop / single-member LLC owes
+  // 15.3% (12.4% Social Security up to the wage base + 2.9% Medicare) on
+  // 92.35% of net business profit — SEPARATE from and on TOP of income tax.
+  // Without this the reserve badly under-states what a self-employed filer
+  // owes. Applied only to BUSINESS net profit, and only when the profile flag
+  // is on. 2025 Social Security wage base.
+  const SS_WAGE_BASE_2025 = 176100;
+  const seEnabled = profile?.self_employment_income_enabled ?? false;
+  const businessNetProfit = Math.max(0, projection.business.taxable - projection.business.deductions);
+  const seTaxBase = businessNetProfit * 0.9235;
+  const selfEmploymentTax = seEnabled
+    ? Math.min(seTaxBase, SS_WAGE_BASE_2025) * 0.124 + seTaxBase * 0.029
+    : 0;
+
+  const totalReserve = federalReserve + nysReserve + nycReserve + selfEmploymentTax;
   const withholding = (profile?.estimated_w2_withholding_ytd ?? 0) + (profile?.estimated_tax_payments_ytd ?? 0);
   const paidYtd = taxPaymentsTotal + withholding;
   const reserveGap = Math.max(0, totalReserve - paidYtd);
@@ -570,8 +587,11 @@ export default function Tax() {
         })()}
 
         {/* Summary Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+        <div className={`grid grid-cols-2 md:grid-cols-3 ${seEnabled ? 'lg:grid-cols-7' : 'lg:grid-cols-6'} gap-4`}>
           <SummaryCard icon={Landmark} label="Federal Reserve" value={fmt(federalReserve)} sub={`${federalPercent}%`} />
+          {seEnabled && (
+            <SummaryCard icon={Briefcase} label="Self-Employment Tax" value={fmt(selfEmploymentTax)} sub="15.3% Sch SE" />
+          )}
           <SummaryCard icon={Building2} label="NYS Reserve" value={fmt(nysReserve)} sub={`${nysPercent}%`} />
           <SummaryCard icon={Building} label="NYC Reserve" value={fmt(nycReserve)} sub={cityEnabled ? `${nycPercent}%` : 'Disabled'} />
           <SummaryCard icon={Shield} label="Total Target" value={fmt(totalReserve)} />
@@ -584,7 +604,7 @@ export default function Tax() {
           <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
           <div>
             <p className="font-medium">Estimates only — not a tax calculation</p>
-            <p className="text-warning/80 mt-0.5">Based on flat reserve rates, not progressive tax brackets. Deductions are simplified (no above/below-the-line distinction). Consult your accountant for actual liability.</p>
+            <p className="text-warning/80 mt-0.5">Based on flat reserve rates, not progressive tax brackets. {seEnabled ? 'Self-employment tax (Schedule SE) is included on business net profit. ' : ''}Deductions are simplified (no above/below-the-line distinction). Consult your accountant for actual liability.</p>
           </div>
         </div>
 
@@ -712,7 +732,7 @@ export default function Tax() {
                           <TableCell>{cat}</TableCell>
                           <TableCell className="text-xs text-muted-foreground">
                             {info.hint === 'full' && 'Full Schedule C'}
-                            {info.hint === 'partial' && '50% (meals/entertainment §274)'}
+                            {info.hint === 'partial' && '50% (business meals §274)'}
                             {info.hint === 'requires_review' && 'Itemizable — subject to limits'}
                             {info.hint === 'none' && 'Manually flagged'}
                           </TableCell>
