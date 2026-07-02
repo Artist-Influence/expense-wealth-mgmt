@@ -7,11 +7,11 @@ export type Snapshot = { account_id: string; as_of_date: string; balance: number
 export type AccountLite = { id: string; account_name: string; mode: string; current_balance: number };
 
 const PALETTE = [
-  'hsl(225, 70%, 60%)',
+  'hsl(0, 84%, 60%)',
   'hsl(145, 50%, 50%)',
   'hsl(38, 85%, 58%)',
   'hsl(280, 55%, 60%)',
-  'hsl(0, 60%, 58%)',
+  'hsl(220, 65%, 60%)',
   'hsl(180, 55%, 50%)',
   'hsl(330, 55%, 58%)',
   'hsl(60, 65%, 50%)',

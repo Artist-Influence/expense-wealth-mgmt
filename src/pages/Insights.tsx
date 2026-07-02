@@ -94,8 +94,8 @@ interface IncomeTransaction {
 }
 
 const CHART_COLORS = [
-  'hsl(225, 70%, 55%)', 'hsl(145, 40%, 42%)', 'hsl(38, 80%, 55%)',
-  'hsl(0, 55%, 50%)', 'hsl(280, 50%, 55%)', 'hsl(180, 50%, 45%)',
+  'hsl(0, 84%, 58%)', 'hsl(145, 40%, 42%)', 'hsl(38, 80%, 55%)',
+  'hsl(220, 65%, 58%)', 'hsl(280, 50%, 55%)', 'hsl(180, 50%, 45%)',
   'hsl(330, 50%, 50%)', 'hsl(60, 60%, 45%)'
 ];
 
@@ -1024,7 +1024,7 @@ export default function Insights() {
                       <Legend wrapperStyle={{ fontSize: '12px' }} />
                       <Bar dataKey="income" fill="hsl(var(--success))" radius={[4, 4, 0, 0]} barSize={20} name="In" />
                       <Bar dataKey="expenses" fill="hsl(var(--destructive))" radius={[4, 4, 0, 0]} barSize={20} name="Out" />
-                      <Line type="monotone" dataKey="net" stroke="hsl(var(--primary))" strokeWidth={2} dot={{ fill: 'hsl(var(--primary))', r: 3 }} name="Net" />
+                      <Line type="monotone" dataKey="net" stroke="hsl(var(--foreground))" strokeWidth={2} dot={{ fill: 'hsl(var(--foreground))', r: 3 }} name="Net" />
                     </ComposedChart>
                   </ResponsiveContainer>
                 </div>
@@ -1361,7 +1361,7 @@ export default function Insights() {
                       <Legend wrapperStyle={{ fontSize: '12px' }} />
                       <Bar dataKey="income" fill="hsl(var(--success))" radius={[4, 4, 0, 0]} barSize={20} />
                       <Bar dataKey="expenses" fill="hsl(var(--destructive))" radius={[4, 4, 0, 0]} barSize={20} />
-                      <Line type="monotone" dataKey="net" stroke="hsl(var(--primary))" strokeWidth={2} dot={{ fill: 'hsl(var(--primary))', r: 3 }} name="net" />
+                      <Line type="monotone" dataKey="net" stroke="hsl(var(--foreground))" strokeWidth={2} dot={{ fill: 'hsl(var(--foreground))', r: 3 }} name="net" />
                     </ComposedChart>
                   </ResponsiveContainer>
                 ) : <p className="text-sm text-muted-foreground text-center py-10">No data yet</p>}
