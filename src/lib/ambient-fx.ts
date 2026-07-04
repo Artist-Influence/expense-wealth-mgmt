@@ -1,6 +1,10 @@
 /**
- * Artist Influence ambient FX layer: drifting background glow, red cursor
- * dot, hover tilt on glass panels, and staggered scroll-reveal.
+ * Artist Influence ambient FX layer: drifting background glow, red cursor dot,
+ * and a one-time staggered scroll-reveal.
+ *
+ * NOTE: there is deliberately NO cursor-driven hover tilt. It was removed
+ * because it made data tables "swing" under the cursor, which is disorienting
+ * on a work surface. Do not reintroduce a pointer-position transform on panels.
  *
  * Implemented with delegated listeners + observers (instead of per-element
  * wiring) so it keeps working across React route changes and re-renders.
@@ -8,19 +12,6 @@
  */
 
 const PANEL_SELECTOR = '.glass-panel, .glass-panel-sm';
-
-/** Panels that must never tilt: sticky nav, portaled overlays, opt-outs. */
-function tiltEligible(el: HTMLElement): boolean {
-  if (
-    el.closest(
-      'nav, [role="dialog"], [role="alertdialog"], [data-radix-popper-content-wrapper], [data-no-tilt]',
-    )
-  ) {
-    return false;
-  }
-  // Data tables are work surfaces; they must stay still under the cursor.
-  return !el.querySelector('table');
-}
 
 function initAmbientLayer() {
   if (document.querySelector('.ambient')) return;
@@ -49,38 +40,6 @@ function initCursorDot() {
   });
 }
 
-function initTilt() {
-  let current: HTMLElement | null = null;
-
-  const reset = () => {
-    if (!current) return;
-    current.classList.remove('tilting');
-    current.style.transform = '';
-    current = null;
-  };
-
-  document.addEventListener('mousemove', (e) => {
-    const target = e.target instanceof Element ? e.target : null;
-    const panel = target?.closest<HTMLElement>(PANEL_SELECTOR) ?? null;
-    const eligible = panel && tiltEligible(panel) ? panel : null;
-
-    if (current && current !== eligible) reset();
-    if (!eligible) return;
-
-    current = eligible;
-    const r = eligible.getBoundingClientRect();
-    const x = (e.clientX - r.left) / r.width - 0.5;
-    const y = (e.clientY - r.top) / r.height - 0.5;
-    // Full-width panels get a gentler tilt so tables stay readable.
-    const amp = r.width > 720 ? 1.8 : 4.5;
-    eligible.classList.add('tilting');
-    eligible.style.transform =
-      `perspective(900px) rotateX(${(-y * amp).toFixed(2)}deg) rotateY(${(x * amp).toFixed(2)}deg) translateY(-2px)`;
-  });
-
-  document.addEventListener('mouseleave', reset);
-}
-
 function initReveal() {
   const revealed = new WeakSet<Element>();
   const io = new IntersectionObserver(
@@ -95,16 +54,6 @@ function initReveal() {
   );
 
   const process = (root: ParentNode) => {
-    // If a table mounted into a panel that is still entering, snap it static
-    // so the table never moves.
-    for (const panel of root.querySelectorAll<HTMLElement>('.reveal')) {
-      if (panel.querySelector('table')) {
-        panel.classList.remove('reveal', 'shown');
-        panel.style.removeProperty('--rd');
-        io.unobserve(panel);
-      }
-    }
-
     const panels = root.querySelectorAll<HTMLElement>(PANEL_SELECTOR);
     let batchIndex = 0;
     for (const panel of panels) {
@@ -134,9 +83,8 @@ export function initAmbientFx() {
   const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   initAmbientLayer();
-  if (!coarse && !reduced) {
-    if (matchMedia('(pointer: fine)').matches) initCursorDot();
-    initTilt();
+  if (!coarse && !reduced && matchMedia('(pointer: fine)').matches) {
+    initCursorDot();
   }
   if (!reduced) initReveal();
 }

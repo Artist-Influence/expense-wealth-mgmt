@@ -197,10 +197,6 @@
   transition-delay: var(--rd, 0ms);
 }
 
-.tiltable.tilting {
-  transition: transform 0.12s ease-out !important;
-}
-
 .cursor-dot {
   position: fixed;
   top: 0;
