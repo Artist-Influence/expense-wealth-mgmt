@@ -51,6 +51,9 @@ export function AppNav() {
   const { profile } = useUsageProfile();
   const [healthOpen, setHealthOpen] = useState(false);
   const [healthSummary, setHealthSummary] = useState<HealthCheckSummary | null>(null);
+  // Plain-language split of what the health number is actually made of, so the
+  // badge reads as "40 duplicates · 12 stale" instead of a scary "965 issues".
+  const [healthDetail, setHealthDetail] = useState<{ duplicates: number; stale: number; parseErrors: number }>({ duplicates: 0, stale: 0, parseErrors: 0 });
 
   // Fetch needs_review count for badge
   const { data: reviewCount = 0 } = useQuery({
@@ -80,6 +83,8 @@ export function AppNav() {
           .eq('owner_id', ownerId!)
           .maybeSingle();
         if (!cancelled && data?.last_health_check_summary) {
+          const persisted = data.last_health_check_summary as any;
+          const b = persisted?.breakdown || {};
           setHealthSummary({
             ranAt: data.last_health_check_at || new Date().toISOString(),
             income: { exactClusters: [], rowIndex: {} },
@@ -87,13 +92,25 @@ export function AppNav() {
             needsReview: { incomeCount: 0, expenseCount: 0 },
             staleReviews: { count: 0, oldestDate: null },
             parseErrors: { count: 0 },
-            totalIssues: (data.last_health_check_summary as any)?.totalIssues || 0,
+            totalIssues: persisted?.totalIssues || 0,
           } as HealthCheckSummary);
+          setHealthDetail({
+            duplicates: (b.incomeExact || 0) + (b.expenseExact || 0) + (b.expenseNear || 0) + (b.crossMode || 0),
+            stale: b.stale || 0,
+            parseErrors: b.parseErrors || 0,
+          });
         }
         const due = await shouldAutoRun(ownerId!);
         if (due && !cancelled) {
           const fresh = await runHealthCheck(ownerId!);
-          if (!cancelled) setHealthSummary(fresh);
+          if (!cancelled) {
+            setHealthSummary(fresh);
+            setHealthDetail({
+              duplicates: fresh.income.exactClusters.length + fresh.expenses.exactClusters.length + fresh.expenses.nearClusters.length + fresh.expenses.crossModePairs.length,
+              stale: fresh.staleReviews.count,
+              parseErrors: fresh.parseErrors.count,
+            });
+          }
         }
       } catch {/* silent */}
     })();
@@ -190,12 +207,28 @@ export function AppNav() {
                 >
                   <Activity className="h-3.5 w-3.5" />
                   <span className="hidden md:inline">
-                    {totalIssues === 0 ? 'Healthy' : `${totalIssues} issue${totalIssues > 1 ? 's' : ''}`}
+                    {totalIssues === 0
+                      ? 'Data healthy'
+                      : healthDetail.duplicates > 0
+                        ? `${healthDetail.duplicates} to clean up`
+                        : `${totalIssues} to review`}
                   </span>
                 </button>
               </TooltipTrigger>
               <TooltipContent side="bottom" className="text-xs">
-                Data Health Check {healthSummary?.ranAt ? `· last run ${new Date(healthSummary.ranAt).toLocaleString()}` : ''}
+                {totalIssues === 0 ? (
+                  <span>No data issues found</span>
+                ) : (
+                  <span>
+                    {[
+                      healthDetail.duplicates > 0 ? `${healthDetail.duplicates} possible duplicate${healthDetail.duplicates > 1 ? 's' : ''}` : null,
+                      healthDetail.stale > 0 ? `${healthDetail.stale} stale review${healthDetail.stale > 1 ? 's' : ''}` : null,
+                      healthDetail.parseErrors > 0 ? `${healthDetail.parseErrors} parse error${healthDetail.parseErrors > 1 ? 's' : ''}` : null,
+                    ].filter(Boolean).join(' · ')}
+                    {' — click to resolve'}
+                  </span>
+                )}
+                {healthSummary?.ranAt ? ` · last checked ${new Date(healthSummary.ranAt).toLocaleString()}` : ''}
               </TooltipContent>
             </Tooltip>
           )}

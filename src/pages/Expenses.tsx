@@ -37,7 +37,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import {
   Upload, Search, Download, Check, CheckCheck, Edit3, X,
   ArrowLeftRight, AlertTriangle, Ban, FileText, Filter,
-  Calendar, ChevronDown, Trash2, Briefcase, User, Receipt, Scissors, RefreshCw, Copy, ArrowRight
+  Calendar, ChevronDown, Trash2, Briefcase, User, Receipt, Scissors, RefreshCw, Copy, ArrowRight, Wand2
 } from 'lucide-react';
 
 type TransactionMode = 'personal' | 'business' | 'reimbursable_work';
@@ -120,6 +120,7 @@ export default function Expenses() {
   const [methodFilter, setMethodFilter] = useState<string>('all');
   const [scanningRecurring, setScanningRecurring] = useState(false);
   const [sweepingDuplicates, setSweepingDuplicates] = useState(false);
+  const [reapplyingMemory, setReapplyingMemory] = useState(false);
   const [resolverOpen, setResolverOpen] = useState(false);
   const [exactClusters, setExactClusters] = useState<DuplicateCluster[]>([]);
   const [nearClusters, setNearClusters] = useState<DuplicateCluster[]>([]);
@@ -448,6 +449,129 @@ export default function Expenses() {
       console.error(err);
     } finally {
       setSweepingDuplicates(false);
+    }
+  };
+
+  /**
+   * Re-apply learned merchant memory + rules to everything still unreviewed.
+   * The engine already runs at import time, but memory keeps improving as you
+   * approve rows — this pushes that knowledge BACK onto the existing backlog so
+   * you don't hand-label merchants the model already knows. Only touches
+   * unreviewed, non-transfer, non-duplicate rows; never overwrites anything
+   * you've approved or edited.
+   */
+  const reapplyMemory = async () => {
+    if (!user || !ownerId) return;
+    if (!confirm(`Re-apply your learned categories to all unreviewed ${MODE_CONFIG[mode].label} transactions? This won't touch anything you've already approved or edited.`)) return;
+    setReapplyingMemory(true);
+    const tId = toast.loading('Re-applying merchant memory…');
+    try {
+      // Allowed categories for this mode (drives whitelist validation).
+      const { data: catData } = await supabase
+        .from('category_options')
+        .select('category_name')
+        .eq('mode', categoryMode).eq('is_active', true).eq('owner_id', ownerId!)
+        .order('sort_order');
+      const allowedCategories = (catData || []).map(c => c.category_name);
+
+      // Pull the unreviewed backlog for this mode — skip transfers, splits, and
+      // possible-duplicates (those are handled by their own flows).
+      const rows = await fetchAllRows<{
+        id: string; date: string | null; amount: number | null;
+        description_raw: string | null; description_normalized: string | null;
+        transaction_mode: string | null;
+      }>((from, to) => supabase
+        .from('transactions_uploaded')
+        .select('id, date, amount, description_raw, description_normalized, transaction_mode')
+        .eq('owner_id', ownerId!)
+        .eq('transaction_mode', mode)
+        .is('deleted_at', null)
+        .in('review_status', ['needs_review', 'suggested', 'ai_suggested'])
+        .eq('is_transfer', false)
+        .eq('is_split_parent', false)
+        .is('parent_transaction_id', null)
+        .neq('duplicate_status', 'possible_duplicate')
+        .order('id')
+        .range(from, to));
+
+      if (rows.length === 0) {
+        toast.dismiss(tId);
+        toast.success('Nothing to re-apply — no unreviewed transactions.');
+        return;
+      }
+
+      const parsed = rows.map(r => ({
+        date: r.date,
+        description_raw: r.description_raw || '',
+        description_normalized: r.description_normalized || '',
+        merchant_key: generateMerchantKey(r.description_normalized || ''),
+        amount: Number(r.amount || 0),
+        category: null, method: null, notes: null,
+        source_row_json: {}, parse_status: 'ok' as const, parse_error: null,
+      }));
+
+      const results = await categorizeTransactions(
+        parsed, categoryMode as 'personal' | 'business', ownerId, undefined, allowedCategories,
+      );
+
+      // Build a per-row update only where the engine now has a real answer.
+      let autoCount = 0, suggestCount = 0, unchanged = 0;
+      const updates: { id: string; payload: Record<string, unknown> }[] = [];
+      results.forEach((result, i) => {
+        const row = rows[i];
+        const hasSignal = !!result.predicted_category;
+        if (!hasSignal) { unchanged++; return; }
+
+        // Auto-approve strong exact-history matches, mirroring the import path.
+        const shouldAutoApprove = result.review_status === 'auto_categorized'
+          && result.confidence >= 95
+          && (result.match_source === 'exact_history' || result.match_source === 'normalized_history');
+        const isAuto = result.review_status === 'auto_categorized';
+        const finalCat = isAuto ? result.predicted_category : null;
+        const reviewStatus = shouldAutoApprove ? 'approved' : result.review_status;
+        const catForDeduction = finalCat || result.predicted_category;
+
+        if (isAuto) autoCount++; else suggestCount++;
+
+        updates.push({
+          id: row.id,
+          payload: {
+            predicted_category: result.predicted_category,
+            predicted_method: result.predicted_method,
+            predicted_notes: result.predicted_notes,
+            final_category: finalCat,
+            review_status: reviewStatus,
+            match_source: result.match_source,
+            match_explanation: result.match_explanation,
+            counts_as_tax_deduction: isDeductibleCategory(row.transaction_mode as any, catForDeduction),
+          },
+        });
+      });
+
+      // Apply with bounded concurrency; count failures rather than aborting.
+      let failed = 0;
+      const CONCURRENCY = 20;
+      for (let i = 0; i < updates.length; i += CONCURRENCY) {
+        const slice = updates.slice(i, i + CONCURRENCY);
+        const res = await Promise.all(slice.map(u =>
+          supabase.from('transactions_uploaded').update(u.payload as never).eq('id', u.id),
+        ));
+        failed += res.filter(r => r.error).length;
+      }
+
+      toast.dismiss(tId);
+      if (failed > 0) {
+        toast.error(`Re-applied with ${failed} failure${failed === 1 ? '' : 's'}. ${autoCount} auto-labeled, ${suggestCount} suggested.`);
+      } else {
+        toast.success(`${autoCount} auto-labeled · ${suggestCount} suggested · ${unchanged} still need a first review.`);
+      }
+      await loadTransactions();
+    } catch (err: any) {
+      toast.dismiss(tId);
+      toast.error(`Re-apply failed: ${err?.message || 'unknown error'}`);
+      console.error(err);
+    } finally {
+      setReapplyingMemory(false);
     }
   };
 
@@ -1987,6 +2111,20 @@ export default function Expenses() {
             </button>
           )}
 
+
+          {!isInvestor && !isAccountant && selectedIds.size === 0 && user && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 gap-1 text-xs glass-input"
+              disabled={reapplyingMemory}
+              onClick={reapplyMemory}
+              title="Auto-label unreviewed transactions using merchants you've already taught the app"
+            >
+              <Wand2 className={`h-3 w-3 ${reapplyingMemory ? 'animate-pulse' : ''}`} />
+              {reapplyingMemory ? 'Applying…' : 'Apply memory'}
+            </Button>
+          )}
 
           {!isInvestor && !isAccountant && selectedIds.size === 0 && user && (
             <Button
