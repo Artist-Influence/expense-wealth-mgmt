@@ -39,6 +39,7 @@ interface IncomeRow {
   income_type: string;
   taxable_status: string;
   amount: number | null;
+  date: string | null;
 }
 
 interface DeductionRow {
@@ -210,7 +211,7 @@ export default function Tax() {
     const rows = await fetchAllRows((from, to) => {
       let q = supabase
         .from('income_transactions')
-        .select('income_type, taxable_status, amount')
+        .select('income_type, taxable_status, amount, date')
         .eq('owner_id', ownerId!)
         .gte('date', yearStart)
         .lte('date', yearEnd)
@@ -440,6 +441,60 @@ export default function Tax() {
     return Object.entries(map).sort((a, b) => b[1].amount - a[1].amount);
   }, [deductionRows]);
 
+  // --- Quarterly estimated-tax schedule ---
+  // The IRS/NY estimated-tax year is split into 4 UNEVEN periods. We apportion
+  // the annual reserve target across them by WHEN taxable income actually landed
+  // (quarterTaxableIncome × the effective rate the annual reserve implies), then
+  // compare that against payments made from each window's start through its due
+  // date. Local date construction only — never new Date('YYYY-MM-DD'), which
+  // parses as UTC midnight and can shift to the prior day in negative-offset zones.
+  type QuarterStatus = 'paid' | 'overdue' | 'due-soon' | 'upcoming';
+  const quarters = useMemo(() => {
+    const y = selectedYear;
+    const parseLocal = (s: string | null): Date | null => {
+      if (!s) return null;
+      const [yy, mm, dd] = s.substring(0, 10).split('-').map(Number);
+      if (!yy || !mm || !dd) return null;
+      return new Date(yy, mm - 1, dd);
+    };
+    // Effective rate the annual reserve implies. Guarded so a 0 adjusted income
+    // yields 0 targets rather than smearing the whole reserve onto gross income.
+    const effectiveRate = adjustedIncome > 0 ? totalReserve / adjustedIncome : 0;
+    const defs = [
+      { label: 'Q1', incomeStart: new Date(y, 0, 1), incomeEnd: new Date(y, 2, 31), due: new Date(y, 3, 15) },
+      { label: 'Q2', incomeStart: new Date(y, 3, 1), incomeEnd: new Date(y, 4, 31), due: new Date(y, 5, 15) },
+      { label: 'Q3', incomeStart: new Date(y, 5, 1), incomeEnd: new Date(y, 7, 31), due: new Date(y, 8, 15) },
+      { label: 'Q4', incomeStart: new Date(y, 8, 1), incomeEnd: new Date(y, 11, 31), due: new Date(y + 1, 0, 15) },
+    ];
+    const today = new Date();
+    const MS_PER_DAY = 86_400_000;
+    // Only the current or a past year should surface overdue / due-soon coloring;
+    // future years are informational (their targets may not exist yet).
+    const nagOk = y <= nowYear;
+    return defs.map(q => {
+      const quarterTaxableIncome = incomeRows.reduce((s, r) => {
+        if (r.taxable_status !== 'taxable') return s;
+        const d = parseLocal(r.date);
+        return d && d >= q.incomeStart && d <= q.incomeEnd ? s + (r.amount || 0) : s;
+      }, 0);
+      const target = quarterTaxableIncome * effectiveRate;
+      // Payments for a quarter are typically made by its due date, so count any
+      // payment landing from the income-window start through the due date.
+      const paid = taxPayments.reduce((s, p) => {
+        const d = parseLocal(p.date);
+        return d && d >= q.incomeStart && d <= q.due ? s + Math.abs(p.amount || 0) : s;
+      }, 0);
+      const remaining = Math.max(0, target - paid);
+      const daysUntilDue = Math.ceil((q.due.getTime() - today.getTime()) / MS_PER_DAY);
+      let status: QuarterStatus;
+      if (remaining <= 0 && target > 0) status = 'paid';
+      else if (nagOk && daysUntilDue < 0 && remaining > 0) status = 'overdue';
+      else if (nagOk && daysUntilDue >= 0 && daysUntilDue <= 30) status = 'due-soon';
+      else status = 'upcoming';
+      return { label: q.label, due: q.due, quarterTaxableIncome, target, paid, remaining, status };
+    });
+  }, [incomeRows, taxPayments, selectedYear, nowYear, totalReserve, adjustedIncome]);
+
   if (loading) {
     return (
       <div className="min-h-screen bg-background">
@@ -598,6 +653,55 @@ export default function Tax() {
           <SummaryCard icon={DollarSign} label="Paid / Withheld YTD" value={fmt(paidYtd)} />
           <SummaryCard icon={reserveGap > 0 ? AlertTriangle : TrendingUp} label="Reserve Gap" value={fmt(reserveGap)} variant={reserveGap > 0 ? 'warning' : 'success'} />
         </div>
+
+        {/* Quarterly Estimated Taxes — annual reserve apportioned across the 4 uneven IRS/NY periods by when income landed */}
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Quarterly Estimated Taxes — {selectedYear}</CardTitle>
+            <CardDescription className="text-xs">
+              Set-aside targets apportioned by when income landed — pay estimated taxes by each date to avoid IRS/NY underpayment penalties.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+              {quarters.map(q => {
+                const meta = {
+                  paid: { label: 'Paid', pill: 'bg-success/15 text-success border border-success/30', card: 'border-success/30' },
+                  overdue: { label: 'Overdue', pill: 'bg-destructive/15 text-destructive border border-destructive/30', card: 'border-destructive/40' },
+                  'due-soon': { label: 'Due soon', pill: 'bg-warning/15 text-warning border border-warning/30', card: 'border-warning/40' },
+                  upcoming: { label: 'Upcoming', pill: 'bg-secondary text-muted-foreground border border-border/40', card: 'border-border/50' },
+                }[q.status];
+                return (
+                  <div key={q.label} className={`rounded-lg border ${meta.card} bg-card p-3`}>
+                    <div className="flex items-start justify-between gap-2 mb-2">
+                      <div>
+                        <span className="text-sm font-semibold text-foreground">{q.label}</span>
+                        <p className="text-[11px] text-muted-foreground">
+                          Due {q.due.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                        </p>
+                      </div>
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium whitespace-nowrap ${meta.pill}`}>{meta.label}</span>
+                    </div>
+                    <div className="space-y-1 text-xs">
+                      <div className="flex items-center justify-between">
+                        <span className="text-muted-foreground">Target</span>
+                        <span className="font-medium text-foreground">{fmt(q.target)}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-muted-foreground">Paid</span>
+                        <span className="text-foreground">{fmt(q.paid)}</span>
+                      </div>
+                      <div className="flex items-center justify-between border-t border-border/40 pt-1 mt-1">
+                        <span className="text-muted-foreground">Remaining</span>
+                        <span className={`font-semibold ${q.status === 'overdue' ? 'text-destructive' : q.status === 'due-soon' ? 'text-warning' : 'text-foreground'}`}>{fmt(q.remaining)}</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
 
         {/* Estimate disclaimer */}
         <div className="rounded-lg border border-warning/30 bg-warning/5 px-4 py-3 text-xs text-warning flex items-start gap-2">

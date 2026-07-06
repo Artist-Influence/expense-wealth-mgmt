@@ -3,6 +3,7 @@ import type { ParsedTransaction } from './csv-parser';
 import { fetchAllRows } from './fetch-all';
 import { generateMerchantKey, remapCategory } from './normalizer';
 import { detectRecurrence } from './recurrence-detector';
+import { matchMerchantKnowledge } from './merchant-knowledge';
 
 export type RecurringHistoryMap = Map<string, { date: string; amount: number }[]>;
 
@@ -401,6 +402,22 @@ export async function categorizeTransactions(
         return buildResult(validated.category, rule.method_output, rule.notes_output,
           85, 'rule', thresholds, false,
           `Rule match: "${rule.match_type}" pattern "${rule.pattern}"`, merchantKey);
+      }
+    }
+
+    // Layer 2.5: Built-in merchant knowledge ("common sense"). Turns a
+    // first-ever charge from a well-known merchant (Anthropic, Netflix, Uber…)
+    // into a filled-in answer instead of a blank needs-review. The returned
+    // category is already one the user actually has. Tagged 'rule' because the
+    // DB match_source constraint has no dedicated value and it is, in effect, a
+    // built-in rule.
+    if (allowedCategories.length > 0) {
+      const knowledge = matchMerchantKnowledge(
+        merchantKey, tx.description_raw || '', tx.description_normalized || '', allowedCategories,
+      );
+      if (knowledge) {
+        return buildResult(knowledge.category, null, null, knowledge.confidence, 'rule', thresholds, false,
+          `Recognized ${knowledge.label} → ${knowledge.category} (built-in knowledge)`, merchantKey);
       }
     }
 

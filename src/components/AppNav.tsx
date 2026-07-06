@@ -39,7 +39,6 @@ const MORE_NAV: NavItem[] = [
   { to: '/assistant', label: 'Assistant', icon: MessageCircle },
   { to: '/close-month', label: 'Close Month', icon: CalendarCheck },
   { to: '/accountant', label: 'Accountant', icon: FileSpreadsheet },
-  { to: '/merchants', label: 'Merchant Memory', icon: Brain },
 ];
 
 const isRouteActive = (pathname: string, to: string) =>

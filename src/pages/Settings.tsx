@@ -11,7 +11,8 @@ import { Slider } from '@/components/ui/slider';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
-import { Plus, Trash2, ChevronDown, Zap, Save, Wand2, HelpCircle, CheckCircle2, Circle, CreditCard, Database, ArrowRight } from 'lucide-react';
+import { Plus, Trash2, ChevronDown, Zap, Save, Wand2, HelpCircle, CheckCircle2, Circle, CreditCard, Database, ArrowRight, Brain } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { previewCsvFile, parseCsvFileWithMapping, type ColumnMapping, type ParsePreview } from '@/lib/csv-parser';
 import { fetchAllRows } from '@/lib/fetch-all';
 import { updateMerchantMemory } from '@/lib/categorization-engine';
@@ -907,6 +908,22 @@ export default function SettingsPage() {
             onConfirm={handleSeedConfirm}
             onCancel={handleSeedCancel}
           />
+
+          {/* Merchant Memory — relocated here from the top nav (it's config, not
+              a daily destination). */}
+          <Link
+            to="/merchants"
+            className="glass-panel p-4 w-full flex items-center justify-between cursor-pointer hover:bg-secondary/20 transition-colors group"
+          >
+            <div className="flex items-center gap-2">
+              <Brain className="h-4 w-4 text-primary" />
+              <div>
+                <h3 className="text-sm font-medium text-foreground">Merchant Memory</h3>
+                <p className="text-[11px] text-muted-foreground">Review and edit the merchants the app has learned</p>
+              </div>
+            </div>
+            <ArrowRight className="h-4 w-4 text-muted-foreground group-hover:translate-x-0.5 transition-transform" />
+          </Link>
 
           {/* Advanced Rules */}
           <Collapsible open={rulesOpen} onOpenChange={setRulesOpen}>
