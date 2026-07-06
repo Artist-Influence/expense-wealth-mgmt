@@ -101,6 +101,16 @@ const CHART_COLORS = [
 
 const fmt = (n: number) => '$' + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+// Recharts tooltip style — static, hoisted to module scope so every chart gets a
+// stable reference (no per-render object allocation, no needless Tooltip reconciliation).
+const tooltipStyle = {
+  background: 'hsl(var(--card))',
+  border: '1px solid hsl(var(--border))',
+  borderRadius: '8px',
+  fontSize: '12px',
+  color: 'hsl(var(--foreground))',
+};
+
 // Review-mode → which review_status values we count in totals/charts.
 //   manual    = only what's been clicked through (current legacy behavior)
 //   suggested = adds rule/AI suggested rows that haven't been clicked yet (NEW DEFAULT)
@@ -843,14 +853,6 @@ export default function Insights() {
     return out.sort((a, b) => b.impactMonthly - a.impactMonthly).slice(0, 6);
   }, [cashFlow, recurringCharges, approvedExpenses, allExpenses, mode, taxReservePct]);
 
-
-  const tooltipStyle = {
-    background: 'hsl(var(--card))',
-    border: '1px solid hsl(var(--border))',
-    borderRadius: '8px',
-    fontSize: '12px',
-    color: 'hsl(var(--foreground))',
-  };
 
   return (
     <div className="min-h-screen bg-background">

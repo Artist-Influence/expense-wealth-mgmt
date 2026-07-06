@@ -60,6 +60,9 @@ const INCOME_TYPE_BADGE: Record<string, { class: string }> = {
   other: { class: 'bg-muted text-muted-foreground border-border' },
 };
 
+// Client-side render pagination — mounting thousands of DOM rows at once is the lag source.
+const PAGE_SIZE = 100;
+
 export default function Income() {
   const { user, isInvestor, isAccountant, ownerId } = useAuth();
   const { profile } = useUsageProfile();
@@ -71,6 +74,7 @@ export default function Income() {
   const [filterType, setFilterType] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [filterMode, setFilterMode] = useState<'all' | 'personal' | 'business'>(isInvestor ? 'business' : 'all');
+  const [page, setPage] = useState(0);
 
   // Lock the view to the usage profile when it isn't "both"
   useEffect(() => {
@@ -179,6 +183,19 @@ export default function Income() {
       return true;
     });
   }, [transactions, filterMode, filterType, filterStatus, dateFrom, dateTo, searchQuery]);
+
+  // Render pagination — only mount PAGE_SIZE rows at a time. Selection, bulk
+  // actions, totals and export still operate on the full `filtered` set below.
+  // Reset to page 0 whenever a filter/search/mode/date input changes the result set.
+  useEffect(() => { setPage(0); }, [filterMode, filterType, filterStatus, searchQuery, dateFrom, dateTo]);
+  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount - 1); // clamp so row deletes can't strand us on an empty page
+  const pagedTransactions = useMemo(
+    () => filtered.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE),
+    [filtered, currentPage],
+  );
+  const rangeStart = filtered.length === 0 ? 0 : currentPage * PAGE_SIZE + 1;
+  const rangeEnd = Math.min(filtered.length, (currentPage + 1) * PAGE_SIZE);
 
   // Months derived from transactions for the date filter
   const availableMonths = useMemo(() => {
@@ -731,7 +748,7 @@ export default function Income() {
                 <TableRow><TableCell colSpan={10} className="text-center text-muted-foreground py-12">
                   No income transactions yet. Import a CSV or add an entry manually.
                 </TableCell></TableRow>
-              ) : filtered.map(tx => (
+              ) : pagedTransactions.map(tx => (
                 <TableRow key={tx.id} className="border-border/50">
                   <TableCell><Checkbox checked={selectedIds.has(tx.id)} onCheckedChange={() => toggleOne(tx.id)} /></TableCell>
                   <TableCell className="text-sm font-mono text-muted-foreground">{tx.date || '—'}</TableCell>
@@ -799,9 +816,30 @@ export default function Income() {
           </Table>
         </div>
 
-        <p className="text-xs text-muted-foreground text-center">
-          Showing {filtered.length} of {transactions.length} income transactions · {dateActive ? dateLabel : 'All Dates'}
-        </p>
+        <div className="flex items-center justify-center gap-3">
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-xs"
+            disabled={currentPage === 0}
+            onClick={() => setPage(p => Math.max(0, p - 1))}
+          >
+            Prev
+          </Button>
+          <p className="text-xs text-muted-foreground text-center">
+            Showing {rangeStart}–{rangeEnd} of {filtered.length} income transactions
+            {filtered.length !== transactions.length ? ` (of ${transactions.length} total)` : ''} · Page {currentPage + 1} of {pageCount} · {dateActive ? dateLabel : 'All Dates'}
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-xs"
+            disabled={currentPage >= pageCount - 1}
+            onClick={() => setPage(p => Math.min(pageCount - 1, p + 1))}
+          >
+            Next
+          </Button>
+        </div>
       </div>
 
       {/* Manual Entry Dialog */}

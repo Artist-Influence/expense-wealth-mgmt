@@ -130,6 +130,10 @@ export default function Expenses() {
   const [dateTo, setDateTo] = useState<string | null>(null);
   const [dateLabel, setDateLabel] = useState<string>('All Dates');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  // Render only one page of rows at a time — a full table of thousands of rows
+  // is the main source of lag. Data is still fully loaded; this caps the DOM.
+  const [page, setPage] = useState(0);
+  const PAGE_SIZE = 100;
   const [categories, setCategories] = useState<string[]>([]);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [sortCol, setSortCol] = useState<string>('date');
@@ -453,122 +457,118 @@ export default function Expenses() {
   };
 
   /**
-   * Re-apply learned merchant memory + rules to everything still unreviewed.
-   * The engine already runs at import time, but memory keeps improving as you
-   * approve rows — this pushes that knowledge BACK onto the existing backlog so
-   * you don't hand-label merchants the model already knows. Only touches
+   * Categorize EVERY still-uncategorized transaction across BOTH personal and
+   * business, using learned merchant memory, the user's rules, and built-in
+   * merchant knowledge (Anthropic, Netflix, Uber, …). Runs each mode with its
+   * own category list so a business Anthropic charge resolves against business
+   * categories and a personal one against personal categories. Only touches
    * unreviewed, non-transfer, non-duplicate rows; never overwrites anything
-   * you've approved or edited.
+   * already approved or edited.
    */
   const reapplyMemory = async () => {
     if (!user || !ownerId) return;
-    if (!confirm(`Re-apply your learned categories to all unreviewed ${MODE_CONFIG[mode].label} transactions? This won't touch anything you've already approved or edited.`)) return;
+    if (!confirm('Categorize all uncategorized transactions across Personal and Business? Uses everything the app knows (your learned merchants, rules, and built-in knowledge of common merchants). Anything you\'ve already approved or edited stays untouched.')) return;
     setReapplyingMemory(true);
-    const tId = toast.loading('Re-applying merchant memory…');
+    const tId = toast.loading('Categorizing your transactions…');
     try {
-      // Allowed categories for this mode (drives whitelist validation).
-      const { data: catData } = await supabase
-        .from('category_options')
-        .select('category_name')
-        .eq('mode', categoryMode).eq('is_active', true).eq('owner_id', ownerId!)
-        .order('sort_order');
-      const allowedCategories = (catData || []).map(c => c.category_name);
+      let autoCount = 0, suggestCount = 0, unchanged = 0, failed = 0, processed = 0, noCatModes = 0;
 
-      // Pull the unreviewed backlog for this mode — skip transfers, splits, and
-      // possible-duplicates (those are handled by their own flows).
-      const rows = await fetchAllRows<{
-        id: string; date: string | null; amount: number | null;
-        description_raw: string | null; description_normalized: string | null;
-        transaction_mode: string | null;
-      }>((from, to) => supabase
-        .from('transactions_uploaded')
-        .select('id, date, amount, description_raw, description_normalized, transaction_mode')
-        .eq('owner_id', ownerId!)
-        .eq('transaction_mode', mode)
-        .is('deleted_at', null)
-        .in('review_status', ['needs_review', 'suggested', 'ai_suggested'])
-        .eq('is_transfer', false)
-        .eq('is_split_parent', false)
-        .is('parent_transaction_id', null)
-        .neq('duplicate_status', 'possible_duplicate')
-        .order('id')
-        .range(from, to));
+      for (const m of ['personal', 'business'] as const) {
+        // Categories for THIS mode — the knowledge/memory match must resolve to
+        // a category the user actually has in this mode.
+        const { data: catData } = await supabase
+          .from('category_options')
+          .select('category_name')
+          .eq('mode', m).eq('is_active', true).eq('owner_id', ownerId!)
+          .order('sort_order');
+        const allowedCategories = (catData || []).map(c => c.category_name);
+        if (allowedCategories.length === 0) { noCatModes++; continue; }
 
-      if (rows.length === 0) {
-        toast.dismiss(tId);
-        toast.success('Nothing to re-apply — no unreviewed transactions.');
-        return;
-      }
+        // This mode's uncategorized backlog — skip transfers, splits, dupes.
+        const rows = await fetchAllRows<{
+          id: string; date: string | null; amount: number | null;
+          description_raw: string | null; description_normalized: string | null;
+        }>((from, to) => supabase
+          .from('transactions_uploaded')
+          .select('id, date, amount, description_raw, description_normalized')
+          .eq('owner_id', ownerId!)
+          .eq('transaction_mode', m)
+          .is('deleted_at', null)
+          .in('review_status', ['needs_review', 'suggested', 'ai_suggested'])
+          .eq('is_transfer', false)
+          .eq('is_split_parent', false)
+          .is('parent_transaction_id', null)
+          .neq('duplicate_status', 'possible_duplicate')
+          .order('id')
+          .range(from, to));
+        if (rows.length === 0) continue;
+        processed += rows.length;
 
-      const parsed = rows.map(r => ({
-        date: r.date,
-        description_raw: r.description_raw || '',
-        description_normalized: r.description_normalized || '',
-        merchant_key: generateMerchantKey(r.description_normalized || ''),
-        amount: Number(r.amount || 0),
-        category: null, method: null, notes: null,
-        source_row_json: {}, parse_status: 'ok' as const, parse_error: null,
-      }));
+        const parsed = rows.map(r => ({
+          date: r.date,
+          description_raw: r.description_raw || '',
+          description_normalized: r.description_normalized || '',
+          merchant_key: generateMerchantKey(r.description_normalized || ''),
+          amount: Number(r.amount || 0),
+          category: null, method: null, notes: null,
+          source_row_json: {}, parse_status: 'ok' as const, parse_error: null,
+        }));
 
-      const results = await categorizeTransactions(
-        parsed, categoryMode as 'personal' | 'business', ownerId, undefined, allowedCategories,
-      );
+        const results = await categorizeTransactions(parsed, m, ownerId, undefined, allowedCategories);
 
-      // Build a per-row update only where the engine now has a real answer.
-      let autoCount = 0, suggestCount = 0, unchanged = 0;
-      const updates: { id: string; payload: Record<string, unknown> }[] = [];
-      results.forEach((result, i) => {
-        const row = rows[i];
-        const hasSignal = !!result.predicted_category;
-        if (!hasSignal) { unchanged++; return; }
+        const updates: { id: string; payload: Record<string, unknown> }[] = [];
+        results.forEach((result, i) => {
+          if (!result.predicted_category) { unchanged++; return; }
 
-        // Auto-approve strong exact-history matches, mirroring the import path.
-        const shouldAutoApprove = result.review_status === 'auto_categorized'
-          && result.confidence >= 95
-          && (result.match_source === 'exact_history' || result.match_source === 'normalized_history');
-        const isAuto = result.review_status === 'auto_categorized';
-        const finalCat = isAuto ? result.predicted_category : null;
-        const reviewStatus = shouldAutoApprove ? 'approved' : result.review_status;
-        const catForDeduction = finalCat || result.predicted_category;
+          // Auto-approve strong exact-history matches, mirroring the import path.
+          const shouldAutoApprove = result.review_status === 'auto_categorized'
+            && result.confidence >= 95
+            && (result.match_source === 'exact_history' || result.match_source === 'normalized_history');
+          const isAuto = result.review_status === 'auto_categorized';
+          const finalCat = isAuto ? result.predicted_category : null;
+          const reviewStatus = shouldAutoApprove ? 'approved' : result.review_status;
+          const catForDeduction = finalCat || result.predicted_category;
 
-        if (isAuto) autoCount++; else suggestCount++;
+          if (isAuto) autoCount++; else suggestCount++;
 
-        updates.push({
-          id: row.id,
-          payload: {
-            predicted_category: result.predicted_category,
-            predicted_method: result.predicted_method,
-            predicted_notes: result.predicted_notes,
-            final_category: finalCat,
-            review_status: reviewStatus,
-            match_source: result.match_source,
-            match_explanation: result.match_explanation,
-            counts_as_tax_deduction: isDeductibleCategory(row.transaction_mode as any, catForDeduction),
-          },
+          updates.push({
+            id: rows[i].id,
+            payload: {
+              predicted_category: result.predicted_category,
+              predicted_method: result.predicted_method,
+              predicted_notes: result.predicted_notes,
+              final_category: finalCat,
+              review_status: reviewStatus,
+              match_source: result.match_source,
+              match_explanation: result.match_explanation,
+              counts_as_tax_deduction: isDeductibleCategory(m, catForDeduction),
+            },
+          });
         });
-      });
 
-      // Apply with bounded concurrency; count failures rather than aborting.
-      let failed = 0;
-      const CONCURRENCY = 20;
-      for (let i = 0; i < updates.length; i += CONCURRENCY) {
-        const slice = updates.slice(i, i + CONCURRENCY);
-        const res = await Promise.all(slice.map(u =>
-          supabase.from('transactions_uploaded').update(u.payload as never).eq('id', u.id),
-        ));
-        failed += res.filter(r => r.error).length;
+        const CONCURRENCY = 20;
+        for (let i = 0; i < updates.length; i += CONCURRENCY) {
+          const res = await Promise.all(updates.slice(i, i + CONCURRENCY).map(u =>
+            supabase.from('transactions_uploaded').update(u.payload as never).eq('id', u.id),
+          ));
+          failed += res.filter(r => r.error).length;
+        }
       }
 
       toast.dismiss(tId);
-      if (failed > 0) {
-        toast.error(`Re-applied with ${failed} failure${failed === 1 ? '' : 's'}. ${autoCount} auto-labeled, ${suggestCount} suggested.`);
+      if (noCatModes === 2) {
+        toast.error('Add some categories in Settings first — there\'s nothing to categorize into yet.');
+      } else if (processed === 0) {
+        toast.success('Nothing to categorize — every transaction is already reviewed.');
+      } else if (failed > 0) {
+        toast.error(`Categorized with ${failed} failure${failed === 1 ? '' : 's'}. ${autoCount} auto-labeled, ${suggestCount} suggested.`);
       } else {
-        toast.success(`${autoCount} auto-labeled · ${suggestCount} suggested · ${unchanged} still need a first review.`);
+        toast.success(`Done: ${autoCount} auto-labeled · ${suggestCount} suggested · ${unchanged} unrecognized (need a first review).`);
       }
       await loadTransactions();
     } catch (err: any) {
       toast.dismiss(tId);
-      toast.error(`Re-apply failed: ${err?.message || 'unknown error'}`);
+      toast.error(`Categorize failed: ${err?.message || 'unknown error'}`);
       console.error(err);
     } finally {
       setReapplyingMemory(false);
@@ -638,6 +638,18 @@ export default function Expenses() {
 
     return result;
   }, [transactions, statusFilter, extraFilter, categoryFilter, methodFilter, dateFrom, dateTo, search, sortCol, sortAsc]);
+
+  // Paginate the RENDER (not the data). safePage clamps if the filtered set
+  // shrank below the current page.
+  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const safePage = Math.min(page, pageCount - 1);
+  const paged = useMemo(
+    () => filtered.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE),
+    [filtered, safePage],
+  );
+  // Reset to the first page only when the FILTER changes — never on a row edit
+  // (which would bounce the user off their current page).
+  useEffect(() => { setPage(0); }, [statusFilter, extraFilter, categoryFilter, methodFilter, dateFrom, dateTo, search, mode]);
 
   // Available payment methods derived from loaded transactions for the Method filter.
   // Falls back to source_account_name (set on upload from filename) so accounts that
@@ -1888,6 +1900,16 @@ export default function Expenses() {
     }
   };
 
+  // Plain-language status labels — clearer than the raw enum for a non-accountant.
+  const statusLabel = (s: string): string => ({
+    approved: 'Approved',
+    edited: 'Approved',
+    auto_categorized: 'Auto',
+    suggested: 'Suggested',
+    ai_suggested: 'Suggested',
+    needs_review: 'Needs review',
+  } as Record<string, string>)[s] ?? s.replace(/_/g, ' ');
+
   const SortHeader = ({ col, label, className = '' }: { col: string; label: string; className?: string }) => (
     <th
       className={`px-2 py-2 text-left text-[11px] font-medium text-muted-foreground cursor-pointer select-none hover:text-foreground transition-colors whitespace-nowrap ${className}`}
@@ -2119,10 +2141,10 @@ export default function Expenses() {
               className="h-8 gap-1 text-xs glass-input"
               disabled={reapplyingMemory}
               onClick={reapplyMemory}
-              title="Auto-label unreviewed transactions using merchants you've already taught the app"
+              title="Categorize every uncategorized transaction (Personal + Business) using learned merchants, your rules, and built-in knowledge of common merchants like Anthropic, Netflix, and Uber"
             >
               <Wand2 className={`h-3 w-3 ${reapplyingMemory ? 'animate-pulse' : ''}`} />
-              {reapplyingMemory ? 'Applying…' : 'Apply memory'}
+              {reapplyingMemory ? 'Categorizing…' : 'Categorize all'}
             </Button>
           )}
 
@@ -2385,7 +2407,7 @@ export default function Expenses() {
                 ) : filtered.length === 0 ? (
                   <tr><td colSpan={11} className="px-2 py-12 text-center text-muted-foreground">No transactions found</td></tr>
                 ) : (
-                  filtered.map(tx => (
+                  paged.map(tx => (
                     <tr
                       key={tx.id}
                       className={`border-b border-border/10 hover:bg-secondary/20 transition-colors cursor-pointer ${tx.exclude_from_expense_totals ? 'opacity-50' : ''}`}
@@ -2479,8 +2501,8 @@ export default function Expenses() {
                         </span>
                       </td>
                       <td className="px-2 py-1">
-                        <span className={getStatusClass(tx.review_status)}>
-                          {tx.review_status === 'ai_suggested' ? 'AI suggested' : tx.review_status.replace(/_/g, ' ')}
+                        <span className={getStatusClass(tx.review_status)} title={tx.review_status === 'auto_categorized' ? 'Auto-categorized from a confident match — counts in totals' : tx.review_status === 'needs_review' ? 'Not recognized yet — set a category' : tx.review_status === 'suggested' || tx.review_status === 'ai_suggested' ? 'Suggested category — confirm or change it' : 'You confirmed this'}>
+                          {statusLabel(tx.review_status)}
                         </span>
                       </td>
                       <td className="px-2 py-1">
@@ -2563,6 +2585,33 @@ export default function Expenses() {
               </tbody>
             </table>
           </div>
+
+          {filtered.length > PAGE_SIZE && (
+            <div className="flex items-center justify-between gap-2 px-3 py-2 border-t border-border/20 text-xs text-muted-foreground">
+              <span className="font-mono">
+                {safePage * PAGE_SIZE + 1}–{Math.min((safePage + 1) * PAGE_SIZE, filtered.length)} of {filtered.length}
+              </span>
+              <div className="flex items-center gap-1">
+                <Button
+                  size="sm" variant="outline"
+                  className="h-7 px-2 glass-input"
+                  disabled={safePage <= 0}
+                  onClick={() => setPage(p => Math.max(0, p - 1))}
+                >
+                  Prev
+                </Button>
+                <span className="font-mono px-1">Page {safePage + 1} / {pageCount}</span>
+                <Button
+                  size="sm" variant="outline"
+                  className="h-7 px-2 glass-input"
+                  disabled={safePage >= pageCount - 1}
+                  onClick={() => setPage(p => Math.min(pageCount - 1, p + 1))}
+                >
+                  Next
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
