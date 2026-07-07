@@ -303,7 +303,12 @@ export default function Income() {
 
         const headers = allRows[0].map(h => (h || '').trim().toLowerCase());
         const dateIdx = headers.findIndex(h => /date/i.test(h));
-        const descIdx = headers.findIndex(h => /desc|memo|narr|detail/i.test(h));
+        // Prefer a real description column over a "Details"/"Type" column (which
+        // in many bank CSVs just holds DEBIT/CREDIT and isn't a merchant name).
+        let descIdx = headers.findIndex(h => /(description|payee|narrative|memo|merchant|name)/i.test(h));
+        if (descIdx === -1) descIdx = headers.findIndex(h => /desc|memo|narr|detail/i.test(h));
+        // A Details/Type column that flags direction (DEBIT = money out).
+        const detailsIdx = headers.findIndex(h => /^(details|type|transaction\s*type|dr\/cr|debit\/credit)$/i.test(h));
         const amtIdx = headers.findIndex(h => /amount|credit|deposit/i.test(h));
         // Twin-column bank statements: a separate "money in" (Credit) and "money
         // out" (Debit). Income only comes from the credit/inflow side.
@@ -354,6 +359,11 @@ export default function Income() {
             inflow = !isNaN(amt) && amt > 0 ? amt : 0;
           }
           if (inflow <= 0) { skippedOutflows++; continue; }
+
+          // If the bank marks direction in a Details/Type column, a DEBIT (or
+          // written CHECK) is money OUT regardless of how the amount is signed.
+          const detailsVal = detailsIdx >= 0 ? (cols[detailsIdx] || '').trim().toUpperCase() : '';
+          if (detailsVal === 'DEBIT' || detailsVal === 'CHECK') { skippedOutflows++; continue; }
 
           // Exclude money that isn't income even when it comes in: transfers
           // between your own accounts, moves into investments (Gemini,

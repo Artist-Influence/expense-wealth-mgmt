@@ -26,7 +26,12 @@ type ImportGroup = {
 const fmt = (n: number) => '$' + Math.round(n).toLocaleString();
 
 function reasonFor(desc: string): 'transfer' | 'outflow' | null {
-  const d = desc || '';
+  const d = (desc || '').trim();
+  const u = d.toUpperCase();
+  // Bank "Details/Type" values that mean money OUT — common when a checking
+  // CSV's DEBIT/CREDIT column got imported as the description. DEBIT is always
+  // an outflow; CHECK is a written check (money out). CREDIT stays (money in).
+  if (u === 'DEBIT' || u === 'CHECK' || u.startsWith('DEBIT ')) return 'outflow';
   const t = detectTransfer(d);
   if (t.isTransfer) return 'transfer';
   if (classifyIncome(d).income_type === 'transfer') return 'transfer';
