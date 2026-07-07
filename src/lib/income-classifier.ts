@@ -29,7 +29,7 @@ const BUSINESS_TYPES = new Set(['business_revenue', 'owner_contribution', 'loan_
 // merchants, Stripe payouts) MUST match before the generic
 // transfer/zelle/venmo/wire bucket — otherwise real revenue gets tagged
 // non-taxable and disappears from the Tax page.
-const RULES: { patterns: RegExp; income_type: string; taxable_status: string; confidence: number }[] = [
+const RULES: { patterns: RegExp; exclude?: RegExp; income_type: string; taxable_status: string; confidence: number }[] = [
   // 1. Payroll providers (highest specificity — these are unambiguous)
   { patterns: /\b(payroll|salary|direct\s*deposit|wages|pay\s?check|adp|gusto|paychex|deel|justworks|rippling|trinet|onpay|bamboohr)\b|SALARY[-\s]/i, income_type: 'payroll', taxable_status: 'taxable', confidence: 90 },
 
@@ -42,8 +42,10 @@ const RULES: { patterns: RegExp; income_type: string; taxable_status: string; co
   // 4. Refund / cashback (specific)
   { patterns: /\b(refund|return\s*credit|cashback|cash\s*back|chargeback)\b/i, income_type: 'refund', taxable_status: 'non_taxable', confidence: 80 },
 
-  // 5. Interest / dividends (specific)
-  { patterns: /\b(interest\s*paid|interest\s*earned|dividend|apy|yield|cd\s*matur)\b/i, income_type: 'interest', taxable_status: 'taxable', confidence: 85 },
+  // 5. Interest / dividends (specific). `apy`/`yield` are loose, so
+  //    "TRANSFER FROM HIGH YIELD SAVINGS" would otherwise book as taxable
+  //    interest — exclude any description that also mentions a transfer.
+  { patterns: /\b(interest\s*paid|interest\s*earned|dividend|apy|yield|cd\s*matur)\b/i, exclude: /\btransfer\b/i, income_type: 'interest', taxable_status: 'taxable', confidence: 85 },
 
   // 6. Owner / capital contribution (must come before transfer; "transfer from owner" should be owner_contribution)
   { patterns: /\b(owner\s*contrib|capital\s*contrib|equity\s*inject|owner\s*draw\s*deposit)\b/i, income_type: 'owner_contribution', taxable_status: 'non_taxable', confidence: 80 },
@@ -75,6 +77,7 @@ const RULES: { patterns: RegExp; income_type: string; taxable_status: string; co
 export function classifyIncome(description: string): IncomeClassification {
   const desc = description || '';
   for (const rule of RULES) {
+    if (rule.exclude && rule.exclude.test(desc)) continue;
     if (rule.patterns.test(desc)) {
       return {
         income_type: rule.income_type,

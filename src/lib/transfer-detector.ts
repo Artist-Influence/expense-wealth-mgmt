@@ -66,7 +66,16 @@ export interface TransferDetectionResult {
 export function detectTransfer(description: string): TransferDetectionResult {
   if (!description) return { isTransfer: false, transferType: null, transferConfidence: null };
 
+  // A bare brokerage NAME (FIDELITY, VANGUARD, COINBASE, ROBINHOOD…) normally
+  // signals money moving INTO wealth, i.e. a transfer. But "VANGUARD DIVIDEND",
+  // "COINBASE PAYROLL", "… INTEREST"/"YIELD" are taxable INCOME paid out of that
+  // account — not transfers. When those income words are present, skip only the
+  // brokerage-name matches; explicit "TRANSFER TO/FROM" account patterns and
+  // credit-card-payment patterns still apply.
+  const incomeContext = /\b(dividend|interest|payroll|div\b|yield)\b/i.test(description);
+
   for (const [pattern, type] of HIGH_CONFIDENCE_PATTERNS) {
+    if (incomeContext && type === 'brokerage_transfer') continue;
     if (pattern.test(description)) {
       return {
         isTransfer: true,

@@ -42,6 +42,13 @@ export function normalizeDescription(raw: string): string {
   normalized = normalized.replace(/\b(ORIG ID|TRACE#?|EED|IND ID|CO ID|SEC|TRN|CONF#?|CO ENTRY DESCR)[:\s]*[\w#*-]*/gi, '');
   normalized = normalized.replace(/IND NAME:\s*[A-Z][\w\s&'./-]*?(?=\s+(?:ORIG|TRACE|EED|TRN|SEC|CO ENTRY|DESC DATE|IND ID|\d{6,})|$)/gi, '');
   normalized = normalized.replace(/DESC DATE:\s*\d+/gi, '');
+  // ACH payment IDs / individual-name tags that VARY per transaction — strip so
+  // repeated payments to one payee (e.g. rent "ACI ... L PMTS ID:67J2V1 INDN:JAR")
+  // collapse to one merchant instead of a separate row per payment.
+  normalized = normalized.replace(/\bINDN:\s*[\w-]+/gi, '');   // INDN:JAR
+  normalized = normalized.replace(/\bID:\s*[\w#-]+/gi, '');    // bare ID:67J2V1
+  normalized = normalized.replace(/\bL\s+PMTS?\b/gi, '');      // "L PMTS"
+  normalized = normalized.replace(/\bPMTS\b/gi, '');           // stray PMTS
 
   // Remove common bank transport words. CREDIT/DEBIT only strip as part of
   // card/txn-type phrases or at the end — merchants like CREDIT KARMA keep theirs.

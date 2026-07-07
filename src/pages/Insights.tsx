@@ -22,6 +22,7 @@ import { NON_EARNING_TYPES } from '@/lib/income-classifier';
 import { effectiveCategory } from '@/lib/categorization-engine';
 import { computeRecurringCharges } from '@/lib/recurring-charges';
 import { useRecurringOverrides } from '@/hooks/useRecurringOverrides';
+import { generateMerchantKey, normalizeDescription } from '@/lib/normalizer';
 
 // Mirror of effectiveCategory: prefer the user-confirmed value, fall back to the
 // engine's prediction. Most rows have predicted_method populated but final_method
@@ -100,6 +101,32 @@ const CHART_COLORS = [
 ];
 
 const fmt = (n: number) => '$' + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+// Collapse transactions into canonical merchant groups. generateMerchantKey(normalizeDescription(...))
+// strips the per-payment ACH noise (varying "ID:…" / "INDN:…" / "PMTS" tags) so repeated payees —
+// e.g. rent "ACI VI DENIZEN L PMTS ID:67J2V1 INDN:JAR" vs "…ID:RT2312…" — land on ONE group with a
+// summed total/count instead of a separate row per payment. Display label = the most common (else
+// first-seen) raw description in the group, truncated, so the row still reads as a human name.
+type MerchantGroup = { key: string; label: string; total: number; count: number; category: string };
+const groupMerchants = (txns: Transaction[]): MerchantGroup[] => {
+  const groups = new Map<string, { total: number; count: number; category: string; labels: Map<string, number> }>();
+  txns.forEach(t => {
+    const raw = (t.description_raw || t.description_normalized || '').trim();
+    const key = generateMerchantKey(normalizeDescription(raw)) || raw.toUpperCase() || 'Unknown';
+    const g = groups.get(key) || { total: 0, count: 0, category: '', labels: new Map<string, number>() };
+    g.total += Math.abs(t.amount || 0);
+    g.count++;
+    if (t.final_category) g.category = t.final_category;
+    const label = raw || key;
+    g.labels.set(label, (g.labels.get(label) || 0) + 1);
+    groups.set(key, g);
+  });
+  return [...groups.entries()].map(([key, g]) => {
+    let bestLabel = key, bestN = -1;
+    g.labels.forEach((n, label) => { if (n > bestN) { bestN = n; bestLabel = label; } });
+    return { key, label: bestLabel.substring(0, 40), total: g.total, count: g.count, category: g.category };
+  });
+};
 
 // Recharts tooltip style — static, hoisted to module scope so every chart gets a
 // stable reference (no per-render object allocation, no needless Tooltip reconciliation).
@@ -350,12 +377,11 @@ export default function Insights() {
     });
     const topCategory = [...catMap.entries()].sort((a, b) => b[1] - a[1])[0];
 
-    const merchMap = new Map<string, number>();
-    approvedScoped.forEach(t => {
-      const desc = (t.description_normalized || t.description_raw || 'Unknown').substring(0, 30);
-      merchMap.set(desc, (merchMap.get(desc) || 0) + Math.abs(t.amount || 0));
-    });
-    const topMerchant = [...merchMap.entries()].sort((a, b) => b[1] - a[1])[0];
+    // Group by canonical merchant key so repeated payees (e.g. rent carrying a unique
+    // per-payment ACH ID) collapse into ONE merchant with a summed total, not many rows.
+    const topMerchGroup = groupMerchants(approvedScoped).sort((a, b) => b.total - a.total)[0];
+    const topMerchant: [string, number] | undefined =
+      topMerchGroup ? [topMerchGroup.label.substring(0, 30), topMerchGroup.total] : undefined;
 
     // Transfers excluded — respect date range
     const transfersExcluded = transactions
@@ -395,16 +421,11 @@ export default function Insights() {
   }, [approvedExpenses]);
 
   const topMerchants = useMemo(() => {
-    const merchMap = new Map<string, { total: number; count: number; category: string }>();
-    approvedExpenses.forEach(t => {
-      const desc = (t.description_normalized || t.description_raw || 'Unknown').substring(0, 40);
-      const existing = merchMap.get(desc) || { total: 0, count: 0, category: '' };
-      existing.total += Math.abs(t.amount || 0);
-      existing.count++;
-      existing.category = t.final_category || '';
-      merchMap.set(desc, existing);
-    });
-    return [...merchMap.entries()].sort((a, b) => b[1].total - a[1].total).slice(0, 10).map(([name, data]) => ({ name, ...data }));
+    // Canonical merchant grouping collapses per-payment ACH IDs so one payee = one row.
+    return groupMerchants(approvedExpenses)
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 10)
+      .map(g => ({ name: g.label, total: g.total, count: g.count, category: g.category }));
   }, [approvedExpenses]);
 
   const allRecurringCharges = useMemo(() => computeRecurringCharges(approvedExpenses), [approvedExpenses]);
@@ -752,10 +773,12 @@ export default function Insights() {
         });
       }
     });
+    const overspendCats = new Set<string>();
     overspendCandidates
       .sort((a, b) => b.over - a.over)
       .slice(0, 3)
       .forEach(c => {
+        overspendCats.add(c.cat);
         const pct = ((c.current - c.baseline) / c.baseline) * 100;
         out.push({
           id: `overspend-${c.cat}`,
@@ -766,48 +789,68 @@ export default function Insights() {
         });
       });
 
-    // 3. Duplicate-service detection (2+ recurring in same category)
-    const recByCat = new Map<string, typeof recurringCharges>();
-    recurringCharges.forEach(rc => {
-      const cat = rc.category || 'Uncategorized';
-      if (!recByCat.has(cat)) recByCat.set(cat, []);
-      recByCat.get(cat)!.push(rc);
-    });
-    recByCat.forEach((list, cat) => {
-      if (list.length < 2 || cat === 'Uncategorized') return;
-      // Don't flag categories where multiple charges are normal (Utilities, Insurance, etc.)
-      if (['Utilities', 'Insurance', 'Rent', 'Mortgage', 'Tax', 'Loans'].includes(cat)) return;
-      const sorted = [...list].sort((a, b) => a.monthlyEstimate - b.monthlyEstimate);
-      const cheaper = sorted[0];
+    // 2b. Standalone discretionary tips — plain-language, specific advice even when
+    // there's no baseline to compare against. Names the category, the ACTUAL ~$/mo, and
+    // a concrete action. Skips any category already flagged above as an overspend (so we
+    // never double-count the same lever). All impacts feed the same monthly-impact ranking.
+    const CATEGORY_ADVICE: Record<string, { label: string; action: string; trim: number }> = {
+      'Dining':        { label: 'eating out',        action: 'Cooking a few more nights at home',          trim: 0.35 },
+      'Restaurants':   { label: 'restaurants',       action: 'Cooking a few more nights at home',          trim: 0.35 },
+      'Food & Drink':  { label: 'food & drink out',  action: 'Eating in more often',                       trim: 0.30 },
+      'Coffee':        { label: 'coffee',            action: 'Brewing at home a few days a week',          trim: 0.50 },
+      'Bars':          { label: 'bars',              action: 'Trading a couple of nights out for staying in', trim: 0.35 },
+      'Alcohol':       { label: 'alcohol',           action: 'Cutting back a couple of rounds',            trim: 0.30 },
+      'Rideshare':     { label: 'rideshare',         action: 'Walking or taking transit for short trips',  trim: 0.30 },
+      'Entertainment': { label: 'entertainment',     action: 'Skipping one outing a month',                trim: 0.25 },
+      'Shopping':      { label: 'shopping',          action: 'A 48-hour rule on non-essentials',           trim: 0.25 },
+    };
+    Object.entries(CATEGORY_ADVICE).forEach(([cat, adv]) => {
+      if (overspendCats.has(cat)) return; // already surfaced as above-baseline overspend
+      const monthly = (catCurrentMonthly.get(cat) || 0) / months;
+      if (monthly < 75) return; // only when spend is material
+      const saving = monthly * adv.trim;
       out.push({
-        id: `duplicate-${cat}`,
+        id: `cat-tip-${cat}`,
         tone: 'opportunity',
-        title: `${list.length} ${cat} subscriptions — consider consolidating`,
-        impactMonthly: cheaper.monthlyEstimate,
-        why: `${list.map(l => l.name).slice(0, 3).join(', ')}. Cancelling the cheapest (${cheaper.name}) saves ~${fmt(cheaper.monthlyEstimate)}/mo.`,
+        title: `You're spending ~${fmt(monthly)}/mo on ${adv.label}`,
+        impactMonthly: saving,
+        why: `${adv.action} could save ~${fmt(saving)}/mo.`,
       });
     });
 
-    // 4. High-frequency small charges (8+ txns, avg <$15)
-    const merchAgg = new Map<string, { count: number; total: number }>();
-    approvedExpenses.forEach(t => {
-      const desc = (t.description_normalized || t.description_raw || 'Unknown').substring(0, 40);
-      const e = merchAgg.get(desc) || { count: 0, total: 0 };
-      e.count++; e.total += Math.abs(t.amount || 0);
-      merchAgg.set(desc, e);
-    });
-    const smallCharges = [...merchAgg.entries()]
-      .filter(([, d]) => d.count >= 8 && (d.total / d.count) < 15)
-      .map(([name, d]) => ({ name, count: d.count, total: d.total, monthly: d.total / months }))
+    // 3. Duplicate-subscription detection — ONLY real subscriptions. Grouping ALL
+    // recurring charges by category mislabels a gym + pharmacy + a one-off session as
+    // "4 Health & Personal Care subscriptions"; a charge is a subscription only when its
+    // category IS 'Subscriptions'. Fire when 2+ DISTINCT subscription merchants exist.
+    const distinctSubs = [...new Map(
+      subs.filter(rc => (rc.name || '').trim().length > 0).map(rc => [rc.merchantKey, rc]),
+    ).values()];
+    if (distinctSubs.length >= 2) {
+      const sorted = [...distinctSubs].sort((a, b) => a.monthlyEstimate - b.monthlyEstimate);
+      const cheaper = sorted[0];
+      out.push({
+        id: 'duplicate-subscriptions',
+        tone: 'opportunity',
+        title: `${distinctSubs.length} subscriptions — consider consolidating`,
+        impactMonthly: cheaper.monthlyEstimate,
+        why: `${sorted.map(l => l.name).slice(0, 3).join(', ')}${distinctSubs.length > 3 ? '…' : ''}. Cancelling the cheapest (${cheaper.name}) saves ~${fmt(cheaper.monthlyEstimate)}/mo.`,
+      });
+    }
+
+    // 4. High-frequency small charges (8+ txns, avg <$15) — grouped by canonical
+    // merchant key so a frequent payee isn't split across per-charge descriptions.
+    const smallCharges = groupMerchants(approvedExpenses)
+      .filter(g => g.count >= 8 && (g.total / g.count) < 15)
+      .map(g => ({ key: g.key, name: g.label, count: g.count, total: g.total, monthly: g.total / months, perMonth: g.count / months }))
       .sort((a, b) => b.total - a.total)
       .slice(0, 2);
     smallCharges.forEach(s => {
       out.push({
-        id: `small-${s.name}`,
+        id: `small-${s.key}`,
         tone: 'opportunity',
         title: `Small charges at ${s.name} add up`,
         impactMonthly: s.monthly * 0.5,
-        why: `${s.count} visits totaling ${fmt(s.total)} (~${fmt(s.monthly)}/mo). Halving the frequency saves ~${fmt(s.monthly * 0.5)}/mo.`,
+        why: `${s.count} visits totaling ${fmt(s.total)} (~${fmt(s.monthly)}/mo, about ${Math.max(1, Math.round(s.perMonth))}×/mo). Halving the frequency saves ~${fmt(s.monthly * 0.5)}/mo.`,
       });
     });
 

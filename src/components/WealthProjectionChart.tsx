@@ -53,16 +53,18 @@ const TARGET_AGE = 65;
 // account-baskets resolution — they only adjust `baseRate` inside the monthly
 // compounding loop for the selected scenario.
 //   Base         → the blended/seeded rate, unchanged (today's expected case).
-//   Conservative → multiplicative haircut, gentler on low-rate assets
-//                  (8% → 4.8%, 12% → 7.2%, 4% → 2.4%), floored at 0%.
-//   Optimistic   → 1.3× boost, capped at +5pp of absolute uplift
-//                  (8% → 10.4%, 12% → 15.6%; a 20% asset → capped at 25%).
+//   Conservative → haircut of 40% of the rate's magnitude toward worse returns
+//                  (8% → 4.8%, 12% → 7.2%, 4% → 2.4%; -10% → -14%).
+//   Optimistic   → boost of 30% of the rate's magnitude, capped at +5pp
+//                  (8% → 10.4%, 12% → 15.6%; -10% → -7%).
+// Magnitude-based so the ordering conservative < base < optimistic holds even
+// when the base rate is negative, not just for positive rates.
 type Scenario = 'conservative' | 'base' | 'optimistic';
 const SCENARIOS: Scenario[] = ['conservative', 'base', 'optimistic'];
 const SCENARIO_RATE: Record<Scenario, (rate: number) => number> = {
-  conservative: (r) => Math.max(0, r * 0.6),
+  conservative: (r) => r - 0.4 * Math.abs(r),
   base: (r) => r,
-  optimistic: (r) => Math.min(r * 1.3, r + 5),
+  optimistic: (r) => r + Math.min(0.3 * Math.abs(r), 5),
 };
 
 type Assumption = {
@@ -90,6 +92,18 @@ function monthlyVolatility(snapshots: RateSnap[]): number | null {
   const monthlyStd = Math.sqrt(variance);
   // Annualize: σ_annual ≈ σ_monthly × √12
   return monthlyStd * Math.sqrt(12) * 100; // as percentage points
+}
+
+// Span (in years) covered by a snapshot series' as_of_date range (0 for < 2
+// points). Used to scale this-year YTD contributions up to the full snapshot
+// window so a multi-year window doesn't treat YTD as the whole-period total.
+function snapshotSpanYears(snapshots: RateSnap[]): number {
+  if (snapshots.length < 2) return 0;
+  const sorted = [...snapshots].sort((a, b) => a.as_of_date.localeCompare(b.as_of_date));
+  const first = new Date(sorted[0].as_of_date).getTime();
+  const last = new Date(sorted[sorted.length - 1].as_of_date).getTime();
+  const ms = last - first;
+  return ms > 0 ? ms / (365.25 * 24 * 3600 * 1000) : 0;
 }
 
 // Blend realized CAGR with benchmark CAGR based on snapshot window length.
@@ -301,8 +315,12 @@ export function WealthProjectionChart({
 
       // Compute realized CAGR for blending
       const snapshots = snapshotsByAccount[a.id] || [];
+      // YTD contributions cover only the current year; scale up to the snapshot
+      // window (>= 1yr) so a multi-year window doesn't understate contributions
+      // and thereby overstate realized return. A < 1yr window is a ~no-op.
+      const windowYears = Math.max(1, snapshotSpanYears(snapshots));
       const contribEstimate = a.contributions_ytd > 0
-        ? a.contributions_ytd
+        ? a.contributions_ytd * windowYears
         : a.contribution_target_monthly * Math.max(1, snapshots.length - 1);
       const realized = realizedCagr(snapshots, contribEstimate);
 
@@ -391,23 +409,30 @@ export function WealthProjectionChart({
     const sim = (sigmaOffset: number, rateFn: (r: number) => number) => {
       const balances: Record<string, number[]> = {};
       for (const a of accounts) {
-        const ass = assumptions[a.id];
-        if (!ass) continue;
+        // Fall back to a synthesized default so accounts whose seeding effect
+        // hasn't run yet are still counted, never silently dropped from totals.
+        const ass = assumptions[a.id] ?? {
+          annual_rate_pct: defaultRateFor(a),
+          monthly_contribution: defaultMonthlyContribution(a),
+          stop_age: TARGET_AGE,
+        };
         const vol = volByAccount[a.id] || 16;
         const baseRate = rateFn(ass.annual_rate_pct);
 
         // Raw offset from volatility (using 0.5σ for a tighter "plausible" band)
         const rawOffset = sigmaOffset * vol * 0.5;
 
-        // Clamp: high band at most +min(vol_offset, base×0.5, 4pp)
-        //        low band at most  -min(vol_offset, base×0.6, 4pp), floored at 0%
+        // Clamp: high band at most +min(vol_offset, |base|×0.5, 4pp)
+        //        low band at most  -min(vol_offset, |base|×0.6, 4pp)
+        // |base| keeps the offset non-negative so the band never inverts for a
+        // negative base rate; the balance itself is floored at 0 in the loop.
         let effectiveAnnual: number;
         if (sigmaOffset > 0) {
-          const cappedOffset = Math.min(Math.abs(rawOffset), baseRate * 0.5, 4);
+          const cappedOffset = Math.min(Math.abs(rawOffset), Math.abs(baseRate) * 0.5, 4);
           effectiveAnnual = baseRate + cappedOffset;
         } else if (sigmaOffset < 0) {
-          const cappedOffset = Math.min(Math.abs(rawOffset), baseRate * 0.6, 4);
-          effectiveAnnual = Math.max(0, baseRate - cappedOffset);
+          const cappedOffset = Math.min(Math.abs(rawOffset), Math.abs(baseRate) * 0.6, 4);
+          effectiveAnnual = baseRate - cappedOffset;
         } else {
           effectiveAnnual = baseRate;
         }
@@ -598,7 +623,7 @@ export function WealthProjectionChart({
               <div className="rounded-lg border border-primary/30 bg-gradient-to-br from-primary/10 to-primary/5 p-2.5">
                 <div className="text-[9px] uppercase tracking-wider text-primary/80 font-medium">Multiplier</div>
                 <div className="text-lg font-semibold tabular-nums tracking-tight text-foreground mt-0.5">
-                  {multiplier >= 1000 ? `${(multiplier / 1000).toFixed(1)}k×` : `${multiplier.toFixed(0)}×`} <span className="text-[10px] font-normal text-muted-foreground">your money</span>
+                  {multiplier >= 1000 ? `${(multiplier / 1000).toFixed(1)}k×` : `${multiplier.toFixed(0)}×`} <span className="text-[10px] font-normal text-muted-foreground">vs. today's balance</span>
                 </div>
                 <div className="text-[10px] text-muted-foreground mt-0.5 truncate">
                   Range: {fmtUsd(finalLow)}–{fmtUsd(finalHigh)}
@@ -625,7 +650,7 @@ export function WealthProjectionChart({
               const realized = realizedCagr(
                 snapshotsByAccount[a.id] || [],
                 a.contributions_ytd > 0
-                  ? a.contributions_ytd
+                  ? a.contributions_ytd * Math.max(1, snapshotSpanYears(snapshotsByAccount[a.id] || []))
                   : a.contribution_target_monthly * Math.max(
                       1,
                       (snapshotsByAccount[a.id]?.length || 1) - 1,

@@ -11,7 +11,10 @@ import { AlertTriangle, Trash2, Wand2, FileWarning } from 'lucide-react';
 // Money-OUT phrasing. Old imports Math.abs'd every row, so withdrawals and
 // payments got stored as positive "income". These descriptions are
 // unambiguous outflows — safe to flag for removal (with a preview + confirm).
-const OUTFLOW_HINTS = /\b(withdrawal|atm\s*withdrawal|bill\s*pay|autopay|auto\s*pay|pos\s*(purchase|debit)|debit\s*card\s*purchase|checkcard|check\s*card|purchase\s*at|ach\s*debit|payment\s*to)\b/i;
+// `payment to` is scoped to credit-card-payment context so an incoming wire
+// like "WIRE PAYMENT TO ACME FROM CLIENT" isn't mistaken for money out.
+// Exported so the income CSV import applies the exact same outflow check.
+export const OUTFLOW_HINTS = /\b(withdrawal|atm\s*withdrawal|bill\s*pay|autopay|auto\s*pay|pos\s*(purchase|debit)|debit\s*card\s*purchase|checkcard|check\s*card|purchase\s*at|ach\s*debit|payment\s*to\b.*\b(?:card|crd|visa|mastercard|amex|chase|citi|discover|capital\s*one))\b/i;
 
 type Row = {
   id: string; date: string | null; amount: number | null;
@@ -104,7 +107,10 @@ export function IncomeCleanupDialog({
         if (arr.length < 2) continue;
         if (!arr.some(r => isReal(r.description_raw))) continue;
         for (const r of arr) {
-          if (isBareCredit(r.description_raw) && !flaggedIds.has(r.id)) dupeList.push(r);
+          // Only the junk twin has a null source. A bare "CREDIT" that came from
+          // a real statement (has a source_file_name) is a legit separate
+          // deposit — never auto-flag it as a duplicate.
+          if (isBareCredit(r.description_raw) && !r.source_file_name && !flaggedIds.has(r.id)) dupeList.push(r);
         }
       }
 

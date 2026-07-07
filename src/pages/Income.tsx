@@ -6,7 +6,7 @@ import { AppNav } from '@/components/AppNav';
 import { CsvUploader } from '@/components/CsvUploader';
 import { IncomeDetailDrawer } from '@/components/IncomeDetailDrawer';
 import { classifyIncome, INCOME_TYPE_OPTIONS, TAXABLE_STATUS_OPTIONS, MODE_OPTIONS, NON_EARNING_TYPES } from '@/lib/income-classifier';
-import { normalizeDescription, parseDate } from '@/lib/normalizer';
+import { normalizeDescription, parseDate, parseAmount } from '@/lib/normalizer';
 import { detectTransfer } from '@/lib/transfer-detector';
 import { trimToTransactionHeader } from '@/lib/csv-parser';
 import { fetchAllRows } from '@/lib/fetch-all';
@@ -27,7 +27,7 @@ import {
   Search, Download, Plus, Check, Trash2, Upload, Receipt,
   Calendar, ChevronDown, X, Wand2
 } from 'lucide-react';
-import { IncomeCleanupDialog } from '@/components/IncomeCleanupDialog';
+import { IncomeCleanupDialog, OUTFLOW_HINTS } from '@/components/IncomeCleanupDialog';
 
 interface IncomeTransaction {
   id: string;
@@ -162,8 +162,11 @@ export default function Income() {
     const nonTaxable = inRange.filter(t => t.taxable_status === 'non_taxable').reduce((s, t) => s + (t.amount || 0), 0);
     const revenue = inRange.filter(t => t.income_type === 'business_revenue').reduce((s, t) => s + (t.amount || 0), 0);
     const payroll = inRange.filter(t => t.income_type === 'payroll').reduce((s, t) => s + (t.amount || 0), 0);
-    // Non-earning = transfers, refunds, reimbursements, owner contribs, loan proceeds, tax refunds
-    const nonEarning = inRange.filter(t => (NON_EARNING_TYPES as readonly string[]).includes(t.income_type)).reduce((s, t) => s + (t.amount || 0), 0);
+    // Non-earning = transfers, refunds, reimbursements, owner contribs, loan proceeds, tax refunds.
+    // Exclude personal_repayment — it has its own "Repayments / Owed Back" card, so
+    // counting it here too would double-show it. (NON_EARNING_TYPES still includes it
+    // for earned-vs-non-earned math elsewhere; only this display bucket drops it.)
+    const nonEarning = inRange.filter(t => (NON_EARNING_TYPES as readonly string[]).includes(t.income_type) && t.income_type !== 'personal_repayment').reduce((s, t) => s + (t.amount || 0), 0);
     const personalRepayments = inRange.filter(t => t.income_type === 'personal_repayment').reduce((s, t) => s + (t.amount || 0), 0);
     // Other earned = anything earned that's not payroll or business revenue (interest, "other")
     const otherEarned = inRange.filter(t => !(NON_EARNING_TYPES as readonly string[]).includes(t.income_type) && !['business_revenue', 'payroll'].includes(t.income_type)).reduce((s, t) => s + (t.amount || 0), 0);
@@ -301,19 +304,34 @@ export default function Income() {
         const allRows = parsed.data as string[][];
         if (allRows.length < 2) { toast.error(`${file.name}: No data rows`); continue; }
 
-        const headers = allRows[0].map(h => (h || '').trim().toLowerCase());
-        const dateIdx = headers.findIndex(h => /date/i.test(h));
+        const headers = allRows[0].map(h => (h || '').replace(/^\uFEFF/, '').trim().toLowerCase());
+        // Tiered column match (exact → starts-with → contains), mirroring
+        // csv-parser's findColumn but returning an INDEX (rows here are arrays,
+        // not keyed objects). `exclude` stops a header already claimed by another
+        // field from being reused — this is what kept the old
+        // /amount|credit|deposit/ regex from grabbing a "Deposit Date" or a
+        // "Credit Card" column as the amount.
+        const findColIdx = (cands: string[], exclude: number[] = []): number => {
+          const free = (idx: number) => !exclude.includes(idx);
+          for (const c of cands) { const i = headers.findIndex((h, idx) => free(idx) && h === c); if (i !== -1) return i; }
+          for (const c of cands) { const i = headers.findIndex((h, idx) => free(idx) && h.startsWith(c)); if (i !== -1) return i; }
+          for (const c of cands) { const i = headers.findIndex((h, idx) => free(idx) && h.includes(c)); if (i !== -1) return i; }
+          return -1;
+        };
+        const dateIdx = findColIdx(['date & time', 'date', 'transaction date', 'post date', 'posted date', 'trans date']);
         // Prefer a real description column over a "Details"/"Type" column (which
-        // in many bank CSVs just holds DEBIT/CREDIT and isn't a merchant name).
-        let descIdx = headers.findIndex(h => /(description|payee|narrative|memo|merchant|name)/i.test(h));
-        if (descIdx === -1) descIdx = headers.findIndex(h => /desc|memo|narr|detail/i.test(h));
+        // in many bank CSVs just holds DEBIT/CREDIT and isn't a merchant name);
+        // fall back to a "Details" column only when nothing better exists.
+        let descIdx = findColIdx(['description', 'payee', 'narrative', 'merchant', 'name', 'short description', 'transaction description', 'memo', 'vendor', 'store', 'desc'], [dateIdx]);
+        if (descIdx === -1) descIdx = findColIdx(['detail'], [dateIdx]);
         // A Details/Type column that flags direction (DEBIT = money out).
         const detailsIdx = headers.findIndex(h => /^(details|type|transaction\s*type|dr\/cr|debit\/credit)$/i.test(h));
-        const amtIdx = headers.findIndex(h => /amount|credit|deposit/i.test(h));
+        // Amount / inflow column — never the date or description column.
+        const amtIdx = findColIdx(['amount', 'total', 'value', 'sum', 'transaction amount', 'credit', 'deposit'], [dateIdx, descIdx]);
         // Twin-column bank statements: a separate "money in" (Credit) and "money
         // out" (Debit). Income only comes from the credit/inflow side.
-        const creditIdx = headers.findIndex(h => /(credit|deposit|money\s*in|inflow|amount\s*received)/i.test(h) && !/debit/i.test(h));
-        const debitIdx = headers.findIndex(h => /(debit|withdrawal|money\s*out|outflow|amount\s*paid)/i.test(h));
+        const debitIdx = findColIdx(['debit', 'withdrawal', 'money out', 'outflow', 'amount paid'], [dateIdx, descIdx]);
+        const creditIdx = findColIdx(['credit', 'deposit', 'money in', 'inflow', 'amount received'], [dateIdx, descIdx, debitIdx]);
         const hasTwinCols = creditIdx >= 0 && debitIdx >= 0 && creditIdx !== debitIdx;
 
         if (amtIdx === -1 && !hasTwinCols) { toast.error(`${file.name}: No amount column found`); continue; }
@@ -327,6 +345,7 @@ export default function Income() {
               .from('income_transactions')
               .select('date, amount, description_normalized')
               .eq('owner_id', ownerId!)
+              .is('deleted_at', null)
               .order('id')
               .range(from, to),
           );
@@ -350,20 +369,30 @@ export default function Income() {
           //  - twin columns → only the Credit column counts;
           //  - single amount column → only POSITIVE values (negatives are
           //    withdrawals/payments, i.e. money OUT — never income).
+          // parseAmount correctly handles trailing-minus "500.00-", parens, and
+          // EU decimals (returns 0 on garbage), so a negative magnitude never
+          // sneaks in as positive income.
           let inflow: number;
           if (hasTwinCols) {
-            const c = parseFloat((cols[creditIdx] || '0').replace(/[$,]/g, ''));
-            inflow = !isNaN(c) && c > 0 ? c : 0;
+            const c = parseAmount(cols[creditIdx] || '');
+            inflow = c > 0 ? c : 0;
           } else {
-            const amt = parseFloat((cols[amtIdx] || '0').replace(/[$,]/g, ''));
-            inflow = !isNaN(amt) && amt > 0 ? amt : 0;
+            const amt = parseAmount(cols[amtIdx] || '');
+            inflow = amt > 0 ? amt : 0;
           }
           if (inflow <= 0) { skippedOutflows++; continue; }
 
-          // If the bank marks direction in a Details/Type column, a DEBIT (or
-          // written CHECK) is money OUT regardless of how the amount is signed.
+          // If the bank marks direction in a Details/Type column, a DEBIT /
+          // WITHDRAWAL / written CHECK is money OUT regardless of how the amount
+          // is signed. Match by substring so "DEBIT CARD", "ATM WITHDRAWAL", etc.
+          // are caught, not just the exact token.
           const detailsVal = detailsIdx >= 0 ? (cols[detailsIdx] || '').trim().toUpperCase() : '';
-          if (detailsVal === 'DEBIT' || detailsVal === 'CHECK') { skippedOutflows++; continue; }
+          if (detailsVal.includes('DEBIT') || detailsVal.includes('WITHDRAWAL') || detailsVal.includes('CHECK')) { skippedOutflows++; continue; }
+          // A positive-magnitude row whose description is unambiguously an outflow
+          // (withdrawal, POS/debit-card purchase, ACH debit, bill pay, card
+          // payment) is still money OUT — same check the cleanup dialog uses to
+          // strip these after the fact.
+          if (OUTFLOW_HINTS.test(rawDesc)) { skippedOutflows++; continue; }
 
           // Exclude money that isn't income even when it comes in: transfers
           // between your own accounts, moves into investments (Gemini,

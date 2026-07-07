@@ -291,7 +291,7 @@ export default function Expenses() {
     exclude_from_expense_totals: boolean | null; is_non_expense_cash_movement: boolean | null;
     parse_status: string | null; counts_toward_true_personal_spend: boolean | null;
     counts_toward_true_business_spend: boolean | null; is_reimbursable: boolean | null;
-    reimbursement_status: string | null; date: string | null;
+    reimbursement_status: string | null; date: string | null; treatment_type: string | null;
   };
   const [allModeRows, setAllModeRows] = useState<AllModeRow[]>([]);
 
@@ -304,7 +304,7 @@ export default function Expenses() {
     while (hasMore) {
       let q = supabase
         .from('transactions_uploaded')
-        .select('amount, transaction_mode, mode, is_split_parent, is_transfer, exclude_from_expense_totals, is_non_expense_cash_movement, parse_status, counts_toward_true_personal_spend, counts_toward_true_business_spend, is_reimbursable, reimbursement_status, date')
+        .select('amount, transaction_mode, mode, is_split_parent, is_transfer, exclude_from_expense_totals, is_non_expense_cash_movement, parse_status, counts_toward_true_personal_spend, counts_toward_true_business_spend, is_reimbursable, reimbursement_status, date, treatment_type')
         .eq('owner_id', ownerId!)
         .is('deleted_at', null);
       if (isInvestor) q = q.eq('mode', 'business');
@@ -789,7 +789,9 @@ export default function Expenses() {
     const active = allModeRows.filter(r =>
       !r.is_split_parent && r.parse_status !== 'parse_error' && inDateRange(r.date)
     );
-    const isOutflow = (r: AllModeRow) => !r.is_non_expense_cash_movement && !r.is_transfer && !r.exclude_from_expense_totals;
+    // Refunds and CC payments are stored positive but are NOT spend — a $500
+    // purchase + $500 refund must net to $0, not read as $1,000 out.
+    const isOutflow = (r: AllModeRow) => !r.is_non_expense_cash_movement && !r.is_transfer && !r.exclude_from_expense_totals && r.treatment_type !== 'refund' && r.treatment_type !== 'credit_card_payment';
     const sum = (rows: AllModeRow[]) => rows.reduce((s, r) => s + Math.abs(Number(r.amount) || 0), 0);
     return {
       personalCashOut: sum(active.filter(r => (r.transaction_mode || r.mode) === 'personal' && isOutflow(r))),
@@ -812,6 +814,7 @@ export default function Expenses() {
 
     const cashOutTxns = activeTxns.filter(t =>
       !t.is_non_expense_cash_movement && !t.is_transfer && !t.exclude_from_expense_totals
+      && t.treatment_type !== 'refund' && t.treatment_type !== 'credit_card_payment'
     );
 
     const totalCashOut = cashOutTxns.reduce((sum, t) => sum + Math.abs(t.amount || 0), 0);
@@ -968,10 +971,19 @@ export default function Expenses() {
    * rule so future imports auto-apply. E.g. mark one "Empower" as Travel → "also
    * mark the other 6 Empower charges as Travel, and remember it?".
    */
+  // Broad aggregator keys collapse many unrelated merchants (a single "AMAZON"
+  // key covers groceries, gifts, electronics…). Never bulk-apply or learn a
+  // rule on these — it would mass-miscategorize.
+  const BULK_APPLY_DENYLIST = new Set([
+    'AMAZON', 'PAYPAL', 'VENMO', 'ZELLE', 'SQUARE', 'STRIPE', 'APPLE', 'GOOGLE',
+    'WALMART', 'COSTCO', 'TARGET', 'CASH APP', 'CASHAPP', 'WISE', 'FACEBK',
+  ]);
+
   const offerBulkApplyLearn = async (editedId: string, category: string, txMode: string, rawDesc: string) => {
     if (!category || !ownerId || !rawDesc) return;
     const key = generateMerchantKey(normalizeDescription(rawDesc));
     if (!key || key.length < 2) return;
+    if ([...BULK_APPLY_DENYLIST].some(d => key.toUpperCase().includes(d))) return;
     const declineKey = `${txMode}|${key}`;
     if (bulkApplyDeclinedRef.current.has(declineKey)) return;
 
@@ -1267,7 +1279,7 @@ export default function Expenses() {
 
   const bulkApprove = async () => {
     const selected = filtered.filter(t => selectedIds.has(t.id));
-    const snap = snapshotRows(selected.map(t => t.id), ['review_status', 'final_category', 'counts_as_tax_deduction']);
+    const snap = snapshotRows(selected.map(t => t.id), ['review_status', 'final_category', 'final_method', 'final_notes', 'counts_as_tax_deduction']);
     const { approved, skipped, failed } = await bulkApproveRows(selected);
     setSelectedIds(new Set());
     if (failed > 0) {
@@ -1285,7 +1297,7 @@ export default function Expenses() {
   const bulkMarkTransfer = async () => {
     const ids = visibleSelectedIds();
     if (ids.length === 0) return;
-    const snap = snapshotRows(ids, ['is_transfer', 'exclude_from_expense_totals', 'transfer_type', 'is_non_expense_cash_movement', 'counts_toward_true_personal_spend', 'counts_toward_true_business_spend', 'treatment_type', 'predicted_category', 'final_category', 'review_status']);
+    const snap = snapshotRows(ids, ['is_transfer', 'exclude_from_expense_totals', 'transfer_type', 'is_non_expense_cash_movement', 'counts_toward_true_personal_spend', 'counts_toward_true_business_spend', 'treatment_type', 'predicted_category', 'final_category', 'review_status', 'counts_as_tax_deduction']);
     const transferCategory = categories.find(c => c.toLowerCase() === 'transfer') || null;
     const { error } = await supabase.from('transactions_uploaded').update({
       is_transfer: true, exclude_from_expense_totals: true, transfer_type: 'unknown_transfer',
@@ -1293,6 +1305,7 @@ export default function Expenses() {
       counts_toward_true_personal_spend: false,
       counts_toward_true_business_spend: false,
       treatment_type: 'transfer',
+      counts_as_tax_deduction: false, // a transfer is never a deduction
       predicted_category: transferCategory,
       final_category: transferCategory,
       review_status: transferCategory ? 'edited' : 'needs_review',
@@ -1307,7 +1320,7 @@ export default function Expenses() {
   const bulkSwitchMode = async (targetMode: TransactionMode) => {
     const ids = visibleSelectedIds();
     if (ids.length === 0) return;
-    const snap = snapshotRows(ids, ['transaction_mode', 'mode', 'economic_owner', 'counts_toward_true_personal_spend', 'counts_toward_true_business_spend', 'is_reimbursable', 'reimbursement_status']);
+    const snap = snapshotRows(ids, ['transaction_mode', 'mode', 'economic_owner', 'counts_toward_true_personal_spend', 'counts_toward_true_business_spend', 'is_reimbursable', 'reimbursement_status', 'counts_as_tax_deduction']);
     const updates: Record<string, any> = {
       transaction_mode: targetMode,
       mode: targetMode === 'reimbursable_work' ? 'personal' : targetMode,
@@ -1329,7 +1342,20 @@ export default function Expenses() {
       updates.is_reimbursable = true;
       updates.reimbursement_status = 'pending';
     }
-    const { error } = await supabase.from('transactions_uploaded').update(updates as never).in('id', ids);
+    // Deductibility depends on (mode, category), so it must be recomputed for
+    // the NEW mode — otherwise a business→personal switch leaves a stale
+    // "deductible" flag that the Tax page then trusts. Group by the resulting
+    // flag so rows with different categories still get the right value.
+    const dedMode = targetMode === 'reimbursable_work' ? 'personal' : targetMode;
+    const selected = transactions.filter(t => ids.includes(t.id));
+    const dedTrue: string[] = [], dedFalse: string[] = [];
+    for (const t of selected) {
+      const cat = t.final_category || t.predicted_category;
+      (isDeductibleCategory(dedMode as any, cat) ? dedTrue : dedFalse).push(t.id);
+    }
+    let error: { message: string } | null = null;
+    if (dedTrue.length) ({ error } = await supabase.from('transactions_uploaded').update({ ...updates, counts_as_tax_deduction: true } as never).in('id', dedTrue));
+    if (!error && dedFalse.length) ({ error } = await supabase.from('transactions_uploaded').update({ ...updates, counts_as_tax_deduction: false } as never).in('id', dedFalse));
     if (error) { toast.error(`Failed to switch mode: ${error.message}`); return; }
     setSelectedIds(new Set());
     await loadTransactions();
@@ -1372,18 +1398,26 @@ export default function Expenses() {
 
   const toggleTransfer = async (tx: Transaction) => {
     const newIsTransfer = !tx.is_transfer;
+    const undoSnap = snapshotRows([tx.id], ['is_transfer', 'exclude_from_expense_totals', 'transfer_type', 'is_non_expense_cash_movement', 'treatment_type', 'counts_toward_true_personal_spend', 'counts_toward_true_business_spend', 'counts_as_tax_deduction']);
+    // Transfer → never deductible; restoring to expense → recompute from (mode, category).
+    const restoredDeduction = isDeductibleCategory(
+      (tx.transaction_mode || tx.mode) as any,
+      tx.final_category || tx.predicted_category,
+    );
     const { error } = await supabase.from('transactions_uploaded').update({
       is_transfer: newIsTransfer, exclude_from_expense_totals: newIsTransfer,
       transfer_type: newIsTransfer ? 'unknown_transfer' : null,
       is_non_expense_cash_movement: newIsTransfer,
       treatment_type: newIsTransfer ? 'transfer' : 'expense',
+      counts_as_tax_deduction: newIsTransfer ? false : restoredDeduction,
       counts_toward_true_personal_spend: newIsTransfer ? false : (tx.transaction_mode === 'personal'),
       counts_toward_true_business_spend: newIsTransfer ? false : (tx.transaction_mode === 'business'),
     }).eq('id', tx.id);
     if (error) { toast.error(`Failed to update transfer flag: ${error.message}`); return; }
     await loadTransactions();
     setDetailTx(null);
-    toast.success(newIsTransfer ? 'Marked as transfer' : 'Restored to expense');
+    registerUndo(newIsTransfer ? 'mark as transfer' : 'restore to expense', undoSnap);
+    toast.success(newIsTransfer ? 'Marked as transfer' : 'Restored to expense', { action: { label: 'Undo', onClick: runUndo } });
   };
 
   const handleSplit = async (parentId: string, children: Array<{

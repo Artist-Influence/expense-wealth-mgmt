@@ -134,10 +134,12 @@ export default function Tax() {
   // `deductibilityHint`, so high-confidence predicted-but-not-yet-approved rows
   // count toward the projection (matches what the user sees on Expenses).
   async function loadProjection() {
-    // Financial-integrity rule: only approved/edited rows count toward totals.
-    // Unreviewed "suggested"/"ai_suggested" rows are surfaced separately as
-    // "potential additional deductions" rather than baked into the projection.
-    const reportingStatuses = ['approved', 'auto_categorized', 'edited'];
+    // Count confirmed AND high-confidence predicted (suggested/ai_suggested)
+    // expenses as deductions, so a business owner's expenses actually net
+    // against income. This MUST match loadDeductions' set so the reserve and
+    // projection reconcile. (Genuinely unreviewed rows have no category and
+    // don't reach here.)
+    const reportingStatuses = ['approved', 'auto_categorized', 'edited', 'suggested', 'ai_suggested'];
     const fetchAll = async (m: 'personal' | 'business') => {
       let from = 0;
       const pageSize = 1000;
@@ -174,15 +176,17 @@ export default function Tax() {
     ]);
     const sumTaxable = (rows: any[] | null) => (rows || []).filter(r => r.taxable_status === 'taxable').reduce((s, r) => s + Number(r.amount || 0), 0);
     // Deductible if explicitly flagged OR effective category is in the
-    // deductible set for the row's mode. Partial categories (meals, entertainment)
-    // get the standard 50% Schedule C haircut. requires_review still counts at full
-    // for the projection but is surfaced separately in the breakdown.
+    // deductible set for the row's mode. Business meals get the 50% Schedule C
+    // haircut (§274). `requires_review` categories (entertainment, taxes,
+    // personal Schedule A items) are EXCLUDED from the reserve base — their real
+    // deductibility is limited/uncertain — and surfaced separately in the breakdown.
     const sumDeductible = (rows: any[], mode: 'personal' | 'business') => {
       let total = 0;
       for (const r of rows) {
         const cat = (r.final_category || r.predicted_category || '') as string;
         const hint = deductibilityHint(mode, cat);
         if (hint === 'none' && !r.counts_as_tax_deduction) continue;
+        if (hint === 'requires_review') continue; // limited/uncertain — keep out of the reserve base
         const amt = Math.abs(Number(r.amount || 0));
         if (hint === 'partial') total += amt * 0.5;
         else total += amt;
@@ -223,9 +227,10 @@ export default function Tax() {
   }
 
   async function loadDeductions() {
-    // Pull every categorized expense in scope (broad statuses), decide
-    // deductibility client-side. This way confirmed AND high-confidence
-    // predicted rows both surface in the breakdown.
+    // Pull categorized expenses in scope, decide deductibility client-side.
+    // Same set as loadProjection so the reserve and projection reconcile, and
+    // include high-confidence predicted (suggested/ai_suggested) expenses so a
+    // business owner's expenses net against income.
     const reportingStatuses = ['approved', 'auto_categorized', 'edited', 'suggested', 'ai_suggested'];
     let from = 0;
     const pageSize = 1000;
@@ -237,6 +242,9 @@ export default function Tax() {
         .select('final_category, predicted_category, amount, review_status, transaction_mode, counts_as_tax_deduction')
         .eq('owner_id', ownerId!)
         .eq('is_split_parent', false)
+        // Exclude tax-payment rows: a business tax payment categorized "taxes"
+        // must not be double-counted as both a deduction and a payment.
+        .not('treatment_type', 'in', '(tax_payment,estimated_tax_payment)')
         .in('review_status', reportingStatuses)
         .gte('date', yearStart)
         .lte('date', yearEnd)
@@ -349,9 +357,10 @@ export default function Tax() {
   }, [incomeRows]);
 
   // Per-row deductible amount with NY/Schedule C-aware haircut.
-  // Meals & entertainment → 50% (§274). Everything else → 100% of the
-  // expense. `requires_review` (e.g. personal Schedule A items) is
-  // counted at full but visually flagged in the breakdown.
+  // Business meals → 50% (§274). Most ordinary business expenses → 100%.
+  // `requires_review` (entertainment, taxes, personal Schedule A items) is
+  // returned at its full raw amount for the informational "review" bucket, but
+  // deliberately EXCLUDED from the reserve total (see totalDeductions below).
   const deductibleAmount = (r: DeductionRow): { amount: number; hint: DeductibilityHint; bucket: 'confirmed' | 'predicted' | 'review' } => {
     const cat = r.final_category || r.predicted_category || '';
     const hint = deductibilityHint(r.transaction_mode, cat);
@@ -371,10 +380,14 @@ export default function Tax() {
       else if (bucket === 'predicted') predicted += amount;
       else review += amount;
     }
-    return { confirmed, predicted, review, total: confirmed + predicted + review };
+    return { confirmed, predicted, review };
   }, [deductionRows]);
 
-  const totalDeductions = deductionBreakdown.total;
+  // Reserve base excludes the `requires_review` (review) bucket: entertainment
+  // is ~0% deductible post-TCJA, taxes aren't deductible against income, and
+  // personal itemized items are SALT-capped — counting them at full would
+  // over-deduct and under-reserve. They stay visible as "needs review".
+  const totalDeductions = deductionBreakdown.confirmed + deductionBreakdown.predicted;
 
   const taxPaymentsTotal = useMemo(() => {
     return taxPayments.reduce((s, r) => s + Math.abs(r.amount || 0), 0);
@@ -400,7 +413,9 @@ export default function Tax() {
   const seEnabled = profile?.self_employment_income_enabled ?? false;
   const businessNetProfit = Math.max(0, projection.business.taxable - projection.business.deductions);
   const seTaxBase = businessNetProfit * 0.9235;
-  const selfEmploymentTax = seEnabled
+  // SE tax applies only to business net profit — never in the personal scope,
+  // where there is no Schedule C income to owe it on.
+  const selfEmploymentTax = (seEnabled && scope !== 'personal')
     ? Math.min(seTaxBase, SS_WAGE_BASE_2025) * 0.124 + seTaxBase * 0.029
     : 0;
 
@@ -457,14 +472,20 @@ export default function Tax() {
       if (!yy || !mm || !dd) return null;
       return new Date(yy, mm - 1, dd);
     };
-    // Effective rate the annual reserve implies. Guarded so a 0 adjusted income
-    // yields 0 targets rather than smearing the whole reserve onto gross income.
-    const effectiveRate = adjustedIncome > 0 ? totalReserve / adjustedIncome : 0;
+    // Effective rate the annual reserve implies, computed on GROSS taxable
+    // income so the four quarters (each apportioned by the gross income that
+    // landed in it) reconcile back to totalReserve. Using net (adjusted) income
+    // here would over-collect by the gross/net ratio. Guarded so 0 income → 0.
+    const effectiveRate = taxableIncome > 0 ? totalReserve / taxableIncome : 0;
+    // `incomeStart`/`incomeEnd` bracket when income landed (drives the target).
+    // `paidStart`→`due` is the NON-overlapping payment-matching window: each
+    // starts the day AFTER the prior quarter's due date, so a payment made on
+    // Apr 15 / Jun 15 / Sep 15 counts in exactly one quarter, never two.
     const defs = [
-      { label: 'Q1', incomeStart: new Date(y, 0, 1), incomeEnd: new Date(y, 2, 31), due: new Date(y, 3, 15) },
-      { label: 'Q2', incomeStart: new Date(y, 3, 1), incomeEnd: new Date(y, 4, 31), due: new Date(y, 5, 15) },
-      { label: 'Q3', incomeStart: new Date(y, 5, 1), incomeEnd: new Date(y, 7, 31), due: new Date(y, 8, 15) },
-      { label: 'Q4', incomeStart: new Date(y, 8, 1), incomeEnd: new Date(y, 11, 31), due: new Date(y + 1, 0, 15) },
+      { label: 'Q1', incomeStart: new Date(y, 0, 1), incomeEnd: new Date(y, 2, 31), paidStart: new Date(y, 0, 1), due: new Date(y, 3, 15) },
+      { label: 'Q2', incomeStart: new Date(y, 3, 1), incomeEnd: new Date(y, 4, 31), paidStart: new Date(y, 3, 16), due: new Date(y, 5, 15) },
+      { label: 'Q3', incomeStart: new Date(y, 5, 1), incomeEnd: new Date(y, 7, 31), paidStart: new Date(y, 5, 16), due: new Date(y, 8, 15) },
+      { label: 'Q4', incomeStart: new Date(y, 8, 1), incomeEnd: new Date(y, 11, 31), paidStart: new Date(y, 8, 16), due: new Date(y + 1, 0, 15) },
     ];
     const today = new Date();
     const MS_PER_DAY = 86_400_000;
@@ -478,11 +499,14 @@ export default function Tax() {
         return d && d >= q.incomeStart && d <= q.incomeEnd ? s + (r.amount || 0) : s;
       }, 0);
       const target = quarterTaxableIncome * effectiveRate;
-      // Payments for a quarter are typically made by its due date, so count any
-      // payment landing from the income-window start through the due date.
-      const paid = taxPayments.reduce((s, p) => {
+      // Count payments landing in this quarter's non-overlapping [paidStart, due]
+      // window, plus an even 1/4 of annual withholding (W-2 + estimated) so the
+      // quarters credit the withholding that the annual paidYtd already counts —
+      // otherwise a filer whose withholding covers the year shows every quarter
+      // as overdue.
+      const paid = withholding / 4 + taxPayments.reduce((s, p) => {
         const d = parseLocal(p.date);
-        return d && d >= q.incomeStart && d <= q.due ? s + Math.abs(p.amount || 0) : s;
+        return d && d >= q.paidStart && d <= q.due ? s + Math.abs(p.amount || 0) : s;
       }, 0);
       const remaining = Math.max(0, target - paid);
       const daysUntilDue = Math.ceil((q.due.getTime() - today.getTime()) / MS_PER_DAY);
@@ -493,7 +517,7 @@ export default function Tax() {
       else status = 'upcoming';
       return { label: q.label, due: q.due, quarterTaxableIncome, target, paid, remaining, status };
     });
-  }, [incomeRows, taxPayments, selectedYear, nowYear, totalReserve, adjustedIncome]);
+  }, [incomeRows, taxPayments, selectedYear, nowYear, totalReserve, taxableIncome, withholding]);
 
   if (loading) {
     return (
@@ -582,7 +606,7 @@ export default function Tax() {
               <CardHeader className="pb-2">
                 <CardTitle className="text-base">{selectedYear} Projection — {scopeLabel}</CardTitle>
                 <CardDescription className="text-xs">
-                  Net = Taxable income − Deductible expenses. Estimated tax = Net × ({(combinedRate * 100).toFixed(1)}%) at your current Fed + NYS{cityEnabled ? ' + NYC' : ''} rates. Only approved / edited expenses count toward deductions.
+                  Net = Taxable income − Deductible expenses. Estimated tax = Net × ({(combinedRate * 100).toFixed(1)}%) at your current Fed + NYS{cityEnabled ? ' + NYC' : ''} rates. Approved and high-confidence predicted expenses count toward deductions.
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -642,9 +666,9 @@ export default function Tax() {
         })()}
 
         {/* Summary Cards */}
-        <div className={`grid grid-cols-2 md:grid-cols-3 ${seEnabled ? 'lg:grid-cols-7' : 'lg:grid-cols-6'} gap-4`}>
+        <div className={`grid grid-cols-2 md:grid-cols-3 ${selfEmploymentTax > 0 ? 'lg:grid-cols-7' : 'lg:grid-cols-6'} gap-4`}>
           <SummaryCard icon={Landmark} label="Federal Reserve" value={fmt(federalReserve)} sub={`${federalPercent}%`} />
-          {seEnabled && (
+          {selfEmploymentTax > 0 && (
             <SummaryCard icon={Briefcase} label="Self-Employment Tax" value={fmt(selfEmploymentTax)} sub="15.3% Sch SE" />
           )}
           <SummaryCard icon={Building2} label="NYS Reserve" value={fmt(nysReserve)} sub={`${nysPercent}%`} />
@@ -708,7 +732,7 @@ export default function Tax() {
           <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
           <div>
             <p className="font-medium">Estimates only — not a tax calculation</p>
-            <p className="text-warning/80 mt-0.5">Based on flat reserve rates, not progressive tax brackets. {seEnabled ? 'Self-employment tax (Schedule SE) is included on business net profit. ' : ''}Deductions are simplified (no above/below-the-line distinction). Consult your accountant for actual liability.</p>
+            <p className="text-warning/80 mt-0.5">Based on flat reserve rates, not progressive tax brackets. {selfEmploymentTax > 0 ? 'Self-employment tax (Schedule SE) is included on business net profit. ' : ''}Deductions are simplified (no above/below-the-line distinction). Consult your accountant for actual liability.</p>
           </div>
         </div>
 
