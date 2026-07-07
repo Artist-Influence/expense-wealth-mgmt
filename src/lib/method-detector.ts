@@ -16,23 +16,44 @@ const FALLBACK_PATTERNS: [RegExp, string][] = [
   [/chase[\s_-]*8886/i, 'Chase Checking/Debit'],
 ];
 
+/** Normalize a string for name matching: lowercase, strip everything but a-z0-9. */
+function norm(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
 /**
  * Detect the payment method from a CSV filename.
- * When `methods` (saved payment methods) are provided, their `match_pattern`
- * is used (treated as a case-insensitive regex, falling back to substring
- * matching if the pattern is not valid regex). Otherwise the built-in
- * fallback patterns are used.
+ *
+ * When saved `methods` are provided we match in two passes:
+ *  1. Any method's explicit `match_pattern` (case-insensitive regex, falling
+ *     back to substring) — lets power users pin tricky filenames.
+ *  2. The method's NAME appearing in the filename. This is what makes it
+ *     "just work" for any card you add: name a method "Karat" and a
+ *     `karat-2026.csv` upload is recognized without configuring anything.
+ *     Most-specific (longest) name wins to avoid a short name shadowing a
+ *     longer one.
+ * Falls back to the built-in patterns only when no saved methods are given.
  */
 export function detectMethodFromFilename(filename: string, methods?: MethodPattern[]): string | null {
+  const fnameLower = filename.toLowerCase();
+  const fnameNorm = norm(filename);
+
   if (methods && methods.length > 0) {
+    // Pass 1 — explicit patterns.
     for (const m of methods) {
       const pattern = m.match_pattern?.trim();
       if (!pattern) continue;
       try {
         if (new RegExp(pattern, 'i').test(filename)) return m.name;
       } catch {
-        if (filename.toLowerCase().includes(pattern.toLowerCase())) return m.name;
+        if (fnameLower.includes(pattern.toLowerCase())) return m.name;
       }
+    }
+    // Pass 2 — match by method name (longest first).
+    const byNameLength = [...methods].sort((a, b) => (b.name?.length || 0) - (a.name?.length || 0));
+    for (const m of byNameLength) {
+      const nameNorm = norm(m.name || '');
+      if (nameNorm.length >= 3 && fnameNorm.includes(nameNorm)) return m.name;
     }
     return null;
   }

@@ -93,10 +93,10 @@ const matchSourceLabels: Record<string, { label: string; icon: React.ReactNode; 
   ai: { label: 'AI Suggestion', icon: <Bot className="h-3.5 w-3.5" />, color: 'text-purple-400' },
 };
 
+// Reimbursable/Work mode retired — a transaction is Personal or Business.
 const MODE_OPTIONS = [
   { value: 'personal', label: 'Personal', icon: User },
   { value: 'business', label: 'Business', icon: Briefcase },
-  { value: 'reimbursable_work', label: 'Reimbursable', icon: Receipt },
 ] as const;
 
 const ECONOMIC_OWNER_OPTIONS = ['personal', 'artist_influence', 'employer', 'client', 'other'];

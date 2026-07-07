@@ -99,11 +99,12 @@ export default function Expenses() {
   const { profile } = useUsageProfile();
   const lockedMode: 'personal' | 'business' | null =
     profile === 'personal' ? 'personal' : profile === 'business' ? 'business' : null;
-  // Which mode tabs to show based on usage profile
+  // Which mode tabs to show based on usage profile.
+  // (Reimbursable/Work mode was retired — everything is Personal or Business.)
   const visibleModes: TransactionMode[] =
-    profile === 'personal' ? ['personal', 'reimbursable_work']
+    profile === 'personal' ? ['personal']
     : profile === 'business' ? ['business']
-    : ['personal', 'business', 'reimbursable_work'];
+    : ['personal', 'business'];
   // Which summary cards to show
   const showPersonalCards = !isInvestor && profile !== 'business';
   const showBusinessCards = profile !== 'personal';
@@ -182,6 +183,32 @@ export default function Expenses() {
     setSelectedIds(new Set());
     if (user && ownerId) { loadTransactions(); loadCategories(); }
   }, [user, ownerId, mode]);
+
+  // One-time cleanup for the retired Reimbursable/Work mode: fold any existing
+  // reimbursable_work transactions into Personal so they aren't orphaned by a
+  // hidden tab. Idempotent — after the first run there are no such rows left.
+  const reimbursableMigratedRef = useRef(false);
+  useEffect(() => {
+    if (!ownerId || reimbursableMigratedRef.current) return;
+    reimbursableMigratedRef.current = true;
+    (async () => {
+      const { data, error } = await supabase
+        .from('transactions_uploaded')
+        .update({
+          transaction_mode: 'personal', mode: 'personal', economic_owner: 'personal',
+          is_reimbursable: false, reimbursement_status: 'none', treatment_type: 'expense',
+          counts_toward_true_personal_spend: true, counts_toward_true_business_spend: false,
+        } as never)
+        .eq('owner_id', ownerId!)
+        .eq('transaction_mode', 'reimbursable_work')
+        .is('deleted_at', null)
+        .select('id');
+      if (!error && data && data.length > 0) {
+        toast.success(`Moved ${data.length} reimbursable transaction${data.length === 1 ? '' : 's'} into Personal.`);
+        loadTransactions();
+      }
+    })();
+  }, [ownerId]);
 
   // Show the setup walkthrough on the owner's first visit
   useEffect(() => {
@@ -2238,11 +2265,6 @@ export default function Expenses() {
               {mode !== 'business' && visibleModes.includes('business') && (
                 <Button size="sm" variant="outline" onClick={() => bulkSwitchMode('business')} className="h-8 gap-1 text-xs text-primary border-primary/30">
                   <Briefcase className="h-3 w-3" /> → Business
-                </Button>
-              )}
-              {mode !== 'reimbursable_work' && visibleModes.includes('reimbursable_work') && (
-                <Button size="sm" variant="outline" onClick={() => bulkSwitchMode('reimbursable_work')} className="h-8 gap-1 text-xs text-warning border-warning/30">
-                  <Receipt className="h-3 w-3" /> → Reimburse
                 </Button>
               )}
               <Button size="sm" variant="destructive" onClick={bulkDelete} className="h-8 gap-1 text-xs">

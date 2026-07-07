@@ -40,10 +40,10 @@ interface SplitTransactionDialogProps {
   onPendingCategoryConsumed?: () => void;
 }
 
+// Reimbursable/Work mode retired — split rows are Personal or Business.
 const MODE_LABELS: Record<string, string> = {
   personal: 'Personal',
   business: 'Business',
-  reimbursable_work: 'Reimbursable',
 };
 
 const TAX_TREATMENTS = [
