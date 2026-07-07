@@ -507,6 +507,27 @@ function buildResult(
 }
 
 /**
+ * Detected transfers / CC-payments / investment moves are excluded from spend,
+ * but still need a category so they don't sit forever in the review queue.
+ * Map the stored transfer_type to a sensible category, preferring one the user
+ * already has; fall back to a generic "Transfer".
+ */
+export function resolveTransferCategory(
+  transferType: string | null | undefined,
+  allowed: string[],
+): string {
+  const desired =
+    transferType === 'credit_card_payment' ? 'Credit Card Payment' :
+    transferType === 'brokerage_transfer' ? 'Investment' :
+    'Transfer';
+  const find = (name: string) => allowed.find(c => c.toLowerCase() === name.toLowerCase());
+  return find(desired) || find('Transfer') || desired;
+}
+
+/** Category names the transfer resolver may assign, so callers can seed them. */
+export const TRANSFER_CATEGORY_NAMES = ['Transfer', 'Credit Card Payment', 'Investment'];
+
+/**
  * Call AI edge function to categorize unmatched transactions.
  */
 export async function categorizeWithAI(

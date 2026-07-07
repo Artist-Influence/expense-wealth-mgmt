@@ -13,7 +13,7 @@ import { AddCategoryDialog } from '@/components/AddCategoryDialog';
 import { OnboardingWizard } from '@/components/OnboardingWizard';
 import { DuplicateResolverDialog, type DupClusterRow } from '@/components/DuplicateResolverDialog';
 import { previewCsvFile, parseCsvFileWithMapping, type ParsePreview, type ColumnMapping } from '@/lib/csv-parser';
-import { categorizeTransactions, categorizeWithAI, updateMerchantMemory, isDeductibleCategory } from '@/lib/categorization-engine';
+import { categorizeTransactions, categorizeWithAI, updateMerchantMemory, isDeductibleCategory, resolveTransferCategory, TRANSFER_CATEGORY_NAMES } from '@/lib/categorization-engine';
 import { detectMethodFromFilename } from '@/lib/method-detector';
 import { usePaymentMethods, type PaymentMethod } from '@/hooks/usePaymentMethods';
 import { useSetupStatus } from '@/hooks/useSetupStatus';
@@ -93,6 +93,20 @@ const MODE_CONFIG: Record<TransactionMode, { label: string; color: string; activ
   business: { label: 'Business', color: 'text-primary', activeClass: 'bg-primary/20 text-primary border-primary/30', icon: Briefcase },
   reimbursable_work: { label: 'Reimbursable/Work', color: 'text-warning', activeClass: 'bg-warning/15 text-warning border-warning/30', icon: Receipt },
 };
+
+// Make sure the categories the transfer resolver can assign actually exist for
+// this mode, so they show up in filters/dropdowns. Idempotent + non-fatal.
+async function ensureTransferCategories(ownerId: string, mode: string, existing: string[]): Promise<string[]> {
+  const have = new Set(existing.map(c => c.toLowerCase()));
+  const missing = TRANSFER_CATEGORY_NAMES.filter(n => !have.has(n.toLowerCase()));
+  if (missing.length === 0) return existing;
+  const rows = missing.map((category_name, i) => ({
+    owner_id: ownerId, mode, category_name, sort_order: existing.length + i, is_active: true,
+  }));
+  const { error } = await supabase.from('category_options').insert(rows as never);
+  if (error) return existing; // resolver still returns a usable label
+  return [...existing, ...missing];
+}
 
 export default function Expenses() {
   const { user, isInvestor, isAccountant, isOwner, ownerId } = useAuth();
@@ -520,6 +534,34 @@ export default function Expenses() {
           .order('sort_order');
         const allowedCategories = (catData || []).map(c => c.category_name);
         if (allowedCategories.length === 0) { noCatModes++; continue; }
+
+        // ── Transfer pass ──────────────────────────────────────────────
+        // Detected transfers / CC-payments / investment moves are excluded from
+        // spend but were never given a category, so they linger in the review
+        // queue. Assign one (from the already-stored transfer_type — no
+        // re-detection needed) and mark auto_categorized so they clear.
+        const allowedWithTransfer = await ensureTransferCategories(ownerId!, m, allowedCategories);
+        const transferRows = await fetchAllRows<{ id: string; transfer_type: string | null; treatment_type: string | null }>((from, to) => supabase
+          .from('transactions_uploaded')
+          .select('id, transfer_type, treatment_type')
+          .eq('owner_id', ownerId!)
+          .eq('transaction_mode', m)
+          .is('deleted_at', null)
+          .eq('is_transfer', true)
+          .in('review_status', ['needs_review', 'suggested', 'ai_suggested'])
+          .order('id')
+          .range(from, to));
+        for (let i = 0; i < transferRows.length; i += 20) {
+          await Promise.all(transferRows.slice(i, i + 20).map(r => {
+            const cat = resolveTransferCategory(r.transfer_type || r.treatment_type, allowedWithTransfer);
+            return supabase.from('transactions_uploaded').update({
+              final_category: cat, predicted_category: cat,
+              review_status: 'auto_categorized', counts_as_tax_deduction: false,
+            } as never).eq('id', r.id);
+          }));
+        }
+        autoCount += transferRows.length;
+        processed += transferRows.length;
 
         // This mode's uncategorized backlog — skip transfers, splits, dupes.
         const rows = await fetchAllRows<{
@@ -1560,7 +1602,7 @@ export default function Expenses() {
         .eq('is_active', true)
         .eq('owner_id', ownerId!)
         .order('sort_order');
-      const allowedCategories = (catData || []).map(c => c.category_name);
+      const allowedCategories = await ensureTransferCategories(ownerId!, categoryMode, (catData || []).map(c => c.category_name));
       const allowedSet = new Set(allowedCategories.map(c => c.toLowerCase()));
 
       updateItem(id, { status: 'parsing' });
@@ -1925,22 +1967,27 @@ export default function Expenses() {
           const isRefund = refundRowKeys.has(routerKey);
           if (isHighConfTransfer || isCcPayment) transferCount++;
 
-          let transferCategory: string | null = null;
-          if (isHighConfTransfer) {
-            transferCategory = allowedSet.has('transfer') ? allowedCategories.find(c => c.toLowerCase() === 'transfer') || null : null;
-          }
-
-          const predictedCat = isHighConfTransfer ? transferCategory : result.predicted_category;
-          // Auto-approve: if auto_categorized with high confidence exact match, mark as approved
-          const shouldAutoApprove = result.review_status === 'auto_categorized' 
-            && result.confidence >= 95 
-            && (result.match_source === 'exact_history' || result.match_source === 'normalized_history')
-            && !isHighConfTransfer;
-          const finalCat = (result.review_status === 'auto_categorized' || shouldAutoApprove)
-            ? (isHighConfTransfer ? transferCategory : result.predicted_category)
+          // Detected transfers / CC-payments are auto-categorized — they're
+          // excluded from spend but must still get a category so they don't sit
+          // in the review queue. resolveTransferCategory always returns a label.
+          const isAutoTransfer = isHighConfTransfer || isCcPayment;
+          const transferCategory = isAutoTransfer
+            ? resolveTransferCategory(isCcPayment ? 'credit_card_payment' : transfer.transferType, allowedCategories)
             : null;
-          const reviewStatus = (isHighConfTransfer && !transferCategory) ? 'needs_review' 
-            : shouldAutoApprove ? 'approved' 
+
+          const predictedCat = isAutoTransfer ? transferCategory : result.predicted_category;
+          // Auto-approve: if auto_categorized with high confidence exact match, mark as approved
+          const shouldAutoApprove = result.review_status === 'auto_categorized'
+            && result.confidence >= 95
+            && (result.match_source === 'exact_history' || result.match_source === 'normalized_history')
+            && !isAutoTransfer;
+          const finalCat = isAutoTransfer
+            ? transferCategory
+            : (result.review_status === 'auto_categorized' || shouldAutoApprove)
+              ? result.predicted_category
+              : null;
+          const reviewStatus: string = isAutoTransfer ? 'auto_categorized'
+            : shouldAutoApprove ? 'approved'
             : result.review_status;
 
           // Medium-confidence transfers: keep in totals, flag for review
