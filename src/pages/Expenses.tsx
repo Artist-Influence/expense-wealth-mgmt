@@ -117,6 +117,9 @@ export default function Expenses() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [extraFilter, setExtraFilter] = useState<string>('all');
+  // When set, the table is scoped to a single CSV upload (the "Review N rows"
+  // link after an import). Null = show everything for the mode.
+  const [batchFilter, setBatchFilter] = useState<string | null>(null);
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [methodFilter, setMethodFilter] = useState<string>('all');
   const [scanningRecurring, setScanningRecurring] = useState(false);
@@ -256,6 +259,13 @@ export default function Expenses() {
     }
     if (method) {
       setMethodFilter(method);
+      consumed = true;
+    }
+    const batch = searchParams.get('batch');
+    if (batch) {
+      // Scope to just this upload's rows, showing all of them regardless of status.
+      setBatchFilter(batch);
+      setStatusFilter('all');
       consumed = true;
     }
     if (consumed) {
@@ -604,6 +614,7 @@ export default function Expenses() {
 
   const filtered = useMemo(() => {
     let result = transactions.filter(tx => {
+      if (batchFilter && tx.upload_batch_id !== batchFilter) return false;
       if (statusFilter === 'unreviewed') {
         if (!['needs_review', 'suggested', 'ai_suggested'].includes(tx.review_status)) return false;
       } else if (statusFilter !== 'all' && tx.review_status !== statusFilter) return false;
@@ -664,7 +675,7 @@ export default function Expenses() {
     });
 
     return result;
-  }, [transactions, statusFilter, extraFilter, categoryFilter, methodFilter, dateFrom, dateTo, search, sortCol, sortAsc]);
+  }, [transactions, batchFilter, statusFilter, extraFilter, categoryFilter, methodFilter, dateFrom, dateTo, search, sortCol, sortAsc]);
 
   // Paginate the RENDER (not the data). safePage clamps if the filtered set
   // shrank below the current page.
@@ -676,7 +687,7 @@ export default function Expenses() {
   );
   // Reset to the first page only when the FILTER changes — never on a row edit
   // (which would bounce the user off their current page).
-  useEffect(() => { setPage(0); }, [statusFilter, extraFilter, categoryFilter, methodFilter, dateFrom, dateTo, search, mode]);
+  useEffect(() => { setPage(0); }, [statusFilter, extraFilter, categoryFilter, methodFilter, dateFrom, dateTo, search, mode, batchFilter]);
 
   // Available payment methods derived from loaded transactions for the Method filter.
   // Falls back to source_account_name (set on upload from filename) so accounts that
@@ -1962,7 +1973,7 @@ export default function Expenses() {
               {(Object.entries(MODE_CONFIG) as [TransactionMode, typeof MODE_CONFIG[TransactionMode]][]).filter(([key]) => visibleModes.includes(key)).map(([key, cfg]) => (
                 <button
                   key={key}
-                  onClick={() => setMode(key)}
+                  onClick={() => { setBatchFilter(null); setMode(key); }}
                   className={`px-3 py-1.5 text-xs font-medium transition-colors border-r border-border/20 last:border-r-0 ${
                     mode === key ? cfg.activeClass : 'text-muted-foreground hover:text-foreground'
                   }`}
@@ -2278,6 +2289,16 @@ export default function Expenses() {
           </Button>
 
           <span className="text-[11px] text-muted-foreground font-mono">{filtered.length} rows</span>
+
+          {batchFilter && (
+            <button
+              onClick={() => setBatchFilter(null)}
+              className="inline-flex items-center gap-1 h-6 px-2 rounded-full text-[11px] bg-primary/10 text-primary border border-primary/20 hover:bg-primary/15 transition-colors"
+              title="Currently showing only the rows from one CSV upload — click to show everything"
+            >
+              Viewing 1 upload <X className="h-3 w-3" />
+            </button>
+          )}
         </div>
 
         {/* Comparative Summary — Personal vs Business at a glance, regardless of active tab */}

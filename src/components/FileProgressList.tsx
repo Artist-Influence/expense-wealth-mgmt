@@ -176,7 +176,7 @@ export function FileProgressList({ items, mode }: FileProgressListProps) {
 
           {item.status === 'done' && item.result && item.result.batchId && (
             <Button asChild variant="outline" size="sm" className="w-full mt-1">
-              <Link to={`/review?mode=${mode}&batch=${item.result.batchId}`}>
+              <Link to={`/?scope=${mode}&batch=${item.result.batchId}`}>
                 <Eye className="h-3.5 w-3.5 mr-1.5" /> Review {item.result.total} rows
               </Link>
             </Button>

@@ -383,7 +383,14 @@ export function WealthProjectionChart({
           effectiveAnnual = baseRate;
         }
 
-        const monthlyRate = (effectiveAnnual / 100) / 12;
+        // The annual rate is a CAGR (a geometric, effective annual return —
+        // that's what realizedCagr, the benchmark, and the asset-class defaults
+        // all express). Convert to a monthly rate GEOMETRICALLY so 12 months of
+        // compounding equals exactly that annual rate. Using annual/12 (a
+        // nominal APR) instead would compound to (1+r/12)^12 > r — e.g. 8% →
+        // 8.30%, 12% → 12.68% — silently overstating a 40-year projection by
+        // 10–25%.
+        const monthlyRate = Math.pow(1 + effectiveAnnual / 100, 1 / 12) - 1;
         const monthsContributing = Math.max(0, (ass.stop_age - age) * 12);
         let bal = Number(a.current_balance) || 0;
         const arr: number[] = [bal];
