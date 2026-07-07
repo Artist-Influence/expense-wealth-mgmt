@@ -426,6 +426,22 @@ export function TransactionDetailDrawer({
             <Textarea value={editValues.notes} onChange={e => setEditValues(prev => ({ ...prev, notes: e.target.value }))} className="mt-1.5 text-sm min-h-[60px]" placeholder="Add notes..." />
           </div>
 
+          {/* Tags — free-text labels beyond the category. Interim reuse of the
+              client_or_project_tag column until an expense can hold multiple
+              categories; surfaced here (not buried in Advanced) so it's usable. */}
+          <div>
+            <Label className="text-xs font-medium text-foreground">Tags</Label>
+            <Input
+              value={editValues.client_or_project_tag}
+              onChange={e => setEditValues(prev => ({ ...prev, client_or_project_tag: e.target.value }))}
+              className="mt-1.5 h-9 text-sm"
+              placeholder="e.g. entertainment, gift"
+            />
+            <p className="text-[11px] text-muted-foreground mt-1 leading-relaxed">
+              Extra labels beyond the category (comma-separated) — a stopgap until an expense can have multiple categories.
+            </p>
+          </div>
+
           {/* Tax deductible? — auto default + manual override */}
           <div className="rounded-lg border border-border/40 bg-secondary/20 p-3">
             <div className="flex items-center justify-between gap-3">
@@ -491,12 +507,6 @@ export function TransactionDetailDrawer({
                 </SelectContent>
               </Select>
               <p className="text-[10px] text-muted-foreground mt-1">Detailed IRS category (the toggle above is the simple version).</p>
-            </div>
-
-            <div>
-              <Label className="text-[11px] text-muted-foreground">Client / project tag</Label>
-              <Input value={editValues.client_or_project_tag} onChange={e => setEditValues(prev => ({ ...prev, client_or_project_tag: e.target.value }))} className="mt-1 h-8 text-xs" placeholder="Tag..." />
-              <p className="text-[10px] text-muted-foreground mt-1">Attribute this to a specific client or project.</p>
             </div>
 
             <div>

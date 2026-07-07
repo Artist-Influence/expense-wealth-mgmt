@@ -649,7 +649,8 @@ export default function Expenses() {
         return (
           (tx.description_raw || '').toLowerCase().includes(s) ||
           (tx.predicted_category || '').toLowerCase().includes(s) ||
-          (tx.final_category || '').toLowerCase().includes(s)
+          (tx.final_category || '').toLowerCase().includes(s) ||
+          (tx.client_or_project_tag || '').toLowerCase().includes(s)
         );
       }
       return true;
@@ -2595,6 +2596,13 @@ export default function Expenses() {
                       <td className="px-2 py-1 font-mono text-muted-foreground whitespace-nowrap">{tx.date || '—'}</td>
                       <td className="px-2 py-1 max-w-[300px]">
                         <p className="text-foreground truncate" title={tx.description_raw || ''}>{tx.description_raw || '—'}</p>
+                        {tx.client_or_project_tag && (
+                          <div className="flex flex-wrap items-center gap-0.5 mt-0.5">
+                            {tx.client_or_project_tag.split(',').map(t => t.trim()).filter(Boolean).map((t, i) => (
+                              <span key={i} className="text-[9px] px-1 rounded bg-secondary/40 text-muted-foreground leading-tight">{t}</span>
+                            ))}
+                          </div>
+                        )}
                       </td>
                       <td className="px-2 py-1 text-right font-mono text-foreground whitespace-nowrap">
                         ${tx.amount != null ? Math.abs(tx.amount).toFixed(2) : '0.00'}

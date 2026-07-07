@@ -25,8 +25,9 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import {
   DollarSign, TrendingUp, Shield, ShieldOff, Briefcase, Banknote,
   Search, Download, Plus, Check, Trash2, Upload, Receipt,
-  Calendar, ChevronDown, X
+  Calendar, ChevronDown, X, Wand2
 } from 'lucide-react';
+import { IncomeCleanupDialog } from '@/components/IncomeCleanupDialog';
 
 interface IncomeTransaction {
   id: string;
@@ -86,6 +87,7 @@ export default function Income() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [detailTx, setDetailTx] = useState<IncomeTransaction | null>(null);
   const [showManualEntry, setShowManualEntry] = useState(false);
+  const [cleanupOpen, setCleanupOpen] = useState(false);
   const [showUploader, setShowUploader] = useState(false);
   const [csvImportMode, setCsvImportMode] = useState<'personal' | 'business'>('personal');
   const [importing, setImporting] = useState(false);
@@ -560,6 +562,9 @@ export default function Income() {
                 <Button variant="outline" size="sm" onClick={() => { setManualMode(filterMode === 'business' ? 'business' : 'personal'); setShowManualEntry(true); }}>
                   <Plus className="h-4 w-4 mr-1" /> Add Entry
                 </Button>
+                <Button variant="outline" size="sm" onClick={() => setCleanupOpen(true)} title="Remove transfers/withdrawals wrongly counted as income, or delete a bad import">
+                  <Wand2 className="h-4 w-4 mr-1" /> Clean up
+                </Button>
               </>
             )}
             <Button variant="outline" size="sm" onClick={exportCsv}>
@@ -885,6 +890,13 @@ export default function Income() {
         open={!!detailTx}
         onClose={() => setDetailTx(null)}
         onSaved={fetchTransactions}
+      />
+
+      <IncomeCleanupDialog
+        open={cleanupOpen}
+        onClose={() => setCleanupOpen(false)}
+        ownerId={ownerId}
+        onDone={fetchTransactions}
       />
 
       {/* Manual Entry Dialog */}
