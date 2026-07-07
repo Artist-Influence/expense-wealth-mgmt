@@ -71,11 +71,11 @@ const STEPS: OnboardingStep[] = [
   },
   {
     icon: DollarSign,
-    title: '3 · Track income &amp; reimbursements',
+    title: '3 · Track income',
     body: (
       <>
         Upload income CSVs on the <strong>Income</strong> page. Keep true earnings separate from
-        reimbursements and money you fronted — so your real cash flow and profit stay accurate.
+        transfers and money you fronted — so your real cash flow and profit stay accurate.
       </>
     ),
   },

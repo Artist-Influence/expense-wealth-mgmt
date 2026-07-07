@@ -35,7 +35,7 @@ const SUGGESTIONS = [
   'How much did I spend on dining last month?',
   'What are my top business expenses this year?',
   'How does the categorization engine work?',
-  'How much do I still have outstanding in reimbursements?',
+  'What are my biggest subscriptions?',
 ];
 
 interface Props {
@@ -119,7 +119,7 @@ export function AssistantChat({ threadId, ownerId, initialMessages, canSend, onF
               <h2 className="text-lg font-semibold text-foreground">Ask anything about your finances</h2>
               <p className="text-sm text-muted-foreground mt-1 max-w-md">
                 I can explain how the platform works and answer questions about your live expenses,
-                income, allocations, tax reserves and reimbursements.
+                income, allocations and tax reserves.
               </p>
               <div className="grid sm:grid-cols-2 gap-2 mt-6 w-full max-w-xl">
                 {SUGGESTIONS.map((s) => (
