@@ -904,6 +904,119 @@ export default function Expenses() {
 
   // Drawer save — returns whether the save persisted so approve flows can
   // stop instead of approving a rejected value.
+  // Merchants the user declined to bulk-apply this session — don't nag again.
+  const bulkApplyDeclinedRef = useRef<Set<string>>(new Set());
+
+  // ── Undo (Cmd+Z) ────────────────────────────────────────────────────────
+  // Snapshot the fields an action is about to change, so we can put them back.
+  const lastUndoRef = useRef<{ describe: string; revert: () => Promise<void> } | null>(null);
+
+  const snapshotRows = (ids: string[], fields: string[]) =>
+    ids
+      .map(id => {
+        const t = transactions.find(x => x.id === id);
+        if (!t) return null;
+        const o: Record<string, unknown> = { id };
+        for (const f of fields) o[f] = (t as any)[f];
+        return o;
+      })
+      .filter(Boolean) as Record<string, unknown>[];
+
+  const restoreSnapshot = async (snap: Record<string, unknown>[]) => {
+    for (let i = 0; i < snap.length; i += 20) {
+      await Promise.all(snap.slice(i, i + 20).map(o => {
+        const { id, ...fields } = o;
+        return supabase.from('transactions_uploaded').update(fields as never).eq('id', id as string);
+      }));
+    }
+  };
+
+  const registerUndo = (describe: string, snap: Record<string, unknown>[]) => {
+    if (snap.length === 0) { lastUndoRef.current = null; return; }
+    lastUndoRef.current = { describe, revert: () => restoreSnapshot(snap) };
+  };
+
+  const runUndo = async () => {
+    const u = lastUndoRef.current;
+    if (!u) return;
+    lastUndoRef.current = null;
+    try {
+      await u.revert();
+      await loadTransactions();
+      toast.success(`Undone: ${u.describe}`);
+    } catch (e: any) {
+      toast.error(`Could not undo: ${e?.message || 'unknown error'}`);
+    }
+  };
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.key.toLowerCase() !== 'z') return;
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
+      if (lastUndoRef.current) { e.preventDefault(); runUndo(); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /**
+   * After you categorize one transaction, offer to apply that category to every
+   * OTHER unreviewed transaction from the same merchant, and remember it as a
+   * rule so future imports auto-apply. E.g. mark one "Empower" as Travel → "also
+   * mark the other 6 Empower charges as Travel, and remember it?".
+   */
+  const offerBulkApplyLearn = async (editedId: string, category: string, txMode: string, rawDesc: string) => {
+    if (!category || !ownerId || !rawDesc) return;
+    const key = generateMerchantKey(normalizeDescription(rawDesc));
+    if (!key || key.length < 2) return;
+    const declineKey = `${txMode}|${key}`;
+    if (bulkApplyDeclinedRef.current.has(declineKey)) return;
+
+    // Other unreviewed rows from the same merchant + mode that aren't already
+    // this category (approved/edited rows are left alone — those were deliberate).
+    const matches = transactions.filter(t =>
+      t.id !== editedId &&
+      (t.transaction_mode || t.mode) === txMode &&
+      !t.is_split_parent && !t.parent_transaction_id && !t.is_transfer &&
+      ['needs_review', 'suggested', 'ai_suggested'].includes(t.review_status) &&
+      t.final_category !== category &&
+      generateMerchantKey(normalizeDescription(t.description_raw || t.description_normalized || '')) === key,
+    );
+    if (matches.length === 0) return;
+
+    const label = (rawDesc || key).trim().slice(0, 40);
+    if (!confirm(`Also mark ${matches.length} other "${label}" transaction${matches.length === 1 ? '' : 's'} as "${category}", and remember to auto-apply it to future imports?`)) {
+      bulkApplyDeclinedRef.current.add(declineKey);
+      return;
+    }
+
+    const ids = matches.map(t => t.id);
+    const { error } = await supabase.from('transactions_uploaded').update({
+      final_category: category,
+      review_status: 'approved',
+      counts_as_tax_deduction: isDeductibleCategory(txMode as any, category),
+    } as never).in('id', ids);
+    if (error) { toast.error(`Could not apply to the others: ${error.message}`); return; }
+
+    // Learn: a "contains" rule on the merchant key so future imports match it.
+    try {
+      const { data: existingRule } = await supabase.from('categorization_rules')
+        .select('id').eq('owner_id', ownerId!).eq('mode', txMode).eq('is_active', true)
+        .ilike('pattern', key).limit(1);
+      if (!existingRule || existingRule.length === 0) {
+        await supabase.from('categorization_rules').insert({
+          owner_id: ownerId!, mode: txMode, match_type: 'contains', pattern: key,
+          category_output: category, priority: 50, is_active: true,
+        } as never);
+      }
+    } catch (e) { console.warn('Could not save learn-rule:', e); }
+
+    await loadTransactions();
+    toast.success(`Applied "${category}" to ${matches.length} more and saved a rule for next time.`);
+  };
+
   const handleDrawerSave = async (id: string, values: {
     category: string; method: string; notes: string;
     transaction_mode?: string; economic_owner?: string; treatment_type?: string;
@@ -973,6 +1086,9 @@ export default function Expenses() {
     await loadTransactions();
     toast.success('Saved');
     setDetailTx(null);
+    if (values.category) {
+      await offerBulkApplyLearn(id, values.category, (values.transaction_mode ?? tx?.transaction_mode ?? mode) as string, tx?.description_raw || '');
+    }
     return true;
   };
 
@@ -1064,6 +1180,8 @@ export default function Expenses() {
       toast.error('Split parent — edit child rows instead.');
       return;
     }
+    // Snapshot BEFORE the optimistic update so Cmd+Z can restore the old value.
+    const undoSnap = snapshotRows([tx.id], [field, 'review_status', 'counts_as_tax_deduction']);
 
     let nextValue: string | null = value;
 
@@ -1139,17 +1257,23 @@ export default function Expenses() {
       }
     }
 
-    toast.success('Saved');
+    registerUndo('category edit', undoSnap);
+    toast.success('Saved', { action: { label: 'Undo', onClick: runUndo } });
+    if (field === 'final_category' && nextValue) {
+      await offerBulkApplyLearn(tx.id, nextValue, (tx.transaction_mode || tx.mode || mode) as string, tx.description_raw || '');
+    }
   };
 
   const bulkApprove = async () => {
     const selected = filtered.filter(t => selectedIds.has(t.id));
+    const snap = snapshotRows(selected.map(t => t.id), ['review_status', 'final_category', 'counts_as_tax_deduction']);
     const { approved, skipped, failed } = await bulkApproveRows(selected);
     setSelectedIds(new Set());
     if (failed > 0) {
       toast.error(`Approved ${approved}, but ${failed} row${failed === 1 ? '' : 's'} failed to save`);
     } else {
-      toast.success(`Approved ${approved} row${approved === 1 ? '' : 's'}${skipped > 0 ? ` · ${skipped} skipped (no category)` : ''}`);
+      registerUndo(`approve ${approved} row${approved === 1 ? '' : 's'}`, snap);
+      toast.success(`Approved ${approved} row${approved === 1 ? '' : 's'}${skipped > 0 ? ` · ${skipped} skipped (no category)` : ''}`, { action: { label: 'Undo', onClick: runUndo } });
     }
   };
 
@@ -1160,6 +1284,7 @@ export default function Expenses() {
   const bulkMarkTransfer = async () => {
     const ids = visibleSelectedIds();
     if (ids.length === 0) return;
+    const snap = snapshotRows(ids, ['is_transfer', 'exclude_from_expense_totals', 'transfer_type', 'is_non_expense_cash_movement', 'counts_toward_true_personal_spend', 'counts_toward_true_business_spend', 'treatment_type', 'predicted_category', 'final_category', 'review_status']);
     const transferCategory = categories.find(c => c.toLowerCase() === 'transfer') || null;
     const { error } = await supabase.from('transactions_uploaded').update({
       is_transfer: true, exclude_from_expense_totals: true, transfer_type: 'unknown_transfer',
@@ -1174,12 +1299,14 @@ export default function Expenses() {
     if (error) { toast.error(`Failed to mark transfers: ${error.message}`); return; }
     setSelectedIds(new Set());
     await loadTransactions();
-    toast.success(`Marked ${ids.length} rows as transfer`);
+    registerUndo(`mark ${ids.length} as transfer`, snap);
+    toast.success(`Marked ${ids.length} rows as transfer`, { action: { label: 'Undo', onClick: runUndo } });
   };
 
   const bulkSwitchMode = async (targetMode: TransactionMode) => {
     const ids = visibleSelectedIds();
     if (ids.length === 0) return;
+    const snap = snapshotRows(ids, ['transaction_mode', 'mode', 'economic_owner', 'counts_toward_true_personal_spend', 'counts_toward_true_business_spend', 'is_reimbursable', 'reimbursement_status']);
     const updates: Record<string, any> = {
       transaction_mode: targetMode,
       mode: targetMode === 'reimbursable_work' ? 'personal' : targetMode,
@@ -1205,14 +1332,16 @@ export default function Expenses() {
     if (error) { toast.error(`Failed to switch mode: ${error.message}`); return; }
     setSelectedIds(new Set());
     await loadTransactions();
-    toast.success(`Switched ${ids.length} rows to ${MODE_CONFIG[targetMode].label}`);
+    registerUndo(`switch ${ids.length} to ${MODE_CONFIG[targetMode].label}`, snap);
+    toast.success(`Switched ${ids.length} rows to ${MODE_CONFIG[targetMode].label}`, { action: { label: 'Undo', onClick: runUndo } });
   };
 
   const bulkDelete = async () => {
     const ids = visibleSelectedIds();
     if (ids.length === 0) return;
-    if (!confirm(`Delete ${ids.length} selected transaction(s)? This cannot be undone.`)) return;
+    if (!confirm(`Delete ${ids.length} selected transaction(s)? You can undo this with Cmd+Z or the Undo button.`)) return;
 
+    const snap = snapshotRows(ids, ['deleted_at']);
     const idSet = new Set(ids);
     const affectedTxs = transactions.filter(t => idSet.has(t.id));
     const affectedBatchIds = [...new Set(
@@ -1236,7 +1365,8 @@ export default function Expenses() {
 
     setSelectedIds(new Set());
     await loadTransactions();
-    toast.success(`Deleted ${ids.length} rows`);
+    registerUndo(`delete ${ids.length} row${ids.length === 1 ? '' : 's'}`, snap);
+    toast.success(`Deleted ${ids.length} rows`, { action: { label: 'Undo', onClick: runUndo } });
   };
 
   const toggleTransfer = async (tx: Transaction) => {

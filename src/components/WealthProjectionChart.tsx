@@ -44,7 +44,26 @@ const PALETTE = [
 const AGE_KEY = 'wealth_user_age';
 const ASSUMP_KEY = 'wealth_projection_assumptions_v1';
 const OVERRIDE_KEY = 'wealth_projection_user_overrides_v1';
+const SCENARIO_KEY = 'wealth_scenario_v1';
 const TARGET_AGE = 65;
+
+// ---- Scenario transforms -------------------------------------------------
+// A display-time re-scaling applied on top of each asset's already-seeded base
+// annual rate (a CAGR). These do NOT touch the per-account rate seeding or the
+// account-baskets resolution — they only adjust `baseRate` inside the monthly
+// compounding loop for the selected scenario.
+//   Base         → the blended/seeded rate, unchanged (today's expected case).
+//   Conservative → multiplicative haircut, gentler on low-rate assets
+//                  (8% → 4.8%, 12% → 7.2%, 4% → 2.4%), floored at 0%.
+//   Optimistic   → 1.3× boost, capped at +5pp of absolute uplift
+//                  (8% → 10.4%, 12% → 15.6%; a 20% asset → capped at 25%).
+type Scenario = 'conservative' | 'base' | 'optimistic';
+const SCENARIOS: Scenario[] = ['conservative', 'base', 'optimistic'];
+const SCENARIO_RATE: Record<Scenario, (rate: number) => number> = {
+  conservative: (r) => Math.max(0, r * 0.6),
+  base: (r) => r,
+  optimistic: (r) => Math.min(r * 1.3, r + 5),
+};
 
 type Assumption = {
   annual_rate_pct: number; // e.g. 8 = 8%
@@ -199,6 +218,10 @@ export function WealthProjectionChart({
   const [overrides, setOverrides] = useState<Set<string>>(() => loadOverrides());
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [showSettings, setShowSettings] = useState(false);
+  const [scenario, setScenario] = useState<Scenario>(() => {
+    const v = localStorage.getItem(SCENARIO_KEY);
+    return v === 'conservative' || v === 'optimistic' ? v : 'base';
+  });
   
   // Track which auto-seeded rates were clamped down from a higher live value,
   // purely for transparency in the assumptions panel.
@@ -306,6 +329,10 @@ export function WealthProjectionChart({
     localStorage.setItem(AGE_KEY, String(age));
   }, [age]);
 
+  useEffect(() => {
+    try { localStorage.setItem(SCENARIO_KEY, scenario); } catch { /* ignore */ }
+  }, [scenario]);
+
   const colorFor = (id: string) => {
     const idx = accounts.findIndex(a => a.id === id);
     return PALETTE[idx % PALETTE.length];
@@ -355,17 +382,19 @@ export function WealthProjectionChart({
       }
     }
 
-    // Simulate at a given confidence-sigma offset.
+    // Simulate at a given confidence-sigma offset. `rateFn` re-scales each
+    // account's base annual rate for the selected scenario (Conservative /
+    // Base / Optimistic) — a display-time transform on top of the seeded rate.
     // offset = 0 → expected, offset = -0.5/+0.5 → "plausible range"
     // Volatility is dampened for long horizons and hard-capped so 40-year
     // projections stay sane (max ±4pp from the base rate).
-    const sim = (sigmaOffset: number) => {
+    const sim = (sigmaOffset: number, rateFn: (r: number) => number) => {
       const balances: Record<string, number[]> = {};
       for (const a of accounts) {
         const ass = assumptions[a.id];
         if (!ass) continue;
         const vol = volByAccount[a.id] || 16;
-        const baseRate = ass.annual_rate_pct;
+        const baseRate = rateFn(ass.annual_rate_pct);
 
         // Raw offset from volatility (using 0.5σ for a tighter "plausible" band)
         const rawOffset = sigmaOffset * vol * 0.5;
@@ -404,9 +433,10 @@ export function WealthProjectionChart({
       return balances;
     };
 
-    const expected = sim(0);
-    const low      = sim(-1);  // dampened low
-    const high     = sim(1);   // dampened high
+    const rateFn = SCENARIO_RATE[scenario];
+    const expected = sim(0, rateFn);
+    const low      = sim(-1, rateFn);  // dampened low
+    const high     = sim(1, rateFn);   // dampened high
 
     // Sample at year boundaries for a clean axis.
     const rows: any[] = [];
@@ -438,7 +468,7 @@ export function WealthProjectionChart({
       rows.push(row);
     }
     return rows;
-  }, [accounts, assumptions, age, hidden, snapshotsByAccount]);
+  }, [accounts, assumptions, age, hidden, snapshotsByAccount, scenario]);
 
   const finalRow = series[series.length - 1];
   const finalTotal = finalRow?.total || 0;
@@ -515,6 +545,31 @@ export function WealthProjectionChart({
         </div>
       </CardHeader>
       <CardContent className="p-3 pt-1">
+        {/* Scenario selector — re-scales every asset's base rate at display time */}
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5 mb-2.5">
+          <div className="inline-flex rounded-lg border border-border/60 bg-muted/20 p-0.5">
+            {SCENARIOS.map(s => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => setScenario(s)}
+                aria-pressed={scenario === s}
+                className={`px-2.5 py-1 rounded-md text-[10px] font-medium capitalize transition-colors ${
+                  scenario === s
+                    ? 'bg-primary/15 text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+          <p className="text-[9.5px] leading-tight text-muted-foreground max-w-[26rem]">
+            <span className="text-foreground font-medium">Conservative / Base / Optimistic</span>{' '}
+            apply a haircut / your blended rate / an upside boost to every asset.
+          </p>
+        </div>
+
         {/* Hero stat strip */}
         {(() => {
           const startTotal = series[0]?.total || 0;

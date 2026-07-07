@@ -4,8 +4,10 @@ import { useUsageProfile } from '@/hooks/useUsageProfile';
 import { supabase } from '@/integrations/supabase/client';
 import { AppNav } from '@/components/AppNav';
 import { CsvUploader } from '@/components/CsvUploader';
+import { IncomeDetailDrawer } from '@/components/IncomeDetailDrawer';
 import { classifyIncome, INCOME_TYPE_OPTIONS, TAXABLE_STATUS_OPTIONS, MODE_OPTIONS, NON_EARNING_TYPES } from '@/lib/income-classifier';
 import { normalizeDescription, parseDate } from '@/lib/normalizer';
+import { detectTransfer } from '@/lib/transfer-detector';
 import { trimToTransactionHeader } from '@/lib/csv-parser';
 import { fetchAllRows } from '@/lib/fetch-all';
 import { toast } from 'sonner';
@@ -82,6 +84,7 @@ export default function Income() {
   }, [lockedMode]);
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [detailTx, setDetailTx] = useState<IncomeTransaction | null>(null);
   const [showManualEntry, setShowManualEntry] = useState(false);
   const [showUploader, setShowUploader] = useState(false);
   const [csvImportMode, setCsvImportMode] = useState<'personal' | 'business'>('personal');
@@ -300,8 +303,13 @@ export default function Income() {
         const dateIdx = headers.findIndex(h => /date/i.test(h));
         const descIdx = headers.findIndex(h => /desc|memo|narr|detail/i.test(h));
         const amtIdx = headers.findIndex(h => /amount|credit|deposit/i.test(h));
+        // Twin-column bank statements: a separate "money in" (Credit) and "money
+        // out" (Debit). Income only comes from the credit/inflow side.
+        const creditIdx = headers.findIndex(h => /(credit|deposit|money\s*in|inflow|amount\s*received)/i.test(h) && !/debit/i.test(h));
+        const debitIdx = headers.findIndex(h => /(debit|withdrawal|money\s*out|outflow|amount\s*paid)/i.test(h));
+        const hasTwinCols = creditIdx >= 0 && debitIdx >= 0 && creditIdx !== debitIdx;
 
-        if (amtIdx === -1) { toast.error(`${file.name}: No amount column found`); continue; }
+        if (amtIdx === -1 && !hasTwinCols) { toast.error(`${file.name}: No amount column found`); continue; }
 
         // Load existing income for dedup (paginated — a single select silently caps at 1000 rows).
         // DB dates are already ISO (YYYY-MM-DD), so fingerprints match the parsed dates below.
@@ -326,23 +334,40 @@ export default function Income() {
         }
 
         const rows: any[] = [];
-        let skippedDupes = 0;
+        let skippedDupes = 0, skippedOutflows = 0, skippedTransfers = 0;
         for (let i = 1; i < allRows.length; i++) {
           const cols = allRows[i];
           const rawDesc = descIdx >= 0 ? cols[descIdx] : '';
-          const rawAmount = parseFloat((cols[amtIdx] || '0').replace(/[$,]/g, ''));
-          if (isNaN(rawAmount) || rawAmount === 0) continue;
-          // Accept negative amounts (some banks represent credits as negative)
-          const normalizedAmount = Math.abs(rawAmount);
 
+          // Income is money coming IN only. Determine the inflow amount:
+          //  - twin columns → only the Credit column counts;
+          //  - single amount column → only POSITIVE values (negatives are
+          //    withdrawals/payments, i.e. money OUT — never income).
+          let inflow: number;
+          if (hasTwinCols) {
+            const c = parseFloat((cols[creditIdx] || '0').replace(/[$,]/g, ''));
+            inflow = !isNaN(c) && c > 0 ? c : 0;
+          } else {
+            const amt = parseFloat((cols[amtIdx] || '0').replace(/[$,]/g, ''));
+            inflow = !isNaN(amt) && amt > 0 ? amt : 0;
+          }
+          if (inflow <= 0) { skippedOutflows++; continue; }
+
+          // Exclude money that isn't income even when it comes in: transfers
+          // between your own accounts, moves into investments (Gemini,
+          // Wealthfront…), and credit-card payments. This is what was wrongly
+          // inflating income (e.g. moving a paycheck into Gemini to invest).
+          const transfer = detectTransfer(rawDesc);
           const classification = classifyIncome(rawDesc);
+          if (transfer.isTransfer || classification.income_type === 'transfer') { skippedTransfers++; continue; }
+
           const normalized = normalizeDescription(rawDesc);
           const dateVal = dateIdx >= 0 ? cols[dateIdx] : null;
           // Normalize to ISO (YYYY-MM-DD) so the fingerprint matches DB rows on re-import
           const isoDate = dateVal ? parseDate(dateVal) : null;
 
           // Fingerprint-based dedup
-          const fp = `income|${isoDate || ''}|${normalizedAmount}|${(normalized || '').toLowerCase()}`;
+          const fp = `income|${isoDate || ''}|${inflow}|${(normalized || '').toLowerCase()}`;
           if (existingFingerprints.has(fp)) { skippedDupes++; continue; }
           existingFingerprints.add(fp);
 
@@ -351,7 +376,7 @@ export default function Income() {
             date: isoDate,
             description_raw: rawDesc || null,
             description_normalized: normalized || null,
-            amount: normalizedAmount,
+            amount: inflow,
             income_type: classification.income_type,
             taxable_status: classification.taxable_status,
             // Honor user-selected mode for the import; the classifier's suggested_mode is a fallback hint
@@ -361,12 +386,20 @@ export default function Income() {
           });
         }
 
-        if (rows.length === 0 && skippedDupes > 0) { toast.info(`${file.name}: All ${skippedDupes} rows are duplicates`); continue; }
-        if (rows.length === 0) { toast.error(`${file.name}: No valid income rows`); continue; }
+        const skipNote = [
+          skippedOutflows > 0 ? `${skippedOutflows} money-out` : null,
+          skippedTransfers > 0 ? `${skippedTransfers} transfer${skippedTransfers === 1 ? '' : 's'}/investments` : null,
+          skippedDupes > 0 ? `${skippedDupes} duplicate${skippedDupes === 1 ? '' : 's'}` : null,
+        ].filter(Boolean).join(', ');
+
+        if (rows.length === 0) {
+          toast.info(`${file.name}: no income to add${skipNote ? ` — skipped ${skipNote}` : ''}.`);
+          continue;
+        }
 
         const { error } = await supabase.from('income_transactions').insert(rows);
         if (error) { toast.error(`${file.name}: Import failed`); console.error(error); }
-        else toast.success(`${file.name}: ${rows.length} imported${skippedDupes > 0 ? `, ${skippedDupes} duplicates skipped` : ''}`);
+        else toast.success(`${file.name}: ${rows.length} income row${rows.length === 1 ? '' : 's'} imported${skipNote ? ` · skipped ${skipNote}` : ''}`);
       }
       setShowUploader(false);
       fetchTransactions();
@@ -749,12 +782,16 @@ export default function Income() {
                   No income transactions yet. Import a CSV or add an entry manually.
                 </TableCell></TableRow>
               ) : pagedTransactions.map(tx => (
-                <TableRow key={tx.id} className="border-border/50">
-                  <TableCell><Checkbox checked={selectedIds.has(tx.id)} onCheckedChange={() => toggleOne(tx.id)} /></TableCell>
+                <TableRow
+                  key={tx.id}
+                  className="border-border/50 cursor-pointer hover:bg-secondary/20 transition-colors"
+                  onClick={() => setDetailTx(tx)}
+                >
+                  <TableCell onClick={e => e.stopPropagation()}><Checkbox checked={selectedIds.has(tx.id)} onCheckedChange={() => toggleOne(tx.id)} /></TableCell>
                   <TableCell className="text-sm font-mono text-muted-foreground">{tx.date || '—'}</TableCell>
                   <TableCell className="text-sm text-foreground max-w-[240px] truncate">{tx.description_raw || '—'}</TableCell>
                   <TableCell className="text-right font-mono text-sm text-success">{tx.amount != null ? fmt(tx.amount) : '—'}</TableCell>
-                  <TableCell>
+                  <TableCell onClick={e => e.stopPropagation()}>
                     <Select value={tx.mode} onValueChange={v => updateField(tx.id, 'mode', v)}>
                       <SelectTrigger className="h-7 text-xs border-0 bg-transparent p-0 w-auto">
                         <Badge variant="outline" className={`text-xs ${tx.mode === 'business' ? 'bg-primary/15 text-primary border-primary/25' : 'bg-secondary text-foreground border-border'}`}>
@@ -764,7 +801,7 @@ export default function Income() {
                       <SelectContent>{MODE_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
                     </Select>
                   </TableCell>
-                  <TableCell>
+                  <TableCell onClick={e => e.stopPropagation()}>
                     <Select value={tx.income_type} onValueChange={v => updateField(tx.id, 'income_type', v)}>
                       <SelectTrigger className="h-7 text-xs border-0 bg-transparent p-0 w-auto">
                         <Badge variant="outline" className={`text-xs ${INCOME_TYPE_BADGE[tx.income_type]?.class || ''}`}>
@@ -774,7 +811,7 @@ export default function Income() {
                       <SelectContent>{INCOME_TYPE_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
                     </Select>
                   </TableCell>
-                  <TableCell>
+                  <TableCell onClick={e => e.stopPropagation()}>
                     <Select value={tx.taxable_status} onValueChange={v => updateField(tx.id, 'taxable_status', v)}>
                       <SelectTrigger className="h-7 text-xs border-0 bg-transparent p-0 w-auto">
                         <Badge variant="outline" className={`text-xs ${tx.taxable_status === 'taxable' ? 'bg-destructive/15 text-destructive border-destructive/25' : tx.taxable_status === 'non_taxable' ? 'bg-success/15 text-success border-success/25' : 'bg-muted text-muted-foreground border-border'}`}>
@@ -790,7 +827,7 @@ export default function Income() {
                       {tx.status === 'needs_review' ? 'Review' : tx.status === 'auto_classified' ? 'Auto' : 'Approved'}
                     </Badge>
                   </TableCell>
-                  <TableCell>
+                  <TableCell onClick={e => e.stopPropagation()}>
                     <div className="flex gap-1">
                       {tx.status !== 'approved' && (
                         <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => updateField(tx.id, 'status', 'approved')} title="Approve">
@@ -841,6 +878,14 @@ export default function Income() {
           </Button>
         </div>
       </div>
+
+      {/* Row detail drawer — click a row to view the full transaction + edit/delete */}
+      <IncomeDetailDrawer
+        transaction={detailTx}
+        open={!!detailTx}
+        onClose={() => setDetailTx(null)}
+        onSaved={fetchTransactions}
+      />
 
       {/* Manual Entry Dialog */}
       <Dialog open={showManualEntry} onOpenChange={setShowManualEntry}>
