@@ -47,9 +47,11 @@ export function IncomeCleanupDialog({
   const [loading, setLoading] = useState(false);
   const [working, setWorking] = useState(false);
   const [nonIncome, setNonIncome] = useState<(Row & { reason: string })[]>([]);
+  const [dupes, setDupes] = useState<Row[]>([]);
   const [groups, setGroups] = useState<ImportGroup[]>([]);
   // In-page confirmation (no native confirm() — nicer, and drivable via automation).
   const [confirmRemove, setConfirmRemove] = useState(false);
+  const [confirmDupes, setConfirmDupes] = useState(false);
   const [confirmDeleteKey, setConfirmDeleteKey] = useState<string | null>(null);
 
   const scan = async () => {
@@ -65,10 +67,11 @@ export function IncomeCleanupDialog({
         .range(from, to));
 
       const flagged: (Row & { reason: string })[] = [];
+      const flaggedIds = new Set<string>();
       const byFile = new Map<string, ImportGroup>();
       for (const r of rows) {
         const reason = reasonFor(r.description_raw || '');
-        if (reason) flagged.push({ ...r, reason });
+        if (reason) { flagged.push({ ...r, reason }); flaggedIds.add(r.id); }
 
         const name = r.source_file_name || '(manually added / unknown source)';
         const key = `${r.mode}|${name}`;
@@ -80,7 +83,33 @@ export function IncomeCleanupDialog({
         if (r.date && (!g.maxDate || r.date > g.maxDate)) g.maxDate = r.date;
         byFile.set(key, g);
       }
+
+      // Duplicate deposits: the SAME (mode, date, amount) imported twice — once
+      // with a real merchant name, once as a bare "CREDIT" (from a Details
+      // column). Keep the named one, flag the bare "CREDIT" twin for removal.
+      const isBareCredit = (d: string | null) => /^credit$/i.test((d || '').trim());
+      const isReal = (d: string | null) => {
+        const s = (d || '').trim();
+        return s.length > 3 && !/^(credit|debit|check)$/i.test(s);
+      };
+      const byAmt = new Map<string, Row[]>();
+      for (const r of rows) {
+        const k = `${r.mode}|${r.date || ''}|${Math.round((Number(r.amount) || 0) * 100)}`;
+        const arr = byAmt.get(k) || [];
+        arr.push(r);
+        byAmt.set(k, arr);
+      }
+      const dupeList: Row[] = [];
+      for (const arr of byAmt.values()) {
+        if (arr.length < 2) continue;
+        if (!arr.some(r => isReal(r.description_raw))) continue;
+        for (const r of arr) {
+          if (isBareCredit(r.description_raw) && !flaggedIds.has(r.id)) dupeList.push(r);
+        }
+      }
+
       setNonIncome(flagged);
+      setDupes(dupeList);
       setGroups([...byFile.values()].sort((a, b) => b.count - a.count));
     } catch (e: any) {
       toast.error(`Scan failed: ${e?.message || 'unknown error'}`);
@@ -114,6 +143,11 @@ export function IncomeCleanupDialog({
   const removeNonIncome = async () => {
     setConfirmRemove(false);
     await softDelete(nonIncome.map(r => r.id), 'non-income rows');
+  };
+
+  const removeDupes = async () => {
+    setConfirmDupes(false);
+    await softDelete(dupes.map(r => r.id), 'duplicate deposits');
   };
 
   const deleteImport = async (g: ImportGroup) => {
@@ -187,6 +221,33 @@ export function IncomeCleanupDialog({
                 </>
               )}
             </div>
+
+            {/* Section A2 — duplicate deposits */}
+            {dupes.length > 0 && (
+              <div className="glass-panel-sm p-3">
+                <div className="flex items-center gap-2 mb-1">
+                  <AlertTriangle className="h-4 w-4 text-warning" />
+                  <h3 className="text-sm font-medium text-foreground">Remove duplicate deposits</h3>
+                </div>
+                <p className="text-xs text-muted-foreground mb-2">
+                  The same deposit imported twice — once with a real name, once as a bare "CREDIT". Keeps the
+                  named copy, removes the duplicate. Found <span className="font-semibold text-warning">{dupes.length}</span>.
+                </p>
+                {confirmDupes ? (
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[11px] text-warning">Remove these {dupes.length} duplicates?</span>
+                    <Button size="sm" variant="destructive" disabled={working} onClick={removeDupes} className="gap-1.5 h-7">
+                      <Trash2 className="h-3.5 w-3.5" /> Yes, remove
+                    </Button>
+                    <Button size="sm" variant="outline" disabled={working} onClick={() => setConfirmDupes(false)} className="h-7">Cancel</Button>
+                  </div>
+                ) : (
+                  <Button size="sm" variant="destructive" disabled={working} onClick={() => setConfirmDupes(true)} className="gap-1.5">
+                    <Trash2 className="h-3.5 w-3.5" /> Remove {dupes.length} duplicate{dupes.length === 1 ? '' : 's'}
+                  </Button>
+                )}
+              </div>
+            )}
 
             {/* Section B — delete a whole import */}
             <div className="glass-panel-sm p-3">
