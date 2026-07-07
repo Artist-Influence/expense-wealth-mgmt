@@ -43,6 +43,9 @@ export function IncomeCleanupDialog({
   const [working, setWorking] = useState(false);
   const [nonIncome, setNonIncome] = useState<(Row & { reason: string })[]>([]);
   const [groups, setGroups] = useState<ImportGroup[]>([]);
+  // In-page confirmation (no native confirm() — nicer, and drivable via automation).
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  const [confirmDeleteKey, setConfirmDeleteKey] = useState<string | null>(null);
 
   const scan = async () => {
     if (!ownerId) return;
@@ -103,14 +106,14 @@ export function IncomeCleanupDialog({
     }
   };
 
-  const removeNonIncome = () => {
-    if (!confirm(`Remove ${nonIncome.length} row(s) that look like transfers, investments, or money going OUT — none of these are income. This can be undone by re-importing.`)) return;
-    softDelete(nonIncome.map(r => r.id), 'non-income rows');
+  const removeNonIncome = async () => {
+    setConfirmRemove(false);
+    await softDelete(nonIncome.map(r => r.id), 'non-income rows');
   };
 
-  const deleteImport = (g: ImportGroup) => {
-    if (!confirm(`Delete the entire "${g.name}" import (${g.count} ${g.mode} rows, ${fmt(g.total)})? Use this to wipe a bad statement so you can re-upload it cleanly.`)) return;
-    softDelete(g.ids, `rows from ${g.name}`);
+  const deleteImport = async (g: ImportGroup) => {
+    setConfirmDeleteKey(null);
+    await softDelete(g.ids, `rows from ${g.name}`);
   };
 
   const personalFlagged = nonIncome.filter(r => r.mode === 'personal').length;
@@ -163,9 +166,19 @@ export function IncomeCleanupDialog({
                       <div className="px-2 py-1 text-[11px] text-muted-foreground">…and {nonIncome.length - 40} more</div>
                     )}
                   </div>
-                  <Button size="sm" variant="destructive" disabled={working} onClick={removeNonIncome} className="gap-1.5">
-                    <Trash2 className="h-3.5 w-3.5" /> Remove {nonIncome.length} non-income row{nonIncome.length === 1 ? '' : 's'}
-                  </Button>
+                  {confirmRemove ? (
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-[11px] text-warning">Remove these {nonIncome.length}? (Restore later by re-importing.)</span>
+                      <Button size="sm" variant="destructive" disabled={working} onClick={removeNonIncome} className="gap-1.5 h-7">
+                        <Trash2 className="h-3.5 w-3.5" /> Yes, remove
+                      </Button>
+                      <Button size="sm" variant="outline" disabled={working} onClick={() => setConfirmRemove(false)} className="h-7">Cancel</Button>
+                    </div>
+                  ) : (
+                    <Button size="sm" variant="destructive" disabled={working} onClick={() => setConfirmRemove(true)} className="gap-1.5">
+                      <Trash2 className="h-3.5 w-3.5" /> Remove {nonIncome.length} non-income row{nonIncome.length === 1 ? '' : 's'}
+                    </Button>
+                  )}
                 </>
               )}
             </div>
@@ -193,9 +206,16 @@ export function IncomeCleanupDialog({
                           {g.minDate && g.maxDate ? ` · ${g.minDate} → ${g.maxDate}` : ''}
                         </p>
                       </div>
-                      <Button size="sm" variant="outline" disabled={working} onClick={() => deleteImport(g)} className="gap-1 shrink-0 h-7">
-                        <Trash2 className="h-3 w-3" /> Delete
-                      </Button>
+                      {confirmDeleteKey === g.key ? (
+                        <span className="flex items-center gap-1 shrink-0">
+                          <Button size="sm" variant="destructive" disabled={working} onClick={() => deleteImport(g)} className="gap-1 h-7">Confirm</Button>
+                          <Button size="sm" variant="outline" disabled={working} onClick={() => setConfirmDeleteKey(null)} className="h-7">Cancel</Button>
+                        </span>
+                      ) : (
+                        <Button size="sm" variant="outline" disabled={working} onClick={() => setConfirmDeleteKey(g.key)} className="gap-1 shrink-0 h-7">
+                          <Trash2 className="h-3 w-3" /> Delete
+                        </Button>
+                      )}
                     </div>
                   ))}
                 </div>
