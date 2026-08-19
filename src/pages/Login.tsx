@@ -53,7 +53,14 @@ export default function Login() {
 
     const { data, error: authError } = await supabase.auth.signInWithPassword({ email, password });
     if (authError) {
-      setError(authError.message);
+      // A network-level failure (not a wrong password) almost always means the
+      // Lovable Cloud backend went to sleep after inactivity; it wakes in ~1-2
+      // minutes once traffic arrives, so tell the user to retry instead of
+      // showing a raw "Failed to fetch".
+      const msg = /fetch|network|load failed/i.test(authError.message)
+        ? 'The backend is waking up from sleep. Wait about a minute, then try again.'
+        : authError.message;
+      setError(msg);
       setLoading(false);
       return;
     }
