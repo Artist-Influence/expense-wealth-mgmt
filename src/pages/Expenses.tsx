@@ -1593,6 +1593,33 @@ export default function Expenses() {
     if (!user) return;
     const { id, file, method, mapping, detectedHeaders } = item;
     try {
+      // MODE-MISMATCH GUARD (2026-08-19): uploads inherit the ACTIVE TAB's mode,
+      // and the duplicate fingerprint is mode-scoped — so the same statement
+      // imported on the wrong tab bypassed dedupe entirely and blended business
+      // activity into personal (Chase 8886/2662, July 2026). Refuse a file whose
+      // detected account belongs to the other mode.
+      const detectedMethod = method ? paymentMethods.find(m => m.name === method) : null;
+      if (detectedMethod?.mode && detectedMethod.mode !== categoryMode) {
+        const target = detectedMethod.mode === 'business' ? 'Business' : 'Personal';
+        updateItem(id, { status: 'error', error: `"${file.name}" looks like ${detectedMethod.name}, a ${detectedMethod.mode} account. Switch to the ${target} tab to import it.` });
+        return;
+      }
+      // Cross-mode same-file guard for files whose account can't be detected:
+      // the same file already sitting in the OTHER mode means importing it here
+      // would double-count every row.
+      const { data: otherModeRows } = await supabase
+        .from('transactions_uploaded')
+        .select('id')
+        .eq('owner_id', ownerId!)
+        .eq('source_file_name', file.name)
+        .neq('mode', categoryMode)
+        .limit(1);
+      if (otherModeRows && otherModeRows.length > 0) {
+        const other = categoryMode === 'business' ? 'Personal' : 'Business';
+        updateItem(id, { status: 'error', error: `"${file.name}" was already imported on the ${other} tab. Delete that import first if it was wrong — importing it here too would double-count every row.` });
+        return;
+      }
+
       const appSettings = await loadSettings();
 
       const { data: catData } = await supabase
