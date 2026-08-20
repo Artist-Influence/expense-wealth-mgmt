@@ -1,5 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { createOpenAICompatible } from "npm:@ai-sdk/openai-compatible";
+import { createAnthropic } from "npm:@ai-sdk/anthropic";
 import { convertToModelMessages, streamText, tool, stepCountIs, type UIMessage } from "npm:ai";
 import { z } from "npm:zod";
 import {
@@ -227,20 +227,16 @@ Deno.serve(async (req) => {
     }
 
 
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) {
+    const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
+    if (!ANTHROPIC_API_KEY) {
       return new Response(JSON.stringify({ error: "AI is not configured" }), {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    const provider = createOpenAICompatible({
-      name: "lovable",
-      baseURL: "https://ai.gateway.lovable.dev/v1",
-      headers: { "Lovable-API-Key": LOVABLE_API_KEY, "X-Lovable-AIG-SDK": "vercel-ai-sdk" },
-    });
-    const model = provider("google/gemini-3-flash-preview");
+    const anthropic = createAnthropic({ apiKey: ANTHROPIC_API_KEY });
+    const model = anthropic("claude-sonnet-5");
 
     const dateCtx = getDateContext();
 

@@ -73,9 +73,9 @@ serve(async (req) => {
       });
     }
 
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) {
-      throw new Error("LOVABLE_API_KEY is not configured");
+    const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
+    if (!ANTHROPIC_API_KEY) {
+      throw new Error("ANTHROPIC_API_KEY is not configured");
     }
 
     const categoryList = allowedCategories.join(", ");
@@ -108,53 +108,50 @@ Rules:
 Transactions:
 ${descriptionList}`;
 
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
+        "x-api-key": ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01",
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-3-flash-preview",
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 8192,
+        system: systemPrompt,
         messages: [
-          { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt },
         ],
         tools: [
           {
-            type: "function",
-            function: {
-              name: "categorize_transactions",
-              description: "Return categorization results for each transaction",
-              parameters: {
-                type: "object",
-                properties: {
-                  results: {
-                    type: "array",
-                    items: {
-                      type: "object",
-                      properties: {
-                        index: { type: "number", description: "Transaction index from input" },
-                        category: { type: "string", description: "Best matching category from allowed list, or null if unknown", nullable: true },
-                        confidence: { type: "number", description: "Confidence score 0-95" },
-                        explanation: { type: "string", description: "Brief reason for the categorization" },
-                        inferred_merchant: { type: "string", description: "What merchant/entity this likely is" },
-                        suggested_mode: { type: "string", description: "Suggested transaction mode: personal, business, or reimbursable_work", enum: ["personal", "business", "reimbursable_work"] },
-                        suggested_tax_treatment: { type: "string", description: "Suggested tax treatment", enum: ["unknown", "likely_deductible", "likely_nondeductible", "capital_or_investment", "transfer_nonexpense"] },
-                        likely_reimbursable: { type: "boolean", description: "Whether this is likely a reimbursable work expense" },
-                      },
-                      required: ["index", "category", "confidence", "explanation", "inferred_merchant", "suggested_mode", "suggested_tax_treatment", "likely_reimbursable"],
-                      additionalProperties: false,
+            name: "categorize_transactions",
+            description: "Return categorization results for each transaction",
+            input_schema: {
+              type: "object",
+              properties: {
+                results: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      index: { type: "number", description: "Transaction index from input" },
+                      category: { type: "string", description: "Best matching category from allowed list, or null if unknown" },
+                      confidence: { type: "number", description: "Confidence score 0-95" },
+                      explanation: { type: "string", description: "Brief reason for the categorization" },
+                      inferred_merchant: { type: "string", description: "What merchant/entity this likely is" },
+                      suggested_mode: { type: "string", description: "Suggested transaction mode", enum: ["personal", "business", "reimbursable_work"] },
+                      suggested_tax_treatment: { type: "string", description: "Suggested tax treatment", enum: ["unknown", "likely_deductible", "likely_nondeductible", "capital_or_investment", "transfer_nonexpense"] },
+                      likely_reimbursable: { type: "boolean", description: "Whether this is likely a reimbursable work expense" },
                     },
+                    required: ["index", "category", "confidence", "explanation", "inferred_merchant", "suggested_mode", "suggested_tax_treatment", "likely_reimbursable"],
                   },
                 },
-                required: ["results"],
-                additionalProperties: false,
               },
+              required: ["results"],
             },
           },
         ],
-        tool_choice: { type: "function", function: { name: "categorize_transactions" } },
+        tool_choice: { type: "tool", name: "categorize_transactions" },
       }),
     });
 
@@ -165,15 +162,9 @@ ${descriptionList}`;
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
-      if (response.status === 402) {
-        return new Response(JSON.stringify({ error: "Payment required. Please add credits to your workspace." }), {
-          status: 402,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
       const errText = await response.text();
-      console.error("AI gateway error:", response.status, errText);
-      return new Response(JSON.stringify({ error: "AI gateway error", details: errText }), {
+      console.error("Anthropic API error:", response.status, errText);
+      return new Response(JSON.stringify({ error: "AI provider error", details: errText }), {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -181,25 +172,18 @@ ${descriptionList}`;
 
     const data = await response.json();
 
-    const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
-    if (!toolCall) {
-      console.error("No tool call in response:", JSON.stringify(data));
+    const toolUse = Array.isArray(data.content)
+      ? data.content.find((b: any) => b.type === "tool_use")
+      : null;
+    if (!toolUse) {
+      console.error("No tool_use block in response:", JSON.stringify(data));
       return new Response(JSON.stringify({ error: "AI did not return structured output", results: [] }), {
         status: 200,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    let parsed;
-    try {
-      parsed = JSON.parse(toolCall.function.arguments);
-    } catch {
-      console.error("Failed to parse tool call arguments:", toolCall.function.arguments);
-      return new Response(JSON.stringify({ error: "Failed to parse AI response", results: [] }), {
-        status: 200,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    const parsed = toolUse.input;
 
     const validated = (parsed.results || []).map((r: any) => {
       const catLower = r.category ? r.category.toLowerCase() : null;
