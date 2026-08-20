@@ -275,6 +275,11 @@ export default function Expenses() {
       setMethodFilter(method);
       consumed = true;
     }
+    const extra = searchParams.get('extra');
+    if (extra) {
+      setExtraFilter(extra);
+      consumed = true;
+    }
     const batch = searchParams.get('batch');
     if (batch) {
       // Scope to just this upload's rows, showing all of them regardless of status.

@@ -91,10 +91,14 @@ function downloadCsv(filename: string, headers: string[], rows: string[][]) {
 export default function Accountant() {
   const { user, ownerId, isAccountant } = useAuth();
   const [selectedExport, setSelectedExport] = useState<ExportType>('expense_ledger');
-  const [period, setPeriod] = useState('month');
+  // Default to the full year (YTD) rather than the current month — a fresh month
+  // is usually near-empty, which made the ledgers look broken.
+  // Default to the full year (YTD) rather than the current month — a fresh month
+  // is usually near-empty, which made the ledgers look broken.
+  const [period, setPeriod] = useState('year');
   const [selection, setSelection] = useState(() => {
-    const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const y = new Date().getFullYear();
+    return `${y}-01:${y}-12`;
   });
   const [modeFilter, setModeFilter] = useState('all');
 

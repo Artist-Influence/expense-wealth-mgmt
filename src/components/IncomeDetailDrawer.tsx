@@ -17,6 +17,7 @@ interface IncomeTransaction {
   id: string;
   date: string | null;
   description_raw: string | null;
+  description_normalized: string | null;
   amount: number | null;
   income_type: string;
   taxable_status: string;
@@ -77,7 +78,32 @@ export function IncomeDetailDrawer({ transaction: tx, open, onClose, onSaved, re
         } as never)
         .eq('id', tx.id);
       if (error) { toast.error('Failed to save'); console.error(error); return; }
-      toast.success('Income entry updated');
+
+      // Learn from this edit: apply the same classification to OTHER income rows
+      // from the same payer that the user hasn't already reviewed, so a single
+      // "business revenue / taxable" decision fixes every matching row at once.
+      // Never overwrites rows the user already approved or edited.
+      const key = tx.description_normalized;
+      let propagated = 0;
+      if (key) {
+        const { data: applied, error: propErr } = await supabase
+          .from('income_transactions')
+          .update({
+            income_type: editValues.income_type,
+            taxable_status: editValues.taxable_status,
+            mode: editValues.mode,
+          } as never)
+          .eq('description_normalized', key)
+          .neq('id', tx.id)
+          .not('status', 'in', '("approved","edited")')
+          .is('deleted_at', null)
+          .select('id');
+        if (!propErr && applied) propagated = applied.length;
+      }
+
+      toast.success(propagated > 0
+        ? `Income entry updated · applied to ${propagated} more from the same source`
+        : 'Income entry updated');
       onSaved();
       onClose();
     } finally {

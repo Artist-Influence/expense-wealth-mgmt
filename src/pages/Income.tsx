@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { useUsageProfile } from '@/hooks/useUsageProfile';
 import { supabase } from '@/integrations/supabase/client';
@@ -78,6 +79,17 @@ export default function Income() {
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [filterMode, setFilterMode] = useState<'all' | 'personal' | 'business'>(isInvestor ? 'business' : 'all');
   const [page, setPage] = useState(0);
+
+  // Honor deep-links from the Health Check panel: /income?status=needs_review&mode=personal
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const status = searchParams.get('status');
+    const mode = searchParams.get('mode');
+    let consumed = false;
+    if (status) { setFilterStatus(status); consumed = true; }
+    if (mode === 'personal' || mode === 'business') { setFilterMode(mode); consumed = true; }
+    if (consumed) setSearchParams({}, { replace: true });
+  }, [searchParams, setSearchParams]);
 
   // Lock the view to the usage profile when it isn't "both"
   useEffect(() => {

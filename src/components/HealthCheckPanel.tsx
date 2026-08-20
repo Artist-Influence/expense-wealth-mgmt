@@ -144,10 +144,10 @@ export function HealthCheckPanel({ open, onClose, initialSummary, onSummaryChang
                 </div>
                 <div className="flex gap-1 shrink-0">
                   <Button asChild size="sm" variant="outline" className="h-7 text-xs">
-                    <Link to="/" onClick={onClose}>Expenses</Link>
+                    <Link to="/?review=unreviewed" onClick={onClose}>Expenses</Link>
                   </Button>
                   <Button asChild size="sm" variant="outline" className="h-7 text-xs">
-                    <Link to="/income" onClick={onClose}>Income</Link>
+                    <Link to="/income?status=needs_review" onClick={onClose}>Income</Link>
                   </Button>
                 </div>
               </div>
@@ -169,7 +169,7 @@ export function HealthCheckPanel({ open, onClose, initialSummary, onSummaryChang
                   </div>
                 </div>
                 <Button asChild size="sm" variant="outline" disabled={summary.staleReviews.count === 0} className="h-7 text-xs shrink-0">
-                  <Link to="/" onClick={onClose}>Review</Link>
+                  <Link to="/?review=unreviewed" onClick={onClose}>Review</Link>
                 </Button>
               </div>
 
@@ -188,7 +188,7 @@ export function HealthCheckPanel({ open, onClose, initialSummary, onSummaryChang
                   </div>
                 </div>
                 <Button asChild size="sm" variant="outline" disabled={summary.parseErrors.count === 0} className="h-7 text-xs shrink-0">
-                  <Link to="/" onClick={onClose}>View</Link>
+                  <Link to="/?extra=parse_errors" onClick={onClose}>View</Link>
                 </Button>
               </div>
             </div>
