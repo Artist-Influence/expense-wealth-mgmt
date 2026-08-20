@@ -518,11 +518,11 @@ export default function Expenses() {
    */
   const reapplyMemory = async () => {
     if (!user || !ownerId) return;
-    if (!confirm('Categorize all uncategorized transactions across Personal and Business? Uses everything the app knows (your learned merchants, rules, and built-in knowledge of common merchants). Anything you\'ve already approved or edited stays untouched.')) return;
+    if (!confirm('Categorize all uncategorized transactions across Personal and Business? Uses everything the app knows (your learned merchants, rules, and built-in knowledge), then falls back to the AI assistant for anything left over. Anything you\'ve already approved or edited stays untouched.')) return;
     setReapplyingMemory(true);
     const tId = toast.loading('Categorizing your transactions…');
     try {
-      let autoCount = 0, suggestCount = 0, unchanged = 0, failed = 0, processed = 0, noCatModes = 0;
+      let autoCount = 0, suggestCount = 0, aiCount = 0, unchanged = 0, failed = 0, processed = 0, noCatModes = 0;
 
       for (const m of ['personal', 'business'] as const) {
         // Categories for THIS mode — the knowledge/memory match must resolve to
@@ -596,8 +596,14 @@ export default function Expenses() {
         const results = await categorizeTransactions(parsed, m, ownerId, undefined, allowedCategories);
 
         const updates: { id: string; payload: Record<string, unknown> }[] = [];
+        const aiCandidates: { index: number; description_raw: string; description_normalized: string }[] = [];
         results.forEach((result, i) => {
-          if (!result.predicted_category) { unchanged++; return; }
+          if (!result.predicted_category) {
+            // Local engine (memory + rules + knowledge) couldn't resolve it —
+            // queue for the Claude AI fallback below instead of leaving it blank.
+            aiCandidates.push({ index: i, description_raw: parsed[i].description_raw, description_normalized: parsed[i].description_normalized });
+            return;
+          }
 
           // Auto-approve strong exact-history matches, mirroring the import path.
           const shouldAutoApprove = result.review_status === 'auto_categorized'
@@ -625,6 +631,32 @@ export default function Expenses() {
           });
         });
 
+        // ── AI fallback ────────────────────────────────────────────────
+        // Send everything the local engine left blank to Claude (categorize-ai).
+        // Results come back as 'ai_suggested' for the user to approve, never
+        // auto-approved — the AI proposes, you confirm.
+        if (aiCandidates.length > 0) {
+          const aiMap = await categorizeWithAI(aiCandidates, m, ownerId, allowedCategories);
+          let aiResolved = 0;
+          for (const [i, ai] of aiMap) {
+            if (!ai.category) continue;
+            aiResolved++;
+            aiCount++;
+            updates.push({
+              id: rows[i].id,
+              payload: {
+                predicted_category: ai.category,
+                review_status: 'ai_suggested',
+                match_source: 'ai',
+                match_explanation: ai.explanation,
+                confidence: ai.confidence,
+                counts_as_tax_deduction: isDeductibleCategory(m, ai.category),
+              },
+            });
+          }
+          unchanged += aiCandidates.length - aiResolved;
+        }
+
         const CONCURRENCY = 20;
         for (let i = 0; i < updates.length; i += CONCURRENCY) {
           const res = await Promise.all(updates.slice(i, i + CONCURRENCY).map(u =>
@@ -640,9 +672,9 @@ export default function Expenses() {
       } else if (processed === 0) {
         toast.success('Nothing to categorize — every transaction is already reviewed.');
       } else if (failed > 0) {
-        toast.error(`Categorized with ${failed} failure${failed === 1 ? '' : 's'}. ${autoCount} auto-labeled, ${suggestCount} suggested.`);
+        toast.error(`Categorized with ${failed} failure${failed === 1 ? '' : 's'}. ${autoCount} auto-labeled, ${suggestCount} suggested, ${aiCount} by AI.`);
       } else {
-        toast.success(`Done: ${autoCount} auto-labeled · ${suggestCount} suggested · ${unchanged} unrecognized (need a first review).`);
+        toast.success(`Done: ${autoCount} auto-labeled · ${suggestCount} suggested · ${aiCount} AI-suggested · ${unchanged} still unrecognized.`);
       }
       await loadTransactions();
     } catch (err: any) {
