@@ -9,9 +9,8 @@ import { describe, it, expect } from "vitest";
  * A correctly-secured table returns an empty array (RLS filters all rows) — never
  * actual financial data — to an unauthenticated caller.
  */
-const SUPABASE_URL = "https://hqfazvpnthsyxpzytggs.supabase.co";
-const ANON_KEY =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhxZmF6dnBudGhzeXhwenl0Z2dzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI4MzM2NDcsImV4cCI6MjA4ODQwOTY0N30.u4ylCwFpRbcVZqfF75hCmzf7ri3jOnietbK9wnT_VJc";
+const SUPABASE_URL = "https://syfwesqaicltboztnagf.supabase.co";
+const ANON_KEY = "sb_publishable_qJNTRZeAmkyVPHq5SNx18Q_le9h7VM9";
 
 const SENSITIVE_TABLES = [
   "transactions_uploaded",
