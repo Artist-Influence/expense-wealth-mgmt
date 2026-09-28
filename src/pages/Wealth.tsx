@@ -18,6 +18,7 @@ import { cn } from '@/lib/utils';
 import { useState } from 'react';
 import { toast } from 'sonner';
 import { fetchAllRows } from '@/lib/fetch-all';
+import { assignContributions, patternWords, realGrowth, type ContributionTx, type Flow } from '@/lib/account-growth';
 import { ModeScopeToggle, readPersistedScope, type ModeScope } from '@/components/ModeScopeToggle';
 import { useUsageProfile } from '@/hooks/useUsageProfile';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
@@ -78,6 +79,8 @@ const emptyForm = {
   auto_track_pattern: '',
 };
 
+const EMPTY_TOTALS = new Map<string, number>();
+
 // Default auto-track patterns the "Sync from expenses" button seeds for missing accounts.
 // Matches description_normalized OR description_raw via case-insensitive ILIKE in Supabase.
 const DEFAULT_AUTO_ACCOUNTS: Array<{
@@ -95,11 +98,7 @@ const DEFAULT_AUTO_ACCOUNTS: Array<{
  * Single-word tokens become `%word%`.
  */
 function patternToIlike(token: string): string {
-  const words = token
-    .replace(/[%,().]/g, ' ')
-    .split(/\s+/)
-    .map(w => w.trim())
-    .filter(Boolean);
+  const words = patternWords(token);
   if (words.length === 0) return '';
   return `%${words.join('%')}%`;
 }
@@ -250,14 +249,20 @@ function BulkBalanceUpdateDialog({
 }) {
   const today = new Date();
   const defaultMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+  const todayIso = today.toISOString().slice(0, 10);
   const [month, setMonth] = useState(defaultMonth);
   const [values, setValues] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
 
+  // An update for the current month is dated today. Writing it to the 1st
+  // overwrote that month's opening balance and plotted today's value before
+  // older mid-month points. Past months still backfill their 1st.
+  const snapshotDate = month === defaultMonth || month === todayIso.slice(0, 7) ? todayIso : `${month}-01`;
+
   const fmt = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 });
 
   const getLastBalance = (accountId: string): number => {
-    const monthDate = `${month}-01`;
+    const monthDate = snapshotDate;
     // If the selected month already has a snapshot, show that
     const exact = snapshots.find(s => s.account_id === accountId && s.as_of_date === monthDate);
     if (exact) return exact.balance;
@@ -269,7 +274,9 @@ function BulkBalanceUpdateDialog({
   const initValues = () => {
     const v: Record<string, string> = {};
     for (const a of accounts) {
-      v[a.id] = String(Math.round(getLastBalance(a.id)));
+      // Keep cents: a rounded prefill differs from the stored balance, so an
+      // untouched row would be re-saved as a fresh snapshot.
+      v[a.id] = String(Math.round(getLastBalance(a.id) * 100) / 100);
     }
     setValues(v);
   };
@@ -283,7 +290,7 @@ function BulkBalanceUpdateDialog({
 
   const handleSave = async () => {
     setSaving(true);
-    const monthDate = `${month}-01`;
+    const monthDate = snapshotDate;
     let updated = 0;
     try {
       for (const acc of accounts) {
@@ -309,7 +316,7 @@ function BulkBalanceUpdateDialog({
         updated++;
       }
       if (updated > 0) {
-        toast.success(`Updated ${updated} account${updated !== 1 ? 's' : ''} for ${new Date(monthDate).toLocaleString('en-US', { month: 'long', year: 'numeric' })}`);
+        toast.success(`Updated ${updated} account${updated !== 1 ? 's' : ''} for ${new Date(`${month}-01T00:00:00`).toLocaleString('en-US', { month: 'long', year: 'numeric' })}`);
       } else {
         toast('No changes detected');
       }
@@ -346,7 +353,7 @@ function BulkBalanceUpdateDialog({
                 <tr className="bg-secondary/30 border-b border-border/40">
                   <th className="text-left px-3 py-1.5 font-medium text-muted-foreground">Account</th>
                   <th className="text-right px-3 py-1.5 font-medium text-muted-foreground w-28">
-                    {new Date(`${month}-01`).toLocaleString('en-US', { month: 'short', year: 'numeric' })}
+                    {new Date(`${month}-01T00:00:00`).toLocaleString('en-US', { month: 'short', year: 'numeric' })}
                   </th>
                   <th className="text-right px-3 py-1.5 font-medium text-muted-foreground w-32">New Balance</th>
                 </tr>
@@ -447,8 +454,8 @@ export default function Wealth() {
   // auto_track_pattern. No button click required.
   // ---------------------------------------------------------------
   const currentYear = new Date().getFullYear();
-  const { data: liveYtdMap = new Map<string, number>() } = useQuery({
-    queryKey: ['contributions_ytd_live', user?.id, currentYear, accounts.map(a => a.id).join(',')],
+  const { data: liveContributions } = useQuery({
+    queryKey: ['contributions_live', user?.id, currentYear, accounts.map(a => a.id).join(',')],
     queryFn: async () => {
       const yearStart = `${currentYear}-01-01`;
       const yearEnd = `${currentYear}-12-31`;
@@ -490,41 +497,54 @@ export default function Wealth() {
         }
       }
 
-      // Re-fetch all accounts (including newly seeded ones)
+      // Re-fetch all accounts (including newly seeded ones). Deleted accounts
+      // must not claim transfers away from live ones.
       const { data: allAccounts } = await supabase
         .from('investment_accounts')
         .select('*')
-        .eq('owner_id', ownerId!);
+        .eq('owner_id', ownerId!)
+        .is('deleted_at', null)
+        .order('priority', { ascending: false })
+        .order('id');
       const accs = (allAccounts || []) as Account[];
+      const tracked = new Set(accs.filter(a => buildOrFilter(a.auto_track_pattern?.trim() || '').length > 0).map(a => a.id));
 
-      const map = new Map<string, number>();
-      for (const acc of accs) {
-        const pattern = acc.auto_track_pattern?.trim();
-        if (!pattern) {
-          map.set(acc.id, Number(acc.contributions_ytd) || 0);
-          continue;
-        }
-        const orParts = buildOrFilter(pattern);
-        if (orParts.length === 0) {
-          map.set(acc.id, Number(acc.contributions_ytd) || 0);
-          continue;
-        }
-        const { data: matches } = await supabase
+      // One read for every account: rows matching any pattern, plus tagged rows
+      // (tagging a transfer with an account's name routes it to that account).
+      const orParts = [...new Set(accs.flatMap(a => buildOrFilter(a.auto_track_pattern?.trim() || '')))];
+      const rows = await fetchAllRows<ContributionTx>((from, to) =>
+        supabase
           .from('transactions_uploaded')
-          .select('amount')
+          .select('date, amount, description_normalized, description_raw, client_or_project_tag')
           .eq('owner_id', ownerId!)
           .eq('mode', 'personal')
           .gte('date', yearStart)
           .lte('date', yearEnd)
           .is('deleted_at', null)
-          .or(orParts.join(','));
-        const total = (matches || []).reduce((s, r) => s + Math.abs(Number(r.amount || 0)), 0);
-        map.set(acc.id, total);
+          .or([...orParts, 'client_or_project_tag.not.is.null'].join(','))
+          .order('date')
+          .order('id')
+          .range(from, to),
+      );
+      const flows = assignContributions(rows, accs);
+
+      const totals = new Map<string, number>();
+      for (const acc of accs) {
+        const accFlows = flows.get(acc.id);
+        if (tracked.has(acc.id) || accFlows) {
+          if (!accFlows) flows.set(acc.id, []);
+          totals.set(acc.id, (accFlows ?? []).reduce((s, f) => s + f.amount, 0));
+        } else {
+          totals.set(acc.id, Number(acc.contributions_ytd) || 0);
+        }
       }
-      return map;
+      return { totals, flows };
     },
     enabled: !!user && !!ownerId && accounts.length > 0,
   });
+  const liveYtdMap = liveContributions?.totals ?? EMPTY_TOTALS;
+  // Dated deposits per auto-tracked account; absent for manual-only accounts.
+  const liveFlows: Map<string, Flow[]> | undefined = liveContributions?.flows;
 
   // App settings — holds portfolio-wide end-of-year wealth target.
   const { data: appSettings } = useQuery({
@@ -1035,7 +1055,7 @@ export default function Wealth() {
 
                         // Build chart data: snapshots + today (if not already a snapshot)
                         const data = accSnaps.map(s => ({
-                          label: new Date(s.as_of_date).toLocaleString('en-US', { month: 'short', year: '2-digit' }),
+                          label: new Date(`${s.as_of_date}T00:00:00`).toLocaleString('en-US', { month: 'short', year: '2-digit' }),
                           value: Number(s.balance),
                           date: s.as_of_date,
                         }));
@@ -1046,16 +1066,21 @@ export default function Wealth() {
 
                         const baseline = data[0].value;
                         const latest = data[data.length - 1].value;
-                        const delta = latest - baseline;
-                        const deltaPct = baseline > 0 ? (delta / baseline) * 100 : 0;
+                        // Deposits are not growth: subtract what went in after the start point.
+                        // Auto-tracked accounts wait for their dated deposits to load.
+                        const depositsReady = !!liveContributions || !a.auto_track_pattern?.trim();
+                        const growth = realGrowth(data, liveFlows?.get(a.id) ?? null, liveYtd);
+                        const delta = growth.gain;
 
                         return (
                           <div className="pt-1 border-t border-border/50">
                             <div className="flex items-center justify-between text-[10px] mb-0.5">
-                              <span className="text-muted-foreground">Growth YTD</span>
+                              <span className="text-muted-foreground" title="Balance change minus deposits since the first point">Growth YTD</span>
                               <div className="flex items-center gap-2">
                                 <span className={delta >= 0 ? 'text-[hsl(var(--success))]' : 'text-destructive'}>
-                                  {delta >= 0 ? '+' : ''}{fmt(delta)}{baseline > 0 ? ` (${deltaPct.toFixed(1)}%)` : ''}
+                                  {!depositsReady ? '…' : (
+                                    <>{delta >= 0 ? '+' : ''}{fmt(delta)}{growth.returnPct != null ? ` (${growth.returnPct.toFixed(1)}%)` : ''}</>
+                                  )}
                                 </span>
                                 <SnapshotEditor
                                   account={a}
@@ -1087,6 +1112,7 @@ export default function Wealth() {
                             </div>
                             <div className="flex justify-between text-[9px] text-muted-foreground">
                               <span>Start {fmt(baseline)}</span>
+                              {depositsReady && growth.deposits > 0 && <span>Deposits +{fmt(growth.deposits)}</span>}
                               <span>Today {fmt(latest)}</span>
                             </div>
                           </div>
