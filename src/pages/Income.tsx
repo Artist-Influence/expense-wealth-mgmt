@@ -355,14 +355,17 @@ export default function Income() {
           const existingTxs = await fetchAllRows((from, to) =>
             supabase
               .from('income_transactions')
-              .select('date, amount, description_normalized')
+              .select('date, amount, description_normalized, description_raw')
               .eq('owner_id', ownerId!)
               .is('deleted_at', null)
               .order('id')
               .range(from, to),
           );
           for (const ex of existingTxs) {
-            const fp = `income|${ex.date || ''}|${ex.amount || 0}|${(ex.description_normalized || '').toLowerCase()}`;
+            // Re-normalize with today's normalizer, like the rows being imported;
+            // a stored description_normalized from an older normalizer won't match.
+            const exNormalized = ex.description_raw ? normalizeDescription(ex.description_raw) : (ex.description_normalized || '');
+            const fp = `income|${ex.date || ''}|${ex.amount || 0}|${exNormalized.toLowerCase()}`;
             existingFingerprints.add(fp);
           }
         } catch (err) {

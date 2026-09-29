@@ -1815,11 +1815,16 @@ export default function Expenses() {
       const existingFpCounts = new Map<string, number>();
       const existingForNearDup: { date: string | null; amount: number; description_normalized: string; id: string; fingerprint: string }[] = [];
 
-      const ingestExisting = (rows: { id: string; date: string | null; description_normalized: string | null; amount: number | null; duplicate_fingerprint: string | null }[]) => {
+      const ingestExisting = (rows: { id: string; date: string | null; description_normalized: string | null; description_raw: string | null; amount: number | null }[]) => {
         for (const row of rows) {
-          const fp = row.duplicate_fingerprint || generateFingerprint(categoryMode, row.date, row.amount ?? 0, row.description_normalized || '');
+          // Re-normalize the raw text with today's normalizer, same as the new
+          // rows. The stored fingerprint came from whatever normalizer ran at
+          // that import, so after a normalizer change the same charge stopped
+          // matching and overlapping statement exports were imported twice.
+          const normalized = row.description_raw ? normalizeDescription(row.description_raw) : (row.description_normalized || '');
+          const fp = generateFingerprint(categoryMode, row.date, row.amount ?? 0, normalized);
           existingFpCounts.set(fp, (existingFpCounts.get(fp) || 0) + 1);
-          existingForNearDup.push({ date: row.date, amount: row.amount ?? 0, description_normalized: row.description_normalized || '', id: row.id, fingerprint: fp });
+          existingForNearDup.push({ date: row.date, amount: row.amount ?? 0, description_normalized: normalized, id: row.id, fingerprint: fp });
         }
       };
 
@@ -1832,9 +1837,10 @@ export default function Expenses() {
         while (hasMore) {
           const { data: existing } = await supabase
             .from('transactions_uploaded')
-            .select('id, date, description_normalized, amount, duplicate_fingerprint')
+            .select('id, date, description_normalized, description_raw, amount')
             .eq('mode', categoryMode).eq('owner_id', ownerId!)
             .gte('date', fromDate).lte('date', toDate)
+            .order('id')
             .range(from, from + pageSize - 1);
           if (existing) ingestExisting(existing as any);
           hasMore = (existing?.length ?? 0) === pageSize;
@@ -1845,7 +1851,7 @@ export default function Expenses() {
       {
         const { data: nullDateRows } = await supabase
           .from('transactions_uploaded')
-          .select('id, date, description_normalized, amount, duplicate_fingerprint')
+          .select('id, date, description_normalized, description_raw, amount')
           .eq('mode', categoryMode).eq('owner_id', ownerId!)
           .is('date', null)
           .limit(1000);

@@ -512,10 +512,10 @@ export default function Wealth() {
       // One read for every account: rows matching any pattern, plus tagged rows
       // (tagging a transfer with an account's name routes it to that account).
       const orParts = [...new Set(accs.flatMap(a => buildOrFilter(a.auto_track_pattern?.trim() || '')))];
-      const rows = await fetchAllRows<ContributionTx>((from, to) =>
+      const rows = await fetchAllRows<ContributionTx & { duplicate_status: string | null; review_status: string | null }>((from, to) =>
         supabase
           .from('transactions_uploaded')
-          .select('date, amount, description_normalized, description_raw, client_or_project_tag')
+          .select('date, amount, description_normalized, description_raw, client_or_project_tag, duplicate_status, review_status')
           .eq('owner_id', ownerId!)
           .eq('mode', 'personal')
           .gte('date', yearStart)
@@ -526,7 +526,11 @@ export default function Wealth() {
           .order('id')
           .range(from, to),
       );
-      const flows = assignContributions(rows, accs);
+      // Duplicates archived in the Duplicate Resolver stay in the table; don't count them twice.
+      const flows = assignContributions(
+        rows.filter(r => r.duplicate_status !== 'exact_duplicate' && r.review_status !== 'archived'),
+        accs,
+      );
 
       const totals = new Map<string, number>();
       for (const acc of accs) {
