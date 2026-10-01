@@ -23,6 +23,7 @@ import { effectiveCategory } from '@/lib/categorization-engine';
 import { computeRecurringCharges } from '@/lib/recurring-charges';
 import { useRecurringOverrides } from '@/hooks/useRecurringOverrides';
 import { generateMerchantKey, normalizeDescription } from '@/lib/normalizer';
+import { isRefund, signedSpend } from '@/lib/spend';
 
 // Mirror of effectiveCategory: prefer the user-confirmed value, fall back to the
 // engine's prediction. Most rows have predicted_method populated but final_method
@@ -84,6 +85,7 @@ interface Transaction {
   exclude_from_expense_totals: boolean;
   parse_status: string;
   is_split_parent: boolean;
+  treatment_type: string | null;
 }
 
 interface IncomeTransaction {
@@ -114,7 +116,7 @@ const groupMerchants = (txns: Transaction[]): MerchantGroup[] => {
     const raw = (t.description_raw || t.description_normalized || '').trim();
     const key = generateMerchantKey(normalizeDescription(raw)) || raw.toUpperCase() || 'Unknown';
     const g = groups.get(key) || { total: 0, count: 0, category: '', labels: new Map<string, number>() };
-    g.total += Math.abs(t.amount || 0);
+    g.total += signedSpend(t);
     g.count++;
     if (t.final_category) g.category = t.final_category;
     const label = raw || key;
@@ -243,8 +245,9 @@ export default function Insights() {
     while (hasMore) {
       const { data } = await supabase
         .from('transactions_uploaded')
-        .select('date, description_raw, description_normalized, amount, final_category, predicted_category, final_method, predicted_method, review_status, is_transfer, transfer_type, exclude_from_expense_totals, parse_status, is_split_parent')
+        .select('date, description_raw, description_normalized, amount, final_category, predicted_category, final_method, predicted_method, review_status, is_transfer, transfer_type, exclude_from_expense_totals, parse_status, is_split_parent, treatment_type')
         .eq('owner_id', ownerId!).is('deleted_at', null).eq('mode', mode).neq('parse_status', 'parse_error')
+        .order('id')
         .range(from, from + pageSize - 1);
       if (data) allData = [...allData, ...(data as Transaction[])];
       hasMore = (data?.length ?? 0) === pageSize;
@@ -364,8 +367,8 @@ export default function Insights() {
     // number on this page, so cards can't contradict the charts beside them.
     const thisMonthTxns = allExpenses.filter(t => t.date?.startsWith(thisMonth) && isCounted(t.review_status));
     const lastMonthTxns = allExpenses.filter(t => t.date?.startsWith(lastMonth) && isCounted(t.review_status));
-    const thisMonthSpend = thisMonthTxns.reduce((s, t) => s + Math.abs(t.amount || 0), 0);
-    const lastMonthSpend = lastMonthTxns.reduce((s, t) => s + Math.abs(t.amount || 0), 0);
+    const thisMonthSpend = thisMonthTxns.reduce((s, t) => s + signedSpend(t), 0);
+    const lastMonthSpend = lastMonthTxns.reduce((s, t) => s + signedSpend(t), 0);
     const momChange = lastMonthSpend > 0 ? ((thisMonthSpend - lastMonthSpend) / lastMonthSpend) * 100 : 0;
 
     // Top Cat / Top Merchant respect the active date range
@@ -373,7 +376,7 @@ export default function Insights() {
     const catMap = new Map<string, number>();
     approvedScoped.forEach(t => {
       const cat = effectiveCategory(t) || 'Uncategorized';
-      catMap.set(cat, (catMap.get(cat) || 0) + Math.abs(t.amount || 0));
+      catMap.set(cat, (catMap.get(cat) || 0) + signedSpend(t));
     });
     const topCategory = [...catMap.entries()].sort((a, b) => b[1] - a[1])[0];
 
@@ -389,7 +392,7 @@ export default function Insights() {
       .reduce((s, t) => s + Math.abs(t.amount || 0), 0);
 
     // Period total (drives clarity when filter != "this month")
-    const periodSpend = approvedScoped.reduce((s, t) => s + Math.abs(t.amount || 0), 0);
+    const periodSpend = approvedScoped.reduce((s, t) => s + signedSpend(t), 0);
 
     return { thisMonthSpend, lastMonthSpend, momChange, topCategory, topMerchant, transfersExcluded, periodSpend };
   }, [expenses, allExpenses, transactions, dateFrom, dateTo, COUNTED_STATUSES]);
@@ -405,7 +408,7 @@ export default function Insights() {
     const catMap = new Map<string, number>();
     approvedExpenses.forEach(t => {
       const cat = effectiveCategory(t) || 'Uncategorized';
-      catMap.set(cat, (catMap.get(cat) || 0) + Math.abs(t.amount || 0));
+      catMap.set(cat, (catMap.get(cat) || 0) + signedSpend(t));
     });
     return [...catMap.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12).map(([name, total]) => ({ name, total: Math.round(total * 100) / 100 }));
   }, [approvedExpenses]);
@@ -415,7 +418,7 @@ export default function Insights() {
     approvedExpenses.forEach(t => {
       if (!t.date) return;
       const month = t.date.substring(0, 7);
-      monthMap.set(month, (monthMap.get(month) || 0) + Math.abs(t.amount || 0));
+      monthMap.set(month, (monthMap.get(month) || 0) + signedSpend(t));
     });
     return [...monthMap.entries()].sort((a, b) => a[0].localeCompare(b[0])).slice(-12).map(([month, total]) => ({ month, total: Math.round(total * 100) / 100 }));
   }, [approvedExpenses]);
@@ -428,7 +431,7 @@ export default function Insights() {
       .map(g => ({ name: g.label, total: g.total, count: g.count, category: g.category }));
   }, [approvedExpenses]);
 
-  const allRecurringCharges = useMemo(() => computeRecurringCharges(approvedExpenses), [approvedExpenses]);
+  const allRecurringCharges = useMemo(() => computeRecurringCharges(approvedExpenses.filter(t => !isRefund(t))), [approvedExpenses]);
   // Respect the user's Subscriptions-page decisions: hide dismissed merchants entirely,
   // and flag confirmed ones so the table can highlight real subscriptions.
   const recurringCharges = useMemo(
@@ -452,7 +455,7 @@ export default function Insights() {
       if (!t.date) return;
       const m = t.date.substring(0, 7);
       const entry = monthMap.get(m) || { income: 0, expenses: 0 };
-      entry.expenses += Math.abs(t.amount || 0);
+      entry.expenses += signedSpend(t);
       monthMap.set(m, entry);
     });
     earnedIncomeAll.forEach(t => {
@@ -486,7 +489,7 @@ export default function Insights() {
     const calcRate = (months: string[]) => {
       let inc = 0, exp = 0;
       earnedIncomeAll.forEach(t => { if (t.date && months.includes(t.date.substring(0, 7))) inc += Math.abs(t.amount || 0); });
-      countedAllExpenses.forEach(t => { if (t.date && months.includes(t.date.substring(0, 7))) exp += Math.abs(t.amount || 0); });
+      countedAllExpenses.forEach(t => { if (t.date && months.includes(t.date.substring(0, 7))) exp += signedSpend(t); });
       return inc > 0 ? ((inc - exp) / inc) * 100 : 0;
     };
 
@@ -495,7 +498,7 @@ export default function Insights() {
 
     // Totals reflect the active date filter
     const totalIncome = earnedIncome.reduce((s, t) => s + Math.abs(t.amount || 0), 0);
-    const totalExpenses = approvedExpenses.reduce((s, t) => s + Math.abs(t.amount || 0), 0);
+    const totalExpenses = approvedExpenses.reduce((s, t) => s + signedSpend(t), 0);
 
     return { currentRate, trailing3, totalIncome, totalExpenses };
   }, [approvedExpenses, earnedIncome, countedAllExpenses, earnedIncomeAll]);
@@ -514,8 +517,8 @@ export default function Insights() {
     });
     countedAllExpenses.forEach(t => {
       if (!t.date) return;
-      if (t.date.startsWith(thisYear)) thisYearExpenses += Math.abs(t.amount || 0);
-      if (t.date.startsWith(lastYear)) lastYearExpenses += Math.abs(t.amount || 0);
+      if (t.date.startsWith(thisYear)) thisYearExpenses += signedSpend(t);
+      if (t.date.startsWith(lastYear)) lastYearExpenses += signedSpend(t);
     });
 
     // Saved-to-Wealth: walk the FULL transactions array (brokerage transfers

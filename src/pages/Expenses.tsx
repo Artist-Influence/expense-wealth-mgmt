@@ -23,6 +23,7 @@ import { routeTransaction } from '@/lib/transaction-router';
 import { classifyIncome } from '@/lib/income-classifier';
 import { generateFingerprint, isNearDuplicate, findExactClusters, findNearClusters, type DuplicateCluster } from '@/lib/duplicate-detector';
 import { generateMerchantKey, normalizeDescription } from '@/lib/normalizer';
+import { isRefund, signedSpend } from '@/lib/spend';
 import { fetchAllRows } from '@/lib/fetch-all';
 import { backfillRecurringForOwner } from '@/lib/recurrence-detector';
 import { isStatementArtifact } from '@/lib/csv-parser';
@@ -868,15 +869,18 @@ export default function Expenses() {
     const active = allModeRows.filter(r =>
       !r.is_split_parent && r.parse_status !== 'parse_error' && inDateRange(r.date)
     );
-    // Refunds and CC payments are stored positive but are NOT spend — a $500
-    // purchase + $500 refund must net to $0, not read as $1,000 out.
-    const isOutflow = (r: AllModeRow) => !r.is_non_expense_cash_movement && !r.is_transfer && !r.exclude_from_expense_totals && r.treatment_type !== 'refund' && r.treatment_type !== 'credit_card_payment';
+    // Refunds and CC payments are stored positive but are NOT spend. CC payments
+    // are skipped; refunds count NEGATIVE so a $500 purchase + $500 refund nets
+    // to $0 (skipping them left the refunded $500 in the total).
+    const isOutflow = (r: AllModeRow) => !r.is_non_expense_cash_movement && !r.is_transfer && !r.exclude_from_expense_totals && r.treatment_type !== 'credit_card_payment';
     const sum = (rows: AllModeRow[]) => rows.reduce((s, r) => s + Math.abs(Number(r.amount) || 0), 0);
+    const net = (rows: AllModeRow[]) => rows.reduce((s, r) => s + signedSpend(r), 0);
+    const modeOf = (r: AllModeRow) => r.transaction_mode || r.mode;
     return {
-      personalCashOut: sum(active.filter(r => (r.transaction_mode || r.mode) === 'personal' && isOutflow(r))),
-      businessCashOut: sum(active.filter(r => (r.transaction_mode || r.mode) === 'business' && isOutflow(r))),
-      truePersonal: sum(active.filter(r => r.counts_toward_true_personal_spend)),
-      trueBusiness: sum(active.filter(r => r.counts_toward_true_business_spend)),
+      personalCashOut: net(active.filter(r => modeOf(r) === 'personal' && isOutflow(r))),
+      businessCashOut: net(active.filter(r => modeOf(r) === 'business' && isOutflow(r))),
+      truePersonal: net(active.filter(r => r.counts_toward_true_personal_spend || (isRefund(r) && modeOf(r) === 'personal' && isOutflow(r)))),
+      trueBusiness: net(active.filter(r => r.counts_toward_true_business_spend || (isRefund(r) && modeOf(r) === 'business' && isOutflow(r)))),
       pendingReimbursable: sum(active.filter(r => r.is_reimbursable && r.reimbursement_status !== 'reimbursed')),
     };
   }, [allModeRows, dateFrom, dateTo]);
@@ -896,15 +900,23 @@ export default function Expenses() {
       && t.treatment_type !== 'refund' && t.treatment_type !== 'credit_card_payment'
     );
 
-    const totalCashOut = cashOutTxns.reduce((sum, t) => sum + Math.abs(t.amount || 0), 0);
+    // Refunds net against spend (see crossModeTotals): subtract them from each total.
+    const refundTxns = activeTxns.filter(t =>
+      isRefund(t) && !t.is_non_expense_cash_movement && !t.is_transfer && !t.exclude_from_expense_totals
+    );
+    const refundsFor = (mode?: string) => refundTxns
+      .filter(t => !mode || (t.transaction_mode || t.mode) === mode)
+      .reduce((sum, t) => sum + Math.abs(t.amount || 0), 0);
+
+    const totalCashOut = cashOutTxns.reduce((sum, t) => sum + Math.abs(t.amount || 0), 0) - refundsFor();
 
     const truePersonalSpend = activeTxns
       .filter(t => t.counts_toward_true_personal_spend)
-      .reduce((sum, t) => sum + Math.abs(t.amount || 0), 0);
+      .reduce((sum, t) => sum + Math.abs(t.amount || 0), 0) - refundsFor('personal');
 
     const trueBusinessSpend = activeTxns
       .filter(t => t.counts_toward_true_business_spend)
-      .reduce((sum, t) => sum + Math.abs(t.amount || 0), 0);
+      .reduce((sum, t) => sum + Math.abs(t.amount || 0), 0) - refundsFor('business');
 
     const pendingReimbursable = activeTxns
       .filter(t => t.is_reimbursable && t.reimbursement_status !== 'reimbursed')
@@ -1697,8 +1709,10 @@ export default function Expenses() {
           incomeRows.push(tx);
           continue;
         }
-        // Build a stable key for the row to mark CC payment / refund treatment downstream
-        const key = `${tx.date}|${tx.amount}|${tx.description_normalized}`;
+        // Build a stable key for the row to mark CC payment / refund treatment downstream.
+        // ABS amount: the lookup below runs on the stored (abs) rows, so a credit
+        // exported as a negative number never matched and was saved as a purchase.
+        const key = `${tx.date}|${Math.abs(tx.amount)}|${tx.description_normalized}`;
         if (decision.route === 'cc_payment_transfer') ccPaymentRowKeys.add(key);
         if (decision.route === 'refund') refundRowKeys.add(key);
         // Store ABS amount for the existing pipeline (display + dedupe expect positives).

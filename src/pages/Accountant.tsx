@@ -15,6 +15,8 @@ import {
 import { toast } from 'sonner';
 import { NON_EARNING_TYPES } from '@/lib/income-classifier';
 import { fetchAllRows } from '@/lib/fetch-all';
+import { deductibilityHint } from '@/lib/categorization-engine';
+import { isRefund, signedSpend } from '@/lib/spend';
 
 type ExportType = 'expense_ledger' | 'income_ledger' | 'tax_deductions' | 'tax_payments' | 'year_end_summary';
 
@@ -170,7 +172,12 @@ export default function Accountant() {
     return result.filter(e => e.transaction_mode === modeFilter);
   }, [expenses, modeFilter]);
 
-  const taxDeductions = useMemo(() => filteredExpenses.filter(e => e.counts_as_tax_deduction), [filteredExpenses]);
+  // Refunds of deductible spend come back as NEGATIVE deductions so they net
+  // against the charge they refund (same rule as the Tax page).
+  const taxDeductions = useMemo(() => filteredExpenses.filter(e =>
+    e.counts_as_tax_deduction
+    || (isRefund(e) && deductibilityHint(e.transaction_mode, e.final_category || e.predicted_category || '') !== 'none')
+  ), [filteredExpenses]);
   const taxPayments = useMemo(() => filteredExpenses.filter(e => e.treatment_type === 'tax_payment'), [filteredExpenses]);
 
   const previewData = useMemo(() => {
@@ -178,7 +185,7 @@ export default function Accountant() {
       case 'expense_ledger':
         return {
           headers: ['Date', 'Description', 'Amount', 'Category', 'Method', 'Mode', 'Transaction Mode', 'Transfer', 'Review Status', 'Notes'],
-          rows: filteredExpenses.map(e => [e.date, e.description_normalized || e.description_raw, String(Math.abs(e.amount ?? 0)), e.final_category, e.final_method, e.mode, e.transaction_mode, e.is_transfer ? 'Yes' : 'No', e.review_status, e.final_notes]),
+          rows: filteredExpenses.map(e => [e.date, e.description_normalized || e.description_raw, String(signedSpend(e)), e.final_category, e.final_method, e.mode, e.transaction_mode, e.is_transfer ? 'Yes' : 'No', e.review_status, e.final_notes]),
         };
       case 'income_ledger':
         return {
@@ -191,7 +198,7 @@ export default function Accountant() {
       case 'tax_deductions':
         return {
           headers: ['Date', 'Description', 'Amount', 'Category', 'Mode'],
-          rows: taxDeductions.map(e => [e.date, e.description_normalized || e.description_raw, String(e.amount ?? 0), e.final_category, e.mode]),
+          rows: taxDeductions.map(e => [e.date, e.description_normalized || e.description_raw, String(signedSpend(e)), e.final_category, e.mode]),
         };
       case 'tax_payments':
         return {
@@ -203,10 +210,10 @@ export default function Accountant() {
         const approved = (expenses || []).filter(e => approvedStatuses.includes(e.review_status));
         const totalInflows = (income || []).reduce((s, i) => s + (i.amount || 0), 0);
         const totalEarnedIncome = (income || []).filter(i => !(NON_EARNING_TYPES as readonly string[]).includes(i.income_type)).reduce((s, i) => s + (i.amount || 0), 0);
-        const totalExpPersonal = approved.filter(e => e.transaction_mode === 'personal' && !e.is_transfer).reduce((s, e) => s + Math.abs(e.amount || 0), 0);
-        const totalExpBusiness = approved.filter(e => e.transaction_mode === 'business' && !e.is_transfer).reduce((s, e) => s + Math.abs(e.amount || 0), 0);
+        const totalExpPersonal = approved.filter(e => e.transaction_mode === 'personal' && !e.is_transfer).reduce((s, e) => s + signedSpend(e), 0);
+        const totalExpBusiness = approved.filter(e => e.transaction_mode === 'business' && !e.is_transfer).reduce((s, e) => s + signedSpend(e), 0);
         const totalTransfers = approved.filter(e => e.is_transfer).reduce((s, e) => s + Math.abs(e.amount || 0), 0);
-        const totalDeductions = taxDeductions.reduce((s, e) => s + Math.abs(e.amount || 0), 0);
+        const totalDeductions = taxDeductions.reduce((s, e) => s + signedSpend(e), 0);
         const totalTaxPaid = taxPayments.reduce((s, e) => s + Math.abs(e.amount || 0), 0);
         return {
           headers: ['Metric', 'Amount'],

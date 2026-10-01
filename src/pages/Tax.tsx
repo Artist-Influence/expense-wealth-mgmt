@@ -15,6 +15,7 @@ import { toast } from 'sonner';
 import { DollarSign, TrendingUp, Shield, AlertTriangle, Settings, Landmark, Building2, Building, Briefcase } from 'lucide-react';
 import { fetchAllRows } from '@/lib/fetch-all';
 import { effectiveCategory, deductibilityHint, type DeductibilityHint } from '@/lib/categorization-engine';
+import { isRefund } from '@/lib/spend';
 
 interface TaxProfile {
   id: string;
@@ -49,6 +50,7 @@ interface DeductionRow {
   review_status: string;
   transaction_mode: string | null;
   counts_as_tax_deduction: boolean | null;
+  treatment_type: string | null;
 }
 
 interface TaxPaymentRow {
@@ -148,7 +150,7 @@ export default function Tax() {
       while (hasMore) {
         const { data } = await supabase
           .from('transactions_uploaded')
-          .select('amount, final_category, predicted_category, counts_as_tax_deduction, review_status')
+          .select('amount, final_category, predicted_category, counts_as_tax_deduction, review_status, treatment_type')
           .eq('owner_id', ownerId!)
           .eq('transaction_mode', m)
           .eq('is_split_parent', false)
@@ -187,7 +189,8 @@ export default function Tax() {
         const hint = deductibilityHint(mode, cat);
         if (hint === 'none' && !r.counts_as_tax_deduction) continue;
         if (hint === 'requires_review') continue; // limited/uncertain — keep out of the reserve base
-        const amt = Math.abs(Number(r.amount || 0));
+        // A refund gives the money back, so it reduces deductions instead of adding one.
+        const amt = Math.abs(Number(r.amount || 0)) * (isRefund(r) ? -1 : 1);
         if (hint === 'partial') total += amt * 0.5;
         else total += amt;
       }
@@ -239,7 +242,7 @@ export default function Tax() {
     while (hasMore) {
       let q = supabase
         .from('transactions_uploaded')
-        .select('final_category, predicted_category, amount, review_status, transaction_mode, counts_as_tax_deduction')
+        .select('final_category, predicted_category, amount, review_status, transaction_mode, counts_as_tax_deduction, treatment_type')
         .eq('owner_id', ownerId!)
         .eq('is_split_parent', false)
         // Exclude tax-payment rows: a business tax payment categorized "taxes"
@@ -364,7 +367,8 @@ export default function Tax() {
   const deductibleAmount = (r: DeductionRow): { amount: number; hint: DeductibilityHint; bucket: 'confirmed' | 'predicted' | 'review' } => {
     const cat = r.final_category || r.predicted_category || '';
     const hint = deductibilityHint(r.transaction_mode, cat);
-    const raw = Math.abs(r.amount || 0);
+    // Refunds come back negative so they net against the charge they refund.
+    const raw = Math.abs(r.amount || 0) * (isRefund(r) ? -1 : 1);
     const amount = hint === 'partial' ? raw * 0.5 : raw;
     const isConfirmed = ['approved', 'edited', 'auto_categorized'].includes(r.review_status) && !!r.final_category;
     const bucket: 'confirmed' | 'predicted' | 'review' =

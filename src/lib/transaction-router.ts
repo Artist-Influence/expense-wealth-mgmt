@@ -26,6 +26,8 @@ interface RouterInput {
  */
 const INCOME_DESCRIPTION_HINTS = /\b(deposit|payroll|direct\s*deposit|salary|wages|paycheck|payment\s*from|received\s*from|zelle\s*from|venmo\s*from|paypal\s*from|refund|return|reimburs\w*|interest|dividend|cashback|cash\s*back|stripe\s*payout|square\s*deposit|tax\s*refund|deel|gusto|adp|paychex|justworks|rippling|trinet|oasis|onpay|bamboohr)\b|SALARY[-\s]|PAYMENTS\s*ID:/i;
 
+const BALANCE_ADJUSTMENT = /^\s*BAL(ANCE)?\s*ADJ\b/i;
+
 function readField(row: Record<string, unknown> | null | undefined, key: string): string {
   if (!row) return '';
   const v = row[key];
@@ -47,6 +49,13 @@ export function routeTransaction(input: RouterInput): TransactionRoute {
 
   // 2. Credit-card "Return" → refund (reduces spend, not income).
   if (isCcCsv && type === 'Return') {
+    return { route: 'refund', signedAmount };
+  }
+
+  // 2b. Card balance adjustments ("BAL ADJ/CLEAR *CLEARME.COM") are merchant
+  // credits. BoA card exports have no Type column, so these were imported as a
+  // second purchase instead of a refund.
+  if (!isCheckingCsv && BALANCE_ADJUSTMENT.test(description)) {
     return { route: 'refund', signedAmount };
   }
 
