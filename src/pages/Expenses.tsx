@@ -24,6 +24,8 @@ import { classifyIncome } from '@/lib/income-classifier';
 import { generateFingerprint, isNearDuplicate, findExactClusters, findNearClusters, type DuplicateCluster } from '@/lib/duplicate-detector';
 import { generateMerchantKey, normalizeDescription } from '@/lib/normalizer';
 import { isRefund, signedSpend } from '@/lib/spend';
+import { createWithdrawalCapture } from '@/lib/withdrawal-capture';
+import type { WithdrawalRow } from '@/lib/account-growth';
 import { fetchAllRows } from '@/lib/fetch-all';
 import { backfillRecurringForOwner } from '@/lib/recurrence-detector';
 import { isStatementArtifact } from '@/lib/csv-parser';
@@ -1717,6 +1719,30 @@ export default function Expenses() {
         if (decision.route === 'refund') refundRowKeys.add(key);
         // Store ABS amount for the existing pipeline (display + dedupe expect positives).
         validRows.push({ ...tx, amount: Math.abs(tx.amount) });
+      }
+
+      // Money back from an investment account (Dub, Wealthfront, Gemini…) is a
+      // WITHDRAWAL from it: neither income nor a deposit. Log it on Wealth.
+      if (incomeRows.length > 0) {
+        const capture = await createWithdrawalCapture(ownerId!);
+        if (capture) {
+          const found: WithdrawalRow[] = [];
+          for (let i = incomeRows.length - 1; i >= 0; i--) {
+            const tx = incomeRows[i];
+            const accountId = tx.date ? capture.match(tx) : null;
+            if (!accountId || !tx.date) continue;
+            found.push({ account_id: accountId, date: tx.date, amount: Math.abs(tx.amount) });
+            incomeRows.splice(i, 1);
+          }
+          if (found.length > 0) {
+            try {
+              const logged = await capture.save(found, file.name);
+              if (logged > 0) toast.success(`${file.name}: ${logged} investment withdrawal${logged === 1 ? '' : 's'} logged on Wealth`);
+            } catch (e) {
+              toast.error(`${file.name}: ${found.length} investment withdrawal(s) could not be logged: ${(e as Error).message}`);
+            }
+          }
+        }
       }
 
       // Insert income rows directly into income_transactions and skip the

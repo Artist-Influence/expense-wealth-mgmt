@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import { Plus, Pencil, TrendingUp, Wallet, Target, DollarSign, Trash2, RefreshCw, Sparkles, CalendarPlus, X, CalendarIcon } from 'lucide-react';
+import { Plus, Pencil, TrendingUp, Wallet, Target, DollarSign, Trash2, RefreshCw, Sparkles, CalendarPlus, X, CalendarIcon, ArrowDownToLine } from 'lucide-react';
 import { Calendar } from '@/components/ui/calendar';
 import { format, parseISO } from 'date-fns';
 import { cn } from '@/lib/utils';
@@ -222,6 +222,124 @@ function SnapshotEditor({
               />
             </div>
             <Button size="sm" className="h-8 text-xs px-3" onClick={handleAdd}>Save</Button>
+          </div>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+// ---------------------------------------------------------------
+// Withdrawals: money taken OUT of the account (e.g. Dub to checking). Growth
+// nets these out so a withdrawal doesn't read as a loss. Imports log them
+// automatically when the platform's credit lands in checking.
+// ---------------------------------------------------------------
+type Withdrawal = { id: string; account_id: string; date: string; amount: number; note: string | null; source: string };
+
+function WithdrawalEditor({
+  account,
+  withdrawals,
+  onAdd,
+  onDelete,
+  busy,
+}: {
+  account: { id: string; account_name: string };
+  withdrawals: Withdrawal[];
+  onAdd: (date: string, amount: number, note: string | null) => void;
+  onDelete: (id: string) => void;
+  busy?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [date, setDate] = useState<Date>(new Date());
+  const [dateOpen, setDateOpen] = useState(false);
+  const [amount, setAmount] = useState('');
+  const [note, setNote] = useState('');
+  const fmtUsd = (n: number) => '$' + n.toLocaleString('en-US', { maximumFractionDigits: 2 });
+
+  const handleAdd = () => {
+    const num = Number(amount.replace(/[$,]/g, ''));
+    if (!Number.isFinite(num) || num <= 0) {
+      toast.error('Enter the amount you took out');
+      return;
+    }
+    onAdd(format(date, 'yyyy-MM-dd'), num, note.trim() || null);
+    setAmount('');
+    setNote('');
+  };
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button variant="ghost" size="icon" className="h-5 w-5" title="Withdrawals">
+          <ArrowDownToLine className="h-3 w-3" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-96 p-3 space-y-2.5" align="end">
+        <div className="text-xs font-semibold text-foreground">{account.account_name} withdrawals</div>
+        <div className="space-y-1 max-h-40 overflow-y-auto">
+          {withdrawals.length === 0 && (
+            <div className="text-[10px] text-muted-foreground italic">None logged. Money you take out goes here so it isn't counted as a loss.</div>
+          )}
+          {withdrawals.map(w => (
+            <div key={w.id} className="flex items-center justify-between gap-2 text-[11px] py-0.5">
+              <span className="text-muted-foreground tabular-nums shrink-0">{format(parseISO(w.date), 'MMM d, yyyy')}</span>
+              <span className="text-muted-foreground truncate flex-1" title={w.note || undefined}>
+                {w.source === 'import' ? 'imported' : w.note || ''}
+              </span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-foreground tabular-nums font-medium">{fmtUsd(Number(w.amount))}</span>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-4 w-4 text-muted-foreground hover:text-destructive"
+                  onClick={() => onDelete(w.id)}
+                  disabled={busy}
+                  title="Remove"
+                >
+                  <X className="h-3 w-3" />
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="pt-2 border-t border-border/50 space-y-2">
+          <Label className="text-[10px] text-muted-foreground">Log a withdrawal</Label>
+          <Popover open={dateOpen} onOpenChange={setDateOpen}>
+            <PopoverTrigger asChild>
+              <Button variant="outline" className="w-full h-8 text-xs justify-start font-normal">
+                <CalendarIcon className="mr-2 h-3.5 w-3.5" />
+                {format(date, 'MMM d, yyyy')}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0 pointer-events-auto" align="start">
+              <Calendar
+                mode="single"
+                selected={date}
+                onSelect={(d) => { if (d) { setDate(d); setDateOpen(false); } }}
+                initialFocus
+                className={cn('p-3 pointer-events-auto')}
+              />
+            </PopoverContent>
+          </Popover>
+          <Input
+            value={note}
+            onChange={e => setNote(e.target.value)}
+            placeholder="Note (optional), e.g. move-in costs"
+            className="h-8 text-xs"
+          />
+          <div className="flex gap-1.5 items-center">
+            <div className="relative flex-1">
+              <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">$</span>
+              <Input
+                type="text"
+                inputMode="decimal"
+                placeholder="0.00"
+                value={amount}
+                onChange={e => setAmount(e.target.value)}
+                className="h-8 text-sm pl-5 tabular-nums"
+              />
+            </div>
+            <Button size="sm" className="h-8 text-xs px-3" onClick={handleAdd} disabled={busy}>Save</Button>
           </div>
         </div>
       </PopoverContent>
@@ -648,6 +766,60 @@ export default function Wealth() {
     onError: (e: any) => toast.error(e.message),
   });
 
+  const { data: withdrawals = [], isFetched: withdrawalsReady } = useQuery({
+    queryKey: ['investment_withdrawals', ownerId],
+    queryFn: async () => {
+      try {
+        const rows = await fetchAllRows<Withdrawal>((from, to) =>
+          supabase
+            .from('investment_withdrawals')
+            .select('id, account_id, date, amount, note, source')
+            .eq('owner_id', ownerId!)
+            .is('deleted_at', null)
+            .order('date')
+            .order('id')
+            .range(from, to),
+        );
+        return rows.map(r => ({ ...r, amount: Number(r.amount) }));
+      } catch (e) {
+        // Show the cards without withdrawals rather than break the page.
+        console.warn('Withdrawals unavailable:', e);
+        return [] as Withdrawal[];
+      }
+    },
+    enabled: !!user && !!ownerId,
+  });
+
+  const addWithdrawal = useMutation({
+    mutationFn: async (w: { account_id: string; date: string; amount: number; note: string | null }) => {
+      const { error } = await supabase
+        .from('investment_withdrawals')
+        .insert({ ...w, owner_id: user!.id, source: 'manual' });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['investment_withdrawals'] });
+      toast.success('Withdrawal logged');
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  // Soft delete: an import won't re-log a withdrawal you removed.
+  const deleteWithdrawal = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase
+        .from('investment_withdrawals')
+        .update({ deleted_at: new Date().toISOString() })
+        .eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['investment_withdrawals'] });
+      toast.success('Withdrawal removed');
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
   const upsert = useMutation({
     mutationFn: async (values: typeof form) => {
       const payload = {
@@ -1070,16 +1242,17 @@ export default function Wealth() {
 
                         const baseline = data[0].value;
                         const latest = data[data.length - 1].value;
-                        // Deposits are not growth: subtract what went in after the start point.
-                        // Auto-tracked accounts wait for their dated deposits to load.
-                        const depositsReady = !!liveContributions || !a.auto_track_pattern?.trim();
-                        const growth = realGrowth(data, liveFlows?.get(a.id) ?? null, liveYtd);
+                        // Deposits are not growth and withdrawals are not losses: net out both
+                        // after the start point. Wait for the dated flows to load.
+                        const accWithdrawals = withdrawals.filter(w => w.account_id === a.id);
+                        const depositsReady = (!!liveContributions || !a.auto_track_pattern?.trim()) && withdrawalsReady;
+                        const growth = realGrowth(data, liveFlows?.get(a.id) ?? null, liveYtd, accWithdrawals);
                         const delta = growth.gain;
 
                         return (
                           <div className="pt-1 border-t border-border/50">
                             <div className="flex items-center justify-between text-[10px] mb-0.5">
-                              <span className="text-muted-foreground" title="Balance change minus deposits since the first point">Growth YTD</span>
+                              <span className="text-muted-foreground" title="Balance change minus deposits, plus withdrawals, since the first point">Growth YTD</span>
                               <div className="flex items-center gap-2">
                                 <span className={delta >= 0 ? 'text-[hsl(var(--success))]' : 'text-destructive'}>
                                   {!depositsReady ? '…' : (
@@ -1092,6 +1265,13 @@ export default function Wealth() {
                                   onSave={(date, balance) => upsertSnapshot.mutate({ account_id: a.id, as_of_date: date, balance })}
                                   onDelete={(date) => deleteSnapshot.mutate({ account_id: a.id, as_of_date: date })}
                                   deleting={deleteSnapshot.isPending}
+                                />
+                                <WithdrawalEditor
+                                  account={a}
+                                  withdrawals={accWithdrawals}
+                                  onAdd={(date, amount, note) => addWithdrawal.mutate({ account_id: a.id, date, amount, note })}
+                                  onDelete={id => deleteWithdrawal.mutate(id)}
+                                  busy={addWithdrawal.isPending || deleteWithdrawal.isPending}
                                 />
                               </div>
                             </div>
@@ -1114,9 +1294,10 @@ export default function Wealth() {
                                 </LineChart>
                               </ResponsiveContainer>
                             </div>
-                            <div className="flex justify-between text-[9px] text-muted-foreground">
+                            <div className="flex flex-wrap justify-between gap-x-2 text-[9px] text-muted-foreground">
                               <span>Start {fmt(baseline)}</span>
                               {depositsReady && growth.deposits > 0 && <span>Deposits +{fmt(growth.deposits)}</span>}
+                              {depositsReady && growth.withdrawn > 0 && <span>Withdrawn {fmt(growth.withdrawn)}</span>}
                               <span>Today {fmt(latest)}</span>
                             </div>
                           </div>

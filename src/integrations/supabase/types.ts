@@ -55,6 +55,53 @@ export type Database = {
           },
         ]
       }
+      investment_withdrawals: {
+        Row: {
+          account_id: string
+          amount: number
+          created_at: string
+          date: string
+          deleted_at: string | null
+          id: string
+          note: string | null
+          owner_id: string
+          source: string
+          source_file_name: string | null
+        }
+        Insert: {
+          account_id: string
+          amount: number
+          created_at?: string
+          date: string
+          deleted_at?: string | null
+          id?: string
+          note?: string | null
+          owner_id: string
+          source?: string
+          source_file_name?: string | null
+        }
+        Update: {
+          account_id?: string
+          amount?: number
+          created_at?: string
+          date?: string
+          deleted_at?: string | null
+          id?: string
+          note?: string | null
+          owner_id?: string
+          source?: string
+          source_file_name?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "investment_withdrawals_account_id_fkey"
+            columns: ["account_id"]
+            isOneToOne: false
+            referencedRelation: "investment_accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       ai_usage_events: {
         Row: {
           created_at: string

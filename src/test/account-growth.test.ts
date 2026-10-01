@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { assignContributions, realGrowth, type ContributionTx } from '@/lib/account-growth';
+import { accountMatcher, assignContributions, planWithdrawals, realGrowth, type ContributionTx } from '@/lib/account-growth';
 
 const tx = (date: string, amount: number, desc: string, tag: string | null = null): ContributionTx => ({
   date,
@@ -70,6 +70,37 @@ describe('realGrowth', () => {
     expect(g.gain).toBeCloseTo(5.12, 2);
   });
 
+  it('does not count a withdrawal as a loss', () => {
+    // Dub: $11,756 on Jan 1, $7,900 deposited, $8,000 pulled out 9/30 for the move.
+    const points = [{ date: '2026-01-01', value: 11756 }, { date: '2026-10-01', value: 31945 - 8000 }];
+    const deposits = [{ date: '2026-02-03', amount: 2000 }, { date: '2026-04-07', amount: 5900 }];
+    const g = realGrowth(points, deposits, 0, [{ date: '2026-09-30', amount: 8000 }]);
+    expect(g.withdrawn).toBe(8000);
+    expect(g.gain).toBe(31945 - 11756 - 7900); // same gain as if nothing was withdrawn
+    expect(g.returnPct!).toBeGreaterThan(0);
+  });
+
+  it('only nets withdrawals inside the window', () => {
+    const points = [{ date: '2026-07-31', value: 1000 }, { date: '2026-09-01', value: 900 }];
+    const g = realGrowth(points, [], 0, [
+      { date: '2026-07-31', amount: 50 }, // already reflected in the start balance
+      { date: '2026-08-15', amount: 100 },
+      { date: '2026-09-15', amount: 75 }, // after the latest point
+    ]);
+    expect(g.withdrawn).toBe(100);
+    expect(g.gain).toBe(0);
+  });
+
+  it('nets withdrawals for manual accounts with an undated YTD total', () => {
+    const g = realGrowth(
+      [{ date: '2026-01-01', value: 1000 }, { date: '2026-12-31', value: 1700 }],
+      null,
+      1200,
+      [{ date: '2026-06-01', amount: 600 }],
+    );
+    expect(g.gain).toBe(1700 - 1000 - 1200 + 600);
+  });
+
   it('shows zero with a single point', () => {
     const g = realGrowth([{ date: '2026-09-28', value: 1865 }], null, 0);
     expect(g.gain).toBe(0);
@@ -119,5 +150,36 @@ describe('assignContributions', () => {
     );
     expect(flows.get('poke')).toEqual([{ date: '2026-05-08', amount: 490 }]);
     expect([...flows.values()].flat()).toHaveLength(1);
+  });
+});
+
+describe('accountMatcher', () => {
+  const match = accountMatcher([
+    { id: 'dub', account_name: 'Dub (Custom ETFs)', auto_track_pattern: 'dub ecfi' },
+    { id: 'gem', account_name: 'Gemini', auto_track_pattern: 'gemini' },
+  ]);
+
+  it('finds the account a Dub withdrawal came out of', () => {
+    expect(match({ description_raw: 'DUB (ECFI) DES:ACH ID:XXXX INDN:JARED R CO', description_normalized: null })).toBe('dub');
+  });
+
+  it('returns null for unrelated credits', () => {
+    expect(match({ description_raw: 'VENMO DES:CASHOUT ID:1050 INDN:JARED R CO', description_normalized: null })).toBeNull();
+  });
+});
+
+describe('planWithdrawals', () => {
+  const w = (date: string, amount: number, account_id = 'dub') => ({ account_id, date, amount });
+
+  it('skips withdrawals already logged (re-import, or the same file on both pages)', () => {
+    expect(planWithdrawals([w('2026-09-30', 8000)], [w('2026-09-30', 8000)])).toEqual([]);
+  });
+
+  it('keeps a second identical same-day withdrawal that is not logged yet', () => {
+    expect(planWithdrawals([w('2026-09-30', 500), w('2026-09-30', 500)], [w('2026-09-30', 500)])).toEqual([w('2026-09-30', 500)]);
+  });
+
+  it('treats amounts at cent precision and accounts separately', () => {
+    expect(planWithdrawals([w('2026-09-30', 8000.004), w('2026-09-30', 8000, 'gem')], [w('2026-09-30', 8000)])).toEqual([w('2026-09-30', 8000, 'gem')]);
   });
 });

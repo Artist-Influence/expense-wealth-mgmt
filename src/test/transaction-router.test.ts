@@ -21,3 +21,18 @@ describe('routeTransaction refunds', () => {
     expect(r.route).toBe('expense');
   });
 });
+
+describe('routeTransaction money in on BoA checking (no signal columns)', () => {
+  it('routes a positive ACH line to income even with no income keyword', () => {
+    expect(routeTransaction({ signedAmount: 8000, description: 'DUB (ECFI) DES:ACH ID:XXXXXXXXXX7229 INDN:JARED R CO' }).route).toBe('income');
+    expect(routeTransaction({ signedAmount: 500, description: 'VENMO DES:CASHOUT ID:1050730816122 INDN:JARED R CO' }).route).toBe('income');
+  });
+
+  it('keeps the same ACH line as an expense when money goes out', () => {
+    expect(routeTransaction({ signedAmount: -2000, description: 'DUB (ECFI) DES:ACH ID:XXXXXXXXXX7229 INDN:JARED R CO' }).route).toBe('expense');
+  });
+
+  it('leaves card purchases (no ACH tags) alone', () => {
+    expect(routeTransaction({ signedAmount: 275.6, description: 'TCGPLAYER.COM 3155010478 NY' }).route).toBe('expense');
+  });
+});

@@ -23,6 +23,7 @@ const SENSITIVE_TABLES = [
   "reimbursement_groups",
   "investment_accounts",
   "account_balance_snapshots",
+  "investment_withdrawals",
   "tax_profiles",
   "categorization_rules",
   "merchant_memory",

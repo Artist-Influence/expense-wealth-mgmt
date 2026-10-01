@@ -11,6 +11,8 @@ import { normalizeDescription, parseDate, parseAmount } from '@/lib/normalizer';
 import { detectTransfer } from '@/lib/transfer-detector';
 import { trimToTransactionHeader } from '@/lib/csv-parser';
 import { fetchAllRows } from '@/lib/fetch-all';
+import { createWithdrawalCapture } from '@/lib/withdrawal-capture';
+import type { WithdrawalRow } from '@/lib/account-growth';
 import { toast } from 'sonner';
 import Papa from 'papaparse';
 import { Button } from '@/components/ui/button';
@@ -376,6 +378,8 @@ export default function Income() {
 
         const rows: any[] = [];
         let skippedDupes = 0, skippedOutflows = 0, skippedTransfers = 0;
+        const capture = await createWithdrawalCapture(ownerId!);
+        const foundWithdrawals: WithdrawalRow[] = [];
         for (let i = 1; i < allRows.length; i++) {
           const cols = allRows[i];
           const rawDesc = descIdx >= 0 ? cols[descIdx] : '';
@@ -409,6 +413,14 @@ export default function Income() {
           // strip these after the fact.
           if (OUTFLOW_HINTS.test(rawDesc)) { skippedOutflows++; continue; }
 
+          // Money back from an investment account (Dub, Wealthfront, Gemini…) is a
+          // WITHDRAWAL from it, not income: log it so the Wealth card nets it out.
+          if (capture) {
+            const wDate = dateIdx >= 0 && cols[dateIdx] ? parseDate(cols[dateIdx]) : null;
+            const accountId = wDate ? capture.match({ description_raw: rawDesc, description_normalized: normalizeDescription(rawDesc) }) : null;
+            if (accountId && wDate) { foundWithdrawals.push({ account_id: accountId, date: wDate, amount: inflow }); continue; }
+          }
+
           // Exclude money that isn't income even when it comes in: transfers
           // between your own accounts, moves into investments (Gemini,
           // Wealthfront…), and credit-card payments. This is what was wrongly
@@ -440,6 +452,18 @@ export default function Income() {
             status: classification.confidence >= 80 ? 'auto_classified' : 'needs_review',
             source_file_name: file.name,
           });
+        }
+
+        let withdrawalsLogged = 0;
+        if (capture && foundWithdrawals.length > 0) {
+          try {
+            withdrawalsLogged = await capture.save(foundWithdrawals, file.name);
+          } catch (e) {
+            toast.error(`${file.name}: ${foundWithdrawals.length} investment withdrawal(s) could not be logged: ${(e as Error).message}`);
+          }
+        }
+        if (withdrawalsLogged > 0) {
+          toast.success(`${file.name}: ${withdrawalsLogged} investment withdrawal${withdrawalsLogged === 1 ? '' : 's'} logged on Wealth`);
         }
 
         const skipNote = [

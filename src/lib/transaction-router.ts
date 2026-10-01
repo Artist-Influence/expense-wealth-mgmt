@@ -27,6 +27,7 @@ interface RouterInput {
 const INCOME_DESCRIPTION_HINTS = /\b(deposit|payroll|direct\s*deposit|salary|wages|paycheck|payment\s*from|received\s*from|zelle\s*from|venmo\s*from|paypal\s*from|refund|return|reimburs\w*|interest|dividend|cashback|cash\s*back|stripe\s*payout|square\s*deposit|tax\s*refund|deel|gusto|adp|paychex|justworks|rippling|trinet|oasis|onpay|bamboohr)\b|SALARY[-\s]|PAYMENTS\s*ID:/i;
 
 const BALANCE_ADJUSTMENT = /^\s*BAL(ANCE)?\s*ADJ\b/i;
+const ACH_LINE = /\bDES:.*\bINDN:/i;
 
 function readField(row: Record<string, unknown> | null | undefined, key: string): string {
   if (!row) return '';
@@ -61,6 +62,18 @@ export function routeTransaction(input: RouterInput): TransactionRoute {
 
   // 3. Checking deposit → income.
   if (isCheckingCsv && details === 'CREDIT' && signedAmount > 0) {
+    return {
+      route: 'income',
+      signedAmount,
+      income: classifyIncome(description),
+    };
+  }
+
+  // 3b. A positive ACH line ("... DES:... INDN:...", BoA checking format; card
+  // lines never carry these tags) is money IN even without an income keyword.
+  // Without this, a Venmo cash-out or a Dub withdrawal was saved as spending,
+  // and the Wealth page then counted the Dub one as a deposit.
+  if (!isCheckingCsv && !isCcCsv && signedAmount > 0 && ACH_LINE.test(description)) {
     return {
       route: 'income',
       signedAmount,
