@@ -19,7 +19,7 @@ import { usePaymentMethods, type PaymentMethod } from '@/hooks/usePaymentMethods
 import { useSetupStatus } from '@/hooks/useSetupStatus';
 import { MethodSelect } from '@/components/MethodSelect';
 import { detectTransfer } from '@/lib/transfer-detector';
-import { routeTransaction } from '@/lib/transaction-router';
+import { routeTransaction, detectCardSign } from '@/lib/transaction-router';
 import { classifyIncome } from '@/lib/income-classifier';
 import { generateFingerprint, isNearDuplicate, findExactClusters, findNearClusters, type DuplicateCluster } from '@/lib/duplicate-detector';
 import { generateMerchantKey, normalizeDescription } from '@/lib/normalizer';
@@ -1643,6 +1643,13 @@ export default function Expenses() {
   const processFile = async (item: FileQueueItem & { mapping: ColumnMapping; detectedHeaders?: string[] }) => {
     if (!user) return;
     const { id, file, method, mapping, detectedHeaders } = item;
+    // Never import without a resolved owner: owner-scoped lookups (duplicates,
+    // categories, income) would all come back empty and the import would look
+    // fine while skipping every safety check.
+    if (!ownerId) {
+      updateItem(id, { status: 'error', error: `"${file.name}" was not imported: your account was still loading. Wait a moment and upload it again.` });
+      return;
+    }
     try {
       // MODE-MISMATCH GUARD (2026-08-19): uploads inherit the ACTIVE TAB's mode,
       // and the duplicate fingerprint is mode-scoped — so the same statement
@@ -1701,11 +1708,17 @@ export default function Expenses() {
       const refundRowKeys = new Set<string>();
       const validRows: typeof validRowsAll = [];
 
+      // Credit-card files: learn which sign this issuer uses for purchases so
+      // payments and statement credits are not saved as purchases.
+      const isCardFile = (detectedMethod as { account_type?: string } | null | undefined)?.account_type === 'credit_card';
+      const cardSign = isCardFile ? detectCardSign(validRowsAll.map(r => ({ amount: r.amount, description: r.description_raw || '' }))) : null;
+
       for (const tx of validRowsAll) {
         const decision = routeTransaction({
           signedAmount: tx.amount,
           description: tx.description_raw || '',
           sourceRow: (tx.source_row_json as Record<string, unknown> | null) || null,
+          cardSign,
         });
         if (decision.route === 'income') {
           incomeRows.push(tx);
@@ -2173,6 +2186,15 @@ export default function Expenses() {
   // consuming — a call while busy ENQUEUES instead of being dropped, so no
   // file can get stuck in 'queued' forever.
   const pendingQueueRef = useRef<(FileQueueItem & { mapping: ColumnMapping; detectedHeaders?: string[] })[]>([]);
+  // Always run the LATEST processFile / loadTransactions. This callback used to
+  // capture them with deps [user, mode], and `user` resolves a render before
+  // `ownerId` does, so an upload started without first switching tabs ran with
+  // ownerId = null: every owner-scoped read failed quietly, which switched off
+  // duplicate checks and categories and dropped the file's income rows.
+  const processFileRef = useRef(processFile);
+  processFileRef.current = processFile;
+  const loadTransactionsRef = useRef(loadTransactions);
+  loadTransactionsRef.current = loadTransactions;
   const processQueue = useCallback(async (items: (FileQueueItem & { mapping: ColumnMapping; detectedHeaders?: string[] })[]) => {
     pendingQueueRef.current.push(...items);
     if (processingRef.current) return;
@@ -2181,13 +2203,13 @@ export default function Expenses() {
       while (pendingQueueRef.current.length > 0) {
         const item = pendingQueueRef.current.shift()!;
         if (item.status === 'error') continue;
-        await processFile(item);
+        await processFileRef.current(item);
       }
-      await loadTransactions();
+      await loadTransactionsRef.current();
     } finally {
       processingRef.current = false;
     }
-  }, [user, mode]);
+  }, []);
 
   const handleFilesSelect = async (files: File[]) => {
     const previews: FilePreviewInfo[] = [];

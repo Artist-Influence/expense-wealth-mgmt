@@ -14,6 +14,15 @@ const HIGH_CONFIDENCE_PATTERNS: [RegExp, string][] = [
   [/TO\s*CREDIT\s*CARD/i, 'credit_card_payment'],
 
   [/PAYMENT\s*TO\s*.*CARD\s*ENDING/i, 'credit_card_payment'],
+  // Card payments that were imported as spending (2026-11): the bank-side ACH
+  // line to the card issuer, and the card-side "payment received" line. Each
+  // one double-counted the card's own charges.
+  [/AMERICAN\s*EXPRESS\s*DES:/i, 'credit_card_payment'],                 // BoA ACH, incl. "DES:RETRY PYMT"
+  [/ORIG\s*CO\s*NAME:\s*AMERICAN\s*EXPRESS\b/i, 'credit_card_payment'],  // Chase ACH to Amex
+  [/ORIG\s*CO\s*NAME:\s*KARAT\s*FINANCIAL/i, 'credit_card_payment'],     // Chase ACH to Karat
+  [/\bMODERN_TREASURY_PAYMENT\b/i, 'credit_card_payment'],               // Karat card: payment received
+  [/BANKING\s*PAYMENT\s*TO\s*CRD\b/i, 'credit_card_payment'],           // BoA checking -> BoA card
+  [/^\s*PAYMENT\s*FROM\s*CHK\s*\d+/i, 'credit_card_payment'],           // BoA card: payment received
   [/ONLINE\s*PAYMENT\s*-?\s*THANK/i, 'credit_card_payment'],
 
   // Internal account transfers — unambiguous

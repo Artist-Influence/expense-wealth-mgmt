@@ -50,7 +50,9 @@ const STATEMENT_ARTIFACT_PATTERNS = [
   /^(beginning|ending|opening|closing)\s+balance/i,
   /^total\s+(credits|debits|charges|fees|interest|payments)/i,
   /^(statement|account)\s+(summary|period|ending|opening|balance)/i,
-  /^(interest|fee|finance)\s+charge/i,
+  // Summary lines only ("Interest Charge", "Finance Charges"). A real card line
+  // like "INTEREST CHARGED ON PURCHASES" is money owed and must import.
+  /^(interest|fee|finance)\s+charges?\s*$/i,
   /^(minimum|previous|new)\s+(payment|balance)/i,
   /^(credit|debit)\s+adjustments?$/i,
   /^balance\s+(forward|brought|carried)/i,
