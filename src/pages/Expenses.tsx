@@ -628,7 +628,9 @@ export default function Expenses() {
             id: rows[i].id,
             payload: {
               predicted_category: result.predicted_category,
-              predicted_method: result.predicted_method,
+              // The account a row came from is a fact from its source file, not
+              // something to re-guess from merchant memory: "Categorize all"
+              // used to overwrite it and relabel rows onto the wrong card.
               predicted_notes: result.predicted_notes,
               final_category: finalCat,
               review_status: reviewStatus,
@@ -2126,7 +2128,9 @@ export default function Expenses() {
             predicted_method: txMethod,
             predicted_notes: result.predicted_notes,
             final_category: finalCat,
-            final_method: reviewStatus === 'auto_categorized' ? txMethod : null,
+            // A method detected from the FILE NAME is the real account; record
+            // it as final so nothing downstream relabels the row.
+            final_method: method ? method : (reviewStatus === 'auto_categorized' ? txMethod : null),
             final_notes: reviewStatus === 'auto_categorized' ? result.predicted_notes : null,
             confidence: result.confidence, match_source: result.match_source,
             match_explanation: matchExplanation,
